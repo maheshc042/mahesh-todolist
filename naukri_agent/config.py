@@ -305,6 +305,103 @@ class RecommendedConfig(BaseModel):
     follow_show_more: bool = True
 
 
+class ExperienceAnswersConfig(BaseModel):
+    """
+    Declarative source of truth for "how many years of X?" questions.
+
+    A finite question->answer table can never cover this: a recruiter may name
+    any technology. Declaring skill->years once lets the answer engine detect the
+    intent and answer phrasings we have never seen, instead of queueing every
+    new skill for manual review.
+    """
+
+    # Whole career length. Also caps every skill answer, so a typo in `skills`
+    # can never claim more experience than the candidate actually has.
+    total_years: float | None = None
+    # Used when a question clearly asks for years but names no declared skill.
+    # Leave null in strict mode to queue those for review instead of guessing.
+    default_years: float | None = None
+    # How to combine when one question names several declared skills
+    # ("HTML, CSS, JavaScript"): max = the stack as a whole (usual intent).
+    multi_skill_strategy: Literal["max", "min", "avg"] = "max"
+    skills: dict[str, float] = Field(default_factory=dict)
+
+    @field_validator("skills", mode="before")
+    @classmethod
+    def _lower_keys(cls, v: Any) -> Any:
+        if isinstance(v, dict):
+            return {str(key).strip().lower(): value for key, value in v.items()}
+        return v
+
+    def to_engine(self) -> Any:
+        """Convert to the transport-free dataclass the answer engine consumes."""
+        from .core.answers import ExperienceAnswers
+
+        return ExperienceAnswers(
+            total_years=self.total_years,
+            default_years=self.default_years,
+            multi_skill_strategy=self.multi_skill_strategy,
+            skills=dict(self.skills),
+        )
+
+
+class ProfileUpdateConfig(BaseModel):
+    """
+    Daily profile refresh.
+
+    Naukri ranks jobseeker profiles in recruiter search by "profile last
+    updated". A profile touched today surfaces above an identical one touched
+    last week, which is why manual users log in every morning just to re-save
+    something. This is that behaviour, automated — and it is worth more inbound
+    recruiter contact than any number of outbound applications.
+
+    Strategies, cheapest and safest first:
+
+    - `headline`: read the existing resume headline and apply a REVERSIBLE
+      micro-mutation (toggle a trailing period), then save. The headline text is
+      never rewritten, so a carefully worded headline survives indefinitely.
+      Alternatively provide `headline_variants` to rotate whole headlines.
+    - `resume`: re-upload the profile's `resume_file`. Strongest signal, but it
+      requires the file to be present and Naukri rate-limits it harder.
+    - `skills`: re-save the key-skills field. Off by default: the widget is a
+      tag editor and a failed interaction can drop skills.
+    """
+
+    enabled: bool = True
+    # Refresh at the start of an apply run. Free (the browser and session are
+    # already open) and guarantees a refresh on every day the agent applies.
+    run_before_apply: bool = True
+    # Standalone cron so the profile also stays fresh on days with no applying
+    # (weekends, holidays). Recruiters search on weekends too.
+    standalone_enabled: bool = True
+    cron: str = "15 8 * * *"
+    cron_by_account: dict[str, str] = Field(default_factory=dict)
+    # Idempotency guard: never refresh twice inside this window, no matter how
+    # many runs fire. Naukri flags profiles edited repeatedly in one day.
+    min_hours_between: int = 20
+    strategies: list[Literal["headline", "resume", "skills"]] = Field(
+        default_factory=lambda: ["headline"]
+    )
+    # Optional full-headline rotation, per account. When empty the existing
+    # headline is preserved and only micro-mutated.
+    headline_variants: dict[str, list[str]] = Field(default_factory=dict)
+    # Confirm "last updated" actually moved; a silent no-op refresh is worse
+    # than a loud failure because it looks like it worked.
+    verify: bool = True
+
+    def cron_for(self, account: str | None) -> str:
+        if account:
+            return self.cron_by_account.get(account.strip().lower(), self.cron)
+        return self.cron
+
+    def variants_for(self, account: str) -> list[str]:
+        return [
+            text.strip()
+            for text in self.headline_variants.get(account.strip().lower(), [])
+            if text.strip()
+        ]
+
+
 class JobProfile(BaseModel):
     """
     A profile bundles: which feed to read, how to filter, which resume to attach
@@ -340,6 +437,11 @@ class JobProfile(BaseModel):
     resume_file: str | None = None
     # Profile-scoped answers override the global knowledge base.
     answers: dict[str, str] = Field(default_factory=dict)
+    # Profile-scoped experience map. Merged over the global one (skills are
+    # merged key-by-key, scalars are replaced) so the AI/Python profile can
+    # declare a different `relevant` story from the Full-Stack profile without
+    # restating every shared skill.
+    experience: ExperienceAnswersConfig | None = None
 
     @field_validator("account", mode="before")
     @classmethod
@@ -434,10 +536,19 @@ class AgentConfig(BaseModel):
     run: RunConfig = Field(default_factory=RunConfig)
     recommended: RecommendedConfig = Field(default_factory=RecommendedConfig)
     schedule: ScheduleConfig = Field(default_factory=ScheduleConfig)
+    profile_update: ProfileUpdateConfig = Field(default_factory=ProfileUpdateConfig)
     notifications: NotificationConfig = Field(default_factory=NotificationConfig)
     profiles: list[JobProfile]
     # Global fallback knowledge base for screening questions.
     answers: dict[str, str] = Field(default_factory=dict)
+    # Global skill -> years map for "how many years of X?" questions.
+    experience: ExperienceAnswersConfig = Field(default_factory=ExperienceAnswersConfig)
+
+    def experience_for(self, profile: JobProfile) -> Any:
+        """Global experience map with the profile's overrides merged in."""
+        base = self.experience.to_engine()
+        override = profile.experience.to_engine() if profile.experience else None
+        return base.merged_with(override)
 
     @field_validator("profiles")
     @classmethod

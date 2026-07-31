@@ -94,7 +94,9 @@ async def safe_text(locator: Locator | None, default: str = "") -> str:
     if locator is None:
         return default
     try:
-        value = await locator.inner_text(timeout=2_500)
+        if await locator.count() == 0:
+            return default
+        value = await locator.inner_text(timeout=200)
         return " ".join(value.split())
     except Exception:
         return default

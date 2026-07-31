@@ -137,6 +137,9 @@ class Orchestrator:
             kb=kb,
             profile_answers=profile.answers,
             strict=self.config.run.strict_answers,
+            # Skill -> years map: answers the open-ended "how many years of X?"
+            # family that no finite question table can cover.
+            experience=self.config.experience_for(profile),
         )
 
     # ------------------------------------------------------------------- main

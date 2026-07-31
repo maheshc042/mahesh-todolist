@@ -183,6 +183,48 @@ MIGRATIONS: list[tuple[str, str]] = [
         GROUP BY 1, 2, 3;
         """,
     ),
+    (
+        "0006_profile_updates",
+        """
+        -- Daily profile refresh log. Naukri ranks recruiter-search results by
+        -- "profile last updated", so the agent touches the profile once a day.
+        --
+        -- This table is the idempotency guard: `min_hours_between` is enforced
+        -- by querying the last successful row, so three runs in one day still
+        -- produce exactly one profile edit and a container restart cannot
+        -- double-touch (repeated edits in one day is what Naukri flags).
+        CREATE TABLE IF NOT EXISTS profile_updates (
+            id            BIGSERIAL PRIMARY KEY,
+            account       TEXT NOT NULL,
+            run_id        BIGINT REFERENCES runs(id) ON DELETE SET NULL,
+            strategy      TEXT NOT NULL DEFAULT '',
+            ok            BOOLEAN NOT NULL DEFAULT FALSE,
+            detail        TEXT,
+            headline_before TEXT,
+            headline_after  TEXT,
+            last_updated_text TEXT,
+            created_at    TIMESTAMPTZ NOT NULL DEFAULT now()
+        );
+
+        -- The hot query is "last successful refresh for this account".
+        CREATE INDEX IF NOT EXISTS profile_updates_account_idx
+            ON profile_updates(account, ok, created_at DESC);
+
+        -- run_events gained an `account` column in 0005 but nothing wrote to it,
+        -- so per-account log filtering silently returned nothing.
+        CREATE INDEX IF NOT EXISTS run_events_account_idx
+            ON run_events(account, created_at DESC);
+
+        CREATE OR REPLACE VIEW profile_freshness AS
+        SELECT account,
+               max(created_at) FILTER (WHERE ok) AS last_success_at,
+               max(created_at)                   AS last_attempt_at,
+               count(*) FILTER (WHERE ok)        AS successes,
+               count(*) FILTER (WHERE NOT ok)    AS failures
+        FROM profile_updates
+        GROUP BY account;
+        """,
+    ),
 ]
 
 

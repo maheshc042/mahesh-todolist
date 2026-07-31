@@ -19,6 +19,7 @@ Design decisions:
 
 from __future__ import annotations
 
+import re
 from playwright.async_api import Page
 
 from ..browser.resilience import (
@@ -180,19 +181,19 @@ class JobSearcher:
 
     async def _goto_recommended(self) -> None:
         response = await self.page.goto(
-            S.RECOMMENDED_JOBS_URL, wait_until="domcontentloaded", timeout=60_000
+            S.RECOMMENDED_JOBS_URL, wait_until="networkidle", timeout=60_000
         )
         if response is not None and response.status >= 500:
             raise TransientPageError(f"Naukri returned HTTP {response.status}")
         await dismiss_overlays(self.page)
-        # Either the feed shell, a job link, or an explicit empty state.
-        ready = (
-            await first_visible(self.page, S.RECO_PAGE_MARKERS, timeout_ms=12_000)
-            or await first_visible(self.page, S.RECO_JOB_LINK, timeout_ms=6_000)
-            or await first_visible(self.page, S.RECO_EMPTY, timeout_ms=2_000)
-        )
-        if ready is None:
-            raise TransientPageError("recommended feed did not render")
+        # Wait for React recommendation API and card rendering
+        try:
+            await self.page.wait_for_selector(
+                "div.cust-job-tuple, div.srp-jobtuple-wrapper, div.tuple-wrapper, article.jobTuple, div.jobTuple, div.recommended-jobs article, div[data-job-id], a[href*='job-listings']",
+                timeout=12_000,
+            )
+        except Exception:
+            pass
 
     # ------------------------------------------------------------------ tabs
     async def _discover_tabs(self) -> dict[str, object]:
@@ -260,12 +261,20 @@ class JobSearcher:
 
         for round_no in range(1, cfg.max_scroll_rounds + 1):
             added = 0
-            for card, title_el in await self._reco_cards():
+            cards = await self._reco_cards()
+            log.info("reco.cards_detected", tab=tab_label, count=len(cards))
+            for card, title_el in cards:
                 if len(collected) >= cfg.max_jobs:
                     break
                 job = await self._parse_card(card, "recommended", title_el=title_el)
-                if job is None or job.job_id in exclude or job.job_id in collected:
+                if job is None:
                     continue
+                if job.job_id in exclude:
+                    log.info("reco.card_already_seen", title=job.title, company=job.company)
+                    continue
+                if job.job_id in collected:
+                    continue
+                log.info("reco.card_harvested", title=job.title, company=job.company, url=job.url[:60])
                 collected[job.job_id] = job
                 added += 1
 
@@ -286,41 +295,49 @@ class JobSearcher:
 
     async def _reco_cards(self) -> list[tuple[object, object | None]]:
         """
-        Return (card_scope, title_element) pairs.
-
-        Class-based selectors first; if a redesign kills all of them we fall back
-        to job-detail anchors and use each anchor's nearest block ancestor as the
-        card scope, so the run degrades in quality instead of finding nothing.
+        Return (card_scope, title_element) pairs for every job card on the page.
+        Scans strictly for genuine job-listings / job-details detail anchors.
         """
+        for selector in [
+            "a[href*='/job-listings-']",
+            "a[href*='/job-details/']",
+            "div.tuple-wrapper a.title",
+            "div.cust-job-tuple a.title",
+            "div.srp-jobtuple-wrapper a.title",
+            "article.jobTuple a.title",
+        ]:
+            try:
+                anchors = await self.page.locator(selector).all()
+                if anchors:
+                    pairs: list[tuple[object, object | None]] = []
+                    for anchor in anchors:
+                        href = (await anchor.get_attribute("href")) or ""
+                        if href and any(blocked in href.lower() for blocked in ["resume.naukri.com", "ambitionbox.com", "/faq/", "/help/", "services"]):
+                            continue
+                        scope = anchor
+                        try:
+                            ancestor = anchor.locator(
+                                "xpath=ancestor::*[self::article or self::div or self::section][contains(@class,'tuple') or contains(@class,'card') or contains(@class,'job')][1]"
+                            ).first
+                            if await ancestor.count():
+                                scope = ancestor
+                            else:
+                                scope = anchor.locator("xpath=ancestor::*[self::article or self::div][2]").first
+                        except Exception:
+                            pass
+                        pairs.append((scope, anchor))
+                    if pairs:
+                        return pairs
+            except Exception:
+                continue
+
         for selector in S.RECO_JOB_CARD_CONTAINERS:
             try:
                 cards = await self.page.locator(selector).all()
+                if len(cards) >= 1:
+                    return [(card, None) for card in cards]
             except Exception:
                 continue
-            if cards:
-                return [(card, None) for card in cards]
-
-        for selector in S.RECO_JOB_LINK:
-            try:
-                anchors = await self.page.locator(selector).all()
-            except Exception:
-                continue
-            if not anchors:
-                continue
-            log.debug("reco.anchor_fallback", selector=selector, count=len(anchors))
-            pairs: list[tuple[object, object | None]] = []
-            for anchor in anchors:
-                scope = anchor
-                try:
-                    ancestor = anchor.locator(
-                        "xpath=ancestor::*[self::article or self::div][2]"
-                    ).first
-                    if await ancestor.count():
-                        scope = ancestor
-                except Exception:
-                    pass
-                pairs.append((scope, anchor))
-            return pairs
 
         return []
 
@@ -369,33 +386,69 @@ class JobSearcher:
     async def _parse_card(self, card, keyword: str, title_el=None) -> Job | None:
         try:
             if title_el is None:
-                # Fast non-blocking check to avoid timeout stalls on non-card containers
-                candidate = card.locator(
-                    "a.title, a.jobTitle, a[class*='title'], h2 a, a[href*='/job-listings-']"
-                ).first
-                if await candidate.count() and await candidate.is_visible():
-                    title_el = candidate
-                else:
-                    title_el = await first_visible(card, S.CARD_TITLE, timeout_ms=250)
+                for t_sel in S.CARD_TITLE:
+                    cand = card.locator(t_sel).first
+                    if await cand.count():
+                        href = (await cand.get_attribute("href")) or ""
+                        if href and "ambitionbox.com" not in href.lower():
+                            title_el = cand
+                            break
+
+            if title_el is None:
+                # Universal fallback: scan all anchors inside card for a job URL
+                try:
+                    for anchor in await card.locator("a").all():
+                        href = (await anchor.get_attribute("href")) or ""
+                        if (
+                            href
+                            and any(k in href for k in ["/job-", "/job-listings", "naukri.com"])
+                            and "ambitionbox.com" not in href.lower()
+                        ):
+                            title_el = anchor
+                            break
+                except Exception:
+                    pass
+
             if title_el is None:
                 return None
-            title = normalise_whitespace(await title_el.inner_text())
-            if not title:
-                # Anchors that wrap only a logo/image expose the text via @title.
-                title = normalise_whitespace(await title_el.get_attribute("title") or "")
-            url = (await title_el.get_attribute("href")) or ""
-            if not title or not url:
-                return None
-            if url.startswith("/"):
-                url = S.BASE_URL + url
 
-            company = await safe_text(await first_visible(card, S.CARD_COMPANY, 800))
-            experience_text = await safe_text(await first_visible(card, S.CARD_EXPERIENCE, 800))
-            salary_text = await safe_text(await first_visible(card, S.CARD_SALARY, 800))
-            location = await safe_text(await first_visible(card, S.CARD_LOCATION, 800))
-            posted_text = await safe_text(await first_visible(card, S.CARD_POSTED, 800))
-            description = await safe_text(await first_visible(card, S.CARD_DESCRIPTION, 800))
-            rating_text = await safe_text(await first_visible(card, S.CARD_RATING, 500))
+            title = normalise_whitespace(await safe_text(title_el) or await title_el.get_attribute("title") or "")
+            url = (await title_el.get_attribute("href")) or ""
+            if not url:
+                return None
+            if any(blocked in url.lower() for blocked in ["resume.naukri.com", "ambitionbox.com", "/faq/", "/help/", "services", "blog"]):
+                return None
+            if not any(x in url.lower() for x in ("/job-listings", "/job-details", "naukri.com/job-")):
+                return None
+
+            if not title:
+                slug = url.split("?")[0].rstrip("/").split("/")[-1]
+                clean_slug = re.sub(r"^(job-listings|job-details|jobs)-", "", slug, flags=re.IGNORECASE)
+                title = normalise_whitespace(clean_slug.replace("-", " ").title())
+
+            if not url.startswith("http"):
+                url = S.BASE_URL + ("/" if not url.startswith("/") else "") + url
+
+            company_el = await first_visible(card, S.CARD_COMPANY, timeout_ms=200)
+            company = await safe_text(company_el)
+
+            exp_el = await first_visible(card, S.CARD_EXPERIENCE, timeout_ms=200)
+            experience_text = await safe_text(exp_el)
+
+            sal_el = await first_visible(card, S.CARD_SALARY, timeout_ms=200)
+            salary_text = await safe_text(sal_el)
+
+            loc_el = await first_visible(card, S.CARD_LOCATION, timeout_ms=200)
+            location = await safe_text(loc_el)
+
+            post_el = await first_visible(card, S.CARD_POSTED, timeout_ms=200)
+            posted_text = await safe_text(post_el)
+
+            desc_el = await first_visible(card, S.CARD_DESCRIPTION, timeout_ms=200)
+            description = await safe_text(desc_el)
+
+            rat_el = await first_visible(card, S.CARD_RATING, timeout_ms=200)
+            rating_text = await safe_text(rat_el)
 
             tags: list[str] = []
             for tag_selector in S.CARD_TAGS:

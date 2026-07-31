@@ -84,13 +84,21 @@ class Repository:
         job_id: str | None = None,
         profile: str | None = None,
         payload: dict[str, Any] | None = None,
+        account: str | None = None,
     ) -> None:
-        """Best-effort audit trail; never let telemetry break a run."""
+        """
+        Best-effort audit trail; never let telemetry break a run.
+
+        `account` is a real column (added in migration 0005) rather than only a
+        payload key, so "show me everything account B did last Tuesday" is an
+        indexed query instead of a JSONB scan.
+        """
         try:
             await self.pool.execute(
                 """
-                INSERT INTO run_events (run_id, level, event, job_id, profile, payload)
-                VALUES ($1, $2, $3, $4, $5, $6::jsonb)
+                INSERT INTO run_events
+                    (run_id, level, event, job_id, profile, payload, account)
+                VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7)
                 """,
                 run_id,
                 level,
@@ -98,6 +106,7 @@ class Repository:
                 job_id,
                 profile,
                 json.dumps(payload or {}),
+                account,
             )
         except Exception as exc:  # pragma: no cover - telemetry must not raise
             log.warning("db.event_log_failed", error=str(exc), event=event)
@@ -143,17 +152,36 @@ class Repository:
     ) -> set[str]:
         """
         Jobs already decided for this profile/account inside the dedupe window.
-        `failed` is deliberately excluded so transient failures get retried on
-        the next run, while `skipped`/`applied` are not re-evaluated.
+
+        Two statuses are deliberately treated as NOT decided, so they come back:
+
+        - `failed`: transient (timeout, markup hiccup) and worth one more try.
+        - `needs_review` whose questions have all been answered by a human. This
+          is what makes `naukri-agent resolve <id> "<answer>"` mean anything: the
+          old query treated needs_review as final, so a resolved answer was
+          promoted into the knowledge base and then never used, because the job
+          it unblocked was permanently excluded from every future run. Jobs whose
+          questions are still unresolved stay excluded, so we do not re-open the
+          same dead end every morning.
         """
         rows = await self.pool.fetch(
             """
-            SELECT job_id
-              FROM applications
-             WHERE profile = $1
-               AND account = $3
-               AND status <> 'failed'
-               AND created_at > now() - ($2 || ' days')::interval
+            SELECT a.job_id
+              FROM applications a
+             WHERE a.profile = $1
+               AND a.account = $3
+               AND a.status <> 'failed'
+               AND a.created_at > now() - ($2 || ' days')::interval
+               AND NOT (
+                     a.status = 'needs_review'
+                 AND NOT EXISTS (
+                         SELECT 1
+                           FROM question_review q
+                          WHERE q.profile = a.profile
+                            AND q.job_id = a.job_id
+                            AND q.resolved = FALSE
+                     )
+               )
             """,
             profile,
             str(window_days),
@@ -285,15 +313,37 @@ class Repository:
         )
         return len(records)
 
-    async def bump_answer_hit(self, pattern: str, profile: str | None) -> None:
-        await self.pool.execute(
-            """
-            UPDATE answer_kb SET hits = hits + 1
-             WHERE pattern = $1 AND (profile = $2 OR ($2 IS NULL AND profile IS NULL))
-            """,
-            pattern,
-            profile,
-        )
+    async def bump_answer_hits(self, hits: dict[tuple[str, str], int], profile: str) -> None:
+        """
+        Record which KB patterns actually answered a question.
+
+        `answer_kb.hits` existed but nothing ever incremented it, so there was no
+        way to tell a load-bearing pattern from a typo that has never matched.
+        Called once per profile at the end of a run, not per answer, to keep the
+        write count proportional to profiles rather than to questions.
+        """
+        if not hits:
+            return
+        records = [
+            (pattern, None if source == "kb" else profile, count)
+            for (pattern, source), count in hits.items()
+            # Synthetic patterns from the experience map have no KB row.
+            if not pattern.startswith("experience:")
+        ]
+        if not records:
+            return
+        try:
+            await self.pool.executemany(
+                """
+                UPDATE answer_kb
+                   SET hits = hits + $3
+                 WHERE pattern = $1
+                   AND (profile = $2 OR ($2 IS NULL AND profile IS NULL))
+                """,
+                records,
+            )
+        except Exception as exc:  # pragma: no cover - accounting must not raise
+            log.warning("db.answer_hits_failed", error=str(exc)[:200])
 
     async def resolved_review_answers(self, profile: str) -> list[tuple[str, str]]:
         rows = await self.pool.fetch(
@@ -399,6 +449,76 @@ class Repository:
             answer,
         )
         return True
+
+    # ------------------------------------------------------- profile refresh
+    async def last_profile_refresh(self, account: str) -> dict[str, Any] | None:
+        """The most recent SUCCESSFUL refresh for this account, or None."""
+        row = await self.pool.fetchrow(
+            """
+            SELECT strategy, created_at, last_updated_text,
+                   EXTRACT(EPOCH FROM (now() - created_at)) / 3600.0 AS hours_ago
+              FROM profile_updates
+             WHERE account = $1 AND ok = TRUE
+             ORDER BY created_at DESC
+             LIMIT 1
+            """,
+            account,
+        )
+        return dict(row) if row else None
+
+    async def profile_refresh_due(self, account: str, min_hours_between: int) -> bool:
+        """
+        Idempotency gate for the daily touch.
+
+        Enforced in SQL rather than in memory because the refresh has three
+        independent triggers (the apply run, the standalone cron, and a manual
+        CLI call) plus container restarts. Repeatedly editing a profile in one
+        day is exactly what Naukri's abuse heuristics look for, so "did we
+        already do this?" has to survive process death.
+        """
+        last = await self.last_profile_refresh(account)
+        if last is None:
+            return True
+        return float(last["hours_ago"] or 0) >= float(min_hours_between)
+
+    async def record_profile_refresh(
+        self,
+        account: str,
+        run_id: int | None,
+        *,
+        ok: bool,
+        strategy: str = "",
+        detail: str = "",
+        headline_before: str = "",
+        headline_after: str = "",
+        last_updated_text: str = "",
+    ) -> None:
+        await self.pool.execute(
+            """
+            INSERT INTO profile_updates
+                (account, run_id, strategy, ok, detail,
+                 headline_before, headline_after, last_updated_text)
+            VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
+            """,
+            account,
+            run_id,
+            strategy,
+            ok,
+            (detail or "")[:1000],
+            (headline_before or "")[:500],
+            (headline_after or "")[:500],
+            (last_updated_text or "")[:200],
+        )
+
+    async def profile_freshness(self) -> list[dict[str, Any]]:
+        rows = await self.pool.fetch(
+            """
+            SELECT account, last_success_at, last_attempt_at, successes, failures
+              FROM profile_freshness
+             ORDER BY account
+            """
+        )
+        return [dict(row) for row in rows]
 
     # --------------------------------------------------------------- session
     async def save_session(self, key: str, state: dict[str, Any], ttl_hours: int = 240) -> None:

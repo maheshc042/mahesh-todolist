@@ -125,18 +125,36 @@ class ApplyEngine:
         await human_pause(500, 1_300)
 
     async def _state(self) -> str:
-        """Classify the loaded detail page into one actionable state."""
+        """
+        Classify the loaded detail page into one actionable state.
+
+        Ordering matters and used to be wrong. `JD_APPLY_BUTTON` contains the
+        text selector `button:has-text('Apply')`, which ALSO matches Naukri's
+        "Apply on company site" button — so external postings were classified as
+        easy_apply, clicked, and only caught afterwards by the popup guard. That
+        made a hard requirement ("never open a third-party tab") depend on a
+        safety net. We now resolve the unambiguous ID selectors first and only
+        fall back to text matching once both IDs are absent.
+        """
         if await first_visible(self.page, S.JD_ALREADY_APPLIED, timeout_ms=2_500):
             return "already_applied"
 
-        apply_btn = await first_visible(self.page, S.JD_APPLY_BUTTON, timeout_ms=6_000)
-        external_btn = await first_visible(self.page, S.JD_COMPANY_SITE_BUTTON, timeout_ms=1_500)
-
-        # Both present (rare): prefer the on-platform path.
-        if apply_btn is not None:
+        # Stable IDs Naukri has shipped for years: exactly one is rendered.
+        easy_by_id = await first_visible(self.page, ["button#apply-button"], timeout_ms=6_000)
+        if easy_by_id is not None:
             return "easy_apply"
-        if external_btn is not None:
+        external_by_id = await first_visible(
+            self.page, ["button#company-site-button"], timeout_ms=1_500
+        )
+        if external_by_id is not None:
             return "external"
+
+        # IDs gone (redesign): fall back to text, external FIRST so the
+        # more-specific "Apply on company site" wins over a bare "Apply".
+        if await first_visible(self.page, S.JD_COMPANY_SITE_BUTTON, timeout_ms=2_000):
+            return "external"
+        if await first_visible(self.page, S.JD_APPLY_BUTTON, timeout_ms=4_000):
+            return "easy_apply"
         return "unknown"
 
     async def enrich(self, job: Job) -> None:
@@ -246,7 +264,11 @@ class ApplyEngine:
         return await self._submit(job, profile, attempt_used)
 
     async def _submit(self, job: Job, profile: str, attempts: int) -> ApplyOutcome:
-        apply_btn = await first_visible(self.page, S.JD_APPLY_BUTTON, timeout_ms=8_000)
+        # `#apply-button` first for the same reason as in `_state()`: the generic
+        # text selector can resolve to "Apply on company site".
+        apply_btn = await first_visible(
+            self.page, ["button#apply-button", *S.JD_APPLY_BUTTON], timeout_ms=8_000
+        )
         if apply_btn is None:
             shot = await self.artifacts.capture_failure(self.page, "apply-btn-gone", profile, job.job_id)
             return ApplyOutcome(

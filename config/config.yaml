@@ -65,8 +65,8 @@ schedule:
   # window is the pattern most likely to trigger Naukri's "unusual activity"
   # challenge. Morning for Full-Stack, afternoon for AI/Python.
   cron_by_account:
-    primary: "40 9 * * 1-5"
-    secondary: "20 15 * * 1-5"
+    primary: "0 10 * * 1-5"    # 10:00 AM IST (Peak morning recruiter search window)
+    secondary: "30 10 * * 1-5" # 10:30 AM IST (Peak morning recruiter search window)
   timezone: Asia/Kolkata
   jitter_seconds: 600
   run_on_start: false
@@ -103,18 +103,36 @@ answers:
   experience in react: "2.6"
   experience in node: "2.6"
   experience in javascript: "2.6"
-  experience in typescript: "2.6"
+  experience in html: "2.6"
+  experience in css: "2.6"
+  experience in html css: "2.6"
+  experience in html css javascript: "2.6"
+  experience in typescript: "2"
   experience in full stack: "2.6"
-  experience in aws: "1.5"
-  experience in testing: "2.6"
-  experience in software testing: "2.6"
+  experience in aws: "2"
+  experience in testing: "2"
+  experience in software testing: "2"
+
+experience:
+  total_years: 2.6
+  default_years: 2.6
+  multi_skill_strategy: max
+  skills:
+    html: 2.6
+    css: 2.6
+    javascript: 2.6
+    js: 2.6
+    react: 2.6
+    node: 2.6
+    typescript: 2.6
+    full stack: 2.6
   # AI / Python is the newer track: 6 months hands-on.
-  experience in ai: "0.6"
-  experience in artificial intelligence: "0.6"
-  experience in machine learning: "0.6"
-  experience in python: "0.6"
-  experience in llm: "0.6"
-  experience in generative ai: "0.6"
+  experience in ai: "1"
+  experience in artificial intelligence: "1"
+  experience in machine learning: "1"
+  experience in python: "1.5"
+  experience in llm: "1"
+  experience in generative ai: "1"
   experience in chatbot: "1"
   experience in .net: "0"
   experience in java: "0"
@@ -127,6 +145,7 @@ answers:
   puc percentage: "75"
   graduation percentage: "60"
   degree percentage: "60"
+  ug percentage: "60"
   cgpa: "6.5"
   post graduation: "NA"
   pg percentage: "NA"
@@ -151,6 +170,9 @@ answers:
   preferred location: "Bengaluru"
   are you willing to work from office: "Yes"
   hybrid mode: "Yes"
+  face to face interview: "Yes"
+  ready to relocate for a face to face interview: "Yes"
+  need specifal accomodation for interview: "no"
 
   # Reason for Change
   reason for job change: "Looking for better technical growth, challenging engineering problems, and career advancement."
@@ -199,7 +221,7 @@ profiles:
     filters:
       title_must_include_any: [full stack, fullstack, mern, react, node, javascript, typescript, frontend, backend, aws, web, software, developer, engineer, ai, chatbot]
       title_must_exclude_any: [intern, internship, sales, bpo, php, wordpress, .net, dotnet, dot net, c++, spring boot, java developer, mainframe, sap, salesforce, drupal, magento, lead, manager, director, vp, head, architect, sr. manager]
-      description_must_exclude_any: ["bpo", "night shift", "us shift", "commission only", "unpaid", ".net developer", "asp.net", "c#", "spring boot", "ruby on rails", "php developer", "wordpress developer", "registration fee", "security deposit"]
+      description_must_exclude_any: ["bpo", "night shift", "us shift", "commission only", "unpaid", ".net developer", "asp.net", "c#", "spring boot", "ruby on rails", "php developer", "wordpress developer", "registration fee", "security deposit" , "prefers women", "women diversity", "women only", "female only"]
       allowed_locations: []
       blocked_locations: []
       blocked_companies: []
@@ -228,7 +250,7 @@ profiles:
   # =========================================================================
   - name: "AI / Python Engineer"
     enabled: true
-    priority: 1
+    priority: 2
     account: secondary
     experience_years: 2.6
     use_recommended: true
@@ -244,7 +266,7 @@ profiles:
       # Excludes senior/lead bands (2.6 yrs will not clear them) and unrelated
       # stacks that Naukri's feed occasionally mixes in.
       title_must_exclude_any: [intern, internship, sales, bpo, php, wordpress, .net, dotnet, c++, java developer, mainframe, sap, salesforce, devops, network, hardware, lead, manager, director, vp, head, principal, architect, staff engineer]
-      description_must_exclude_any: ["bpo", "night shift", "us shift", "commission only", "unpaid", "phd required", "8+ years", "10+ years", "registration fee", "security deposit", ".net developer", "asp.net"]
+      description_must_exclude_any: ["bpo", "night shift", "us shift", "commission only", "unpaid", "phd required", "8+ years", "10+ years", "registration fee", "security deposit", ".net developer", "asp.net", "prefers women", "women diversity" , "women only" , "female only"]
       allowed_locations: []
       blocked_locations: []
       blocked_companies: []

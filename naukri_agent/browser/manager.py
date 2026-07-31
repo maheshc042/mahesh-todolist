@@ -90,6 +90,12 @@ class BrowserManager:
         self._browser: Browser | None = None
         self._context: BrowserContext | None = None
         self._restored_session = False
+        # Guards against writing a LOGGED-OUT storage_state back over a good one.
+        # `stop()` persists unconditionally, so a run that invalidated the session
+        # (expired cookies, OTP challenge) used to save the anonymous state on
+        # teardown, guaranteeing a fresh form login next run — and repeated fresh
+        # logins are the main trigger for Naukri's OTP/captcha challenge.
+        self._session_trusted = False
 
     # ------------------------------------------------------------- lifecycle
     async def __aenter__(self) -> "BrowserManager":
@@ -111,6 +117,8 @@ class BrowserManager:
         if self.repo is not None:
             storage_state = await self.repo.load_session(self.session_key)
             self._restored_session = storage_state is not None
+            # A restored session is trusted until something proves otherwise.
+            self._session_trusted = self._restored_session
 
         self._context = await self._browser.new_context(
             viewport={
@@ -153,7 +161,9 @@ class BrowserManager:
     async def stop(self) -> None:
         try:
             if self._context is not None:
-                await self.persist_session()
+                # Only if the session is still believed good — see
+                # `_session_trusted`.
+                await self.persist_session(only_if_trusted=True)
                 await self._context.close()
         finally:
             if self._browser is not None:
@@ -183,18 +193,31 @@ class BrowserManager:
         return page
 
     # --------------------------------------------------------------- session
-    async def persist_session(self) -> None:
-        """Save cookies + localStorage so the next run skips the login form."""
+    async def persist_session(self, only_if_trusted: bool = False) -> None:
+        """
+        Save cookies + localStorage so the next run skips the login form.
+
+        Called explicitly by the auth layer right after a verified login (which
+        marks the session trusted), and implicitly on teardown with
+        `only_if_trusted=True` so a logged-out state is never written back.
+        """
         if self.repo is None or self._context is None:
+            return
+        if only_if_trusted and not self._session_trusted:
+            log.info("browser.session_not_persisted", key=self.session_key, reason="untrusted")
             return
         try:
             state = await self._context.storage_state()
+            cookies = state.get("cookies", [])
+            if not cookies:
+                # An empty jar overwriting a good session is strictly worse than
+                # keeping the old one: Playwright returns this if the context was
+                # never navigated.
+                log.warning("browser.session_empty_skipped", key=self.session_key)
+                return
             await self.repo.save_session(self.session_key, dict(state))
-            log.info(
-                "browser.session_saved",
-                key=self.session_key,
-                cookies=len(state.get("cookies", [])),
-            )
+            self._session_trusted = True
+            log.info("browser.session_saved", key=self.session_key, cookies=len(cookies))
         except Exception as exc:
             log.warning("browser.session_save_failed", error=str(exc))
 
@@ -202,4 +225,5 @@ class BrowserManager:
         if self.repo is not None:
             await self.repo.clear_session(self.session_key)
         self._restored_session = False
+        self._session_trusted = False
         log.info("browser.session_invalidated", key=self.session_key)

@@ -106,16 +106,14 @@ RECO_PAGE_MARKERS = [
 ]
 
 RECO_JOB_CARD_CONTAINERS = [
-    "article.jobTupleHeader",
-    "div.recommended-jobs div.jobTuple",
-    "div[class*='reco'] article",
-    "div.list > article",
-    "article[class*='jobTuple']",
-    "div.jobTuple",
-    "div[data-job-id]",
-    "div[class*='jobTupleWrapper']",
     "div.cust-job-tuple",
     "div.srp-jobtuple-wrapper",
+    "div.tuple-wrapper",
+    "article.jobTuple",
+    "div.jobTuple",
+    "div.recommended-jobs article",
+    "div[data-job-id]",
+    "div[class*='jobTupleWrapper']",
 ]
 
 # Structural fallback: every job card, in every Naukri layout, contains an
@@ -163,7 +161,17 @@ RECO_EMPTY = [
     "div.empty-state",
 ]
 
-CARD_TITLE = ["a.title", "a.jobTitle", "a[class*='title']", "h2 a"]
+CARD_TITLE = [
+    "a[href*='job-listings']",
+    "a[href*='job-details']",
+    "a.title",
+    "a.jobTitle",
+    "a[class*='title']",
+    "div[class*='title'] a",
+    "h2 a",
+    "h3 a",
+    "a.row1",
+]
 CARD_COMPANY = [
     "a.comp-name",
     "a.subTitle",
@@ -314,3 +322,87 @@ RESUME_SUCCESS = [
     "span:has-text('successfully uploaded')",
 ]
 RESUME_CURRENT_NAME = ["div.filename", "span.fileName", "div[class*='filename']"]
+
+# ------------------------------------------------------- profile refresh
+# Naukri ranks profiles in recruiter search by "profile last updated", so a
+# daily touch is the single highest-leverage action on the platform. The resume
+# HEADLINE is the safest field to touch: it is a plain <textarea> in a modal, it
+# has an explicit Save button, and re-saving it moves the timestamp.
+PROFILE_LAST_UPDATED = [
+    "span:has-text('Profile last updated')",
+    "div:has-text('Profile last updated')",
+    "span[class*='lastUpdated']",
+    "div[class*='last-updated']",
+]
+
+# The pencil / "Edit" affordance on the Resume headline card.
+HEADLINE_SECTION = [
+    "div.resumeHeadline",
+    "div[class*='resumeHeadline']",
+    "section:has-text('Resume headline')",
+    "div:has-text('Resume headline')",
+]
+HEADLINE_EDIT_TRIGGER = [
+    "div.resumeHeadline span.edit.icon",
+    "div.resumeHeadline span[class*='edit']",
+    "div[class*='resumeHeadline'] span[class*='edit']",
+    "span#resumeHeadline .edit",
+    "//div[contains(., 'Resume headline')]//span[contains(@class,'edit')]",
+]
+# Current headline text as rendered on the profile page (read-only view).
+HEADLINE_TEXT = [
+    "div.resumeHeadline span[class*='truncate']",
+    "div.resumeHeadline p",
+    "div[class*='resumeHeadline'] p",
+    "span#resumeHeadlineTxt",
+]
+# The editable field inside the modal.
+HEADLINE_TEXTAREA = [
+    "textarea#resumeHeadlineTxt",
+    "form[name='resumeHeadlineForm'] textarea",
+    "div.modal textarea[name*='headline' i]",
+    "textarea[placeholder*='headline' i]",
+    "div[role='dialog'] textarea",
+]
+HEADLINE_SAVE = [
+    "form[name='resumeHeadlineForm'] button[type='submit']",
+    "div[role='dialog'] button:has-text('Save')",
+    "div.modal button:has-text('Save')",
+    "button.btn-dark-ot:has-text('Save')",
+    "button:has-text('Save')",
+]
+# Naukri shows a green toast on success and a red one on validation errors.
+PROFILE_SAVE_SUCCESS = [
+    "p.error.success",
+    "div:has-text('Resume headline has been successfully saved')",
+    "span:has-text('successfully saved')",
+    "div[class*='toast'][class*='success']",
+    "div.success-toast",
+]
+PROFILE_SAVE_ERROR = [
+    "div[role='dialog'] p.error:not(.success)",
+    "div.modal p.error:not(.success)",
+    "span.errorTxt",
+]
+PROFILE_MODAL = [
+    "div[role='dialog']",
+    "div.modal",
+    "div.crossform",
+]
+PROFILE_MODAL_CLOSE = [
+    "div[role='dialog'] span.crossIcon",
+    "div.modal span.crossIcon",
+    "div[role='dialog'] button[aria-label='Close']",
+]
+
+# Key-skills widget (optional `skills` refresh strategy).
+KEY_SKILLS_EDIT_TRIGGER = [
+    "div.keySkills span.edit.icon",
+    "div[class*='keySkills'] span[class*='edit']",
+    "//div[contains(., 'Key skills')]//span[contains(@class,'edit')]",
+]
+KEY_SKILLS_INPUT = [
+    "input#keySkillSugg",
+    "div[role='dialog'] input[placeholder*='skill' i]",
+    "input[placeholder*='skill' i]",
+]
