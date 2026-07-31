@@ -259,9 +259,9 @@ profiles:
     account: primary
     experience_years: 2.6
     use_recommended: true
-    max_applications_per_run: 50
-    resume_label: null
-    resume_file: null
+    max_applications_per_run: 25
+    resume_label: "Full Stack Engineer"
+    resume_file: "resumes/Mahesh_Chitakoti_FullStack_Engineer.pdf"
 
     # Recommended-only. To re-enable the keyword search as a TOP-UP (it only
     # runs when the feed did not fill max_applications_per_run), move the block
@@ -286,7 +286,7 @@ profiles:
       blocked_companies: []
       experience:
         min_years: 0
-        max_years: 5
+        max_years: 3
       min_salary_lpa: null
       max_posted_days: 5
       min_rating: null
@@ -313,9 +313,9 @@ profiles:
     account: secondary
     experience_years: 2.6
     use_recommended: true
-    max_applications_per_run: 50
-    resume_label: null
-    resume_file: null
+    max_applications_per_run: 25
+    resume_label: "AI / Python Engineer"
+    resume_file: "resumes/Mahesh_Chitakoti_AI_Engineer.pdf"
 
     searches: []
     search_is_fallback_only: true
@@ -329,7 +329,7 @@ profiles:
       blocked_companies: []
       experience:
         min_years: 0
-        max_years: 5
+        max_years: 3
       min_salary_lpa: null
       max_posted_days: 5
       min_rating: null

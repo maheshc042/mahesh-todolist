@@ -373,7 +373,7 @@ class ProfileRefreshConfig(_Model):
 
     enabled: bool = True
     strategies: list[str] = Field(default_factory=lambda: ["headline"])
-    min_hours_between: int = Field(default=20, ge=1, le=168)
+    min_hours_between: int = Field(default=12, ge=1, le=168)
     verify: bool = True
     headline_variants: list[str] = Field(default_factory=list)
 
