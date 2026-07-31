@@ -564,3 +564,15 @@ class Repository:
         data = dict(row or {})
         data["fetched_at"] = datetime.now(timezone.utc).isoformat()
         return data
+
+    async def prune_stale_data(self, keep_days: int = 30) -> dict[str, int]:
+        """Prune old run events and expired sessions to keep database lean."""
+        deleted_events = await self.pool.execute(
+            "DELETE FROM run_events WHERE created_at < now() - ($1 || ' days')::interval",
+            str(keep_days),
+        )
+        deleted_sessions = await self.pool.execute(
+            "DELETE FROM browser_sessions WHERE valid_until < now()"
+        )
+        log.info("db.pruned", events=deleted_events, sessions=deleted_sessions)
+        return {"events": deleted_events, "sessions": deleted_sessions}

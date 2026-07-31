@@ -149,6 +149,10 @@ class Orchestrator:
         # targeting `secondary` fails loudly instead of silently using account 1.
         self.account = self.settings.validate_for_run(self.account_key)
         self.repo = await Repository.create()
+        try:
+            await self.repo.prune_stale_data()
+        except Exception as exc:
+            log.debug("db.prune_ignored", error=str(exc))
         profiles = self.config.active_profiles(self.only_profiles, account=self.account_key)
         profile_names = [p.name for p in profiles]
         if not profile_names:

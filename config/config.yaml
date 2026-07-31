@@ -259,7 +259,7 @@ profiles:
     account: primary
     experience_years: 2.6
     use_recommended: true
-    max_applications_per_run: 25
+    max_applications_per_run: 50
     resume_label: null
     resume_file: null
 
@@ -288,7 +288,7 @@ profiles:
         min_years: 0
         max_years: 5
       min_salary_lpa: null
-      max_posted_days: 3
+      max_posted_days: 5
       min_rating: null
       require_easy_apply: true
       skip_walkin: true
@@ -313,7 +313,7 @@ profiles:
     account: secondary
     experience_years: 2.6
     use_recommended: true
-    max_applications_per_run: 25
+    max_applications_per_run: 50
     resume_label: null
     resume_file: null
 
@@ -331,7 +331,7 @@ profiles:
         min_years: 0
         max_years: 5
       min_salary_lpa: null
-      max_posted_days: 3
+      max_posted_days: 5
       min_rating: null
       require_easy_apply: true
       skip_walkin: true

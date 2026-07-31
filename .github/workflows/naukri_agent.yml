@@ -4,6 +4,8 @@ on:
   schedule:
     # 04:00 UTC = 09:30 AM IST (Monday to Friday)
     - cron: '0 4 * * 1-5'
+    # 10:00 UTC = 03:30 PM IST (Monday to Friday)
+    - cron: '0 10 * * 1-5'
   workflow_dispatch:
 
 jobs:
