@@ -1,0 +1,75 @@
+# ---------------------------------------------------------------------------
+# One image, several entrypoints.
+#
+#   docker compose run --rm migrate                     # create/upgrade schema
+#   docker compose run --rm accounts                    # which logins are wired up
+#   docker compose run --rm agent run --dry-run         # rehearse, submit nothing
+#   docker compose run --rm agent run -a primary        # Full-Stack account only
+#   docker compose run --rm agent run -a secondary      # AI/Python account only
+#   docker compose run --rm agent run --all-accounts    # both, sequentially
+#   docker compose up -d agent                          # always-on daemon
+#
+# `agent` is the long-lived service (CMD `schedule`) and registers ONE cron job
+# per configured account, staggered by `schedule.cron_by_account` — the two
+# logins must never overlap. The one-shot helpers are profile-gated so `up`
+# never starts them.
+#
+# Interactive first login (needed once per account, or after an OTP challenge)
+# is a HOST command, not a compose one: it needs a visible browser.
+#   python -m naukri_agent login -a primary
+#   python -m naukri_agent login -a secondary
+# ---------------------------------------------------------------------------
+
+x-agent-base: &agent-base
+  build:
+    context: .
+    dockerfile: Dockerfile
+  image: naukri-agent:latest
+  env_file:
+    - .env
+  environment:
+    TZ: Asia/Kolkata
+    CONFIG_PATH: /app/config/config.yaml
+    LOG_JSON: "true"
+  volumes:
+    # config.yaml is mounted read-only: the container must never rewrite rules.
+    - ./config:/app/config:ro
+    - ./resumes:/app/resumes:ro
+    - agent-artifacts:/app/artifacts
+    - agent-logs:/app/logs
+  # Chromium crashes with the default 64 MB /dev/shm.
+  shm_size: "1gb"
+  # Chromium spawns many short-lived processes; without a reaper they zombie.
+  init: true
+  security_opt:
+    - seccomp:unconfined
+
+services:
+  migrate:
+    <<: *agent-base
+    profiles: ["tools"]
+    command: ["migrate"]
+    restart: "no"
+
+  agent:
+    <<: *agent-base
+    container_name: naukri-agent
+    command: ["schedule"]
+    restart: unless-stopped
+    # The scheduler holds no listening port, so health is "is the process alive
+    # and can it still reach Postgres".
+    healthcheck:
+      test: ["CMD", "python", "-c", "import socket,os,urllib.parse as u; d=u.urlparse(os.environ['DATABASE_URL']); s=socket.create_connection((d.hostname, d.port or 5432), 5); s.close()"]
+      interval: 2m
+      timeout: 15s
+      retries: 3
+      start_period: 30s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
+
+volumes:
+  agent-artifacts:
+  agent-logs:

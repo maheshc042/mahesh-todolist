@@ -1,0 +1,13 @@
+# Runtime dependencies for the Naukri Auto-Apply Agent (Python 3.11+)
+playwright==1.49.1
+pydantic==2.10.4
+pydantic-settings==2.7.0
+PyYAML==6.0.2
+asyncpg==0.30.0
+apscheduler==3.11.0
+structlog==24.4.0
+httpx==0.28.1
+tenacity==9.0.0
+typer==0.15.1
+rich==13.9.4
+python-dotenv==1.0.1

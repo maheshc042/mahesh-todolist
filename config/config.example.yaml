@@ -1,0 +1,133 @@
+# ---------------------------------------------------------------------------
+# Naukri auto-apply agent — behavioural configuration.
+#
+# Copy to config/config.yaml and edit. Secrets (Naukri login, DATABASE_URL,
+# Telegram token) belong in the environment, NOT here. `${VAR}` interpolation
+# is supported if you really need to reference an env var.
+# ---------------------------------------------------------------------------
+
+browser:
+  headless: true
+  slow_mo_ms: 0
+  viewport_width: 1440
+  viewport_height: 900
+  locale: en-IN
+  timezone: Asia/Kolkata
+  default_timeout_ms: 30000
+  navigation_timeout_ms: 60000
+  # Human-like pacing between interactions (randomised in this range).
+  min_action_delay_ms: 350
+  max_action_delay_ms: 1400
+  # Resource types to abort. Keep "image" out if a captcha ever appears.
+  block_resources: [font, media]
+
+run:
+  daily_application_cap: 60
+  dedupe_window_days: 90
+  max_consecutive_failures: 5
+  min_delay_between_applies_s: 8
+  max_delay_between_applies_s: 25
+  max_retries_per_job: 2
+  # true  -> unknown screening question => skip job and queue it for review
+  # false -> best-effort guess (not recommended)
+  strict_answers: true
+  screenshot_on_failure: true
+  screenshot_on_success: false
+  run_timeout_minutes: 90
+
+schedule:
+  enabled: true
+  # 09:30 and 15:30 IST, Monday–Friday.
+  cron: "30 9,15 * * 1-5"
+  timezone: Asia/Kolkata
+  jitter_seconds: 600
+  run_on_start: false
+
+notifications:
+  telegram_enabled: true
+  notify_on_success: true
+  notify_on_failure: true
+  include_job_list: true
+  max_jobs_in_message: 15
+
+# Global screening-question knowledge base. Keys are matched case-insensitively
+# as a substring first, then as a regex if the pattern compiles.
+answers:
+  notice period: "30 days"
+  current ctc: "12"
+  expected ctc: "18"
+  total experience: "4"
+  relevant experience: "3"
+  current location: "Bengaluru"
+  preferred location: "Bengaluru"
+  willing to relocate: "Yes"
+  ready to relocate: "Yes"
+  are you willing to work from office: "Yes"
+  do you have a valid passport: "Yes"
+  highest qualification: "B.Tech"
+  graduation year: "2020"
+  serving notice: "No"
+  any offer in hand: "No"
+  immediate joiner: "No"
+  "^yes/no$": "Yes"
+
+profiles:
+  - name: "AI / Python Engineer"
+    enabled: true
+    priority: 10
+    experience_years: 4
+    max_applications_per_run: 15
+    # Label of a resume already uploaded to your Naukri profile (optional).
+    resume_label: null
+    # Local file used only by the "upload new resume" flow (optional).
+    resume_file: null
+    searches:
+      - keyword: "python developer"
+        locations: [bengaluru, hyderabad, remote]
+        max_pages: 3
+        sort_by: date
+        freshness_days: 7
+      - keyword: "ai engineer"
+        locations: [bengaluru, remote]
+        max_pages: 2
+        sort_by: date
+        freshness_days: 7
+    filters:
+      title_must_include_any: [python, ai, ml, machine learning, backend, llm]
+      title_must_exclude_any: [intern, trainee, fresher, sales, support, manual testing]
+      description_must_exclude_any: ["bpo", "night shift", "commission only"]
+      allowed_locations: [bengaluru, bangalore, hyderabad, remote, pune]
+      blocked_locations: [chennai]
+      blocked_companies: ["some staffing agency"]
+      experience:
+        min_years: 2
+        max_years: 7
+      min_salary_lpa: null
+      max_posted_days: 15
+      min_rating: 3.0
+      require_easy_apply: true
+      skip_walkin: true
+    # Profile-scoped answers override the global ones above.
+    answers:
+      relevant experience: "4"
+
+  - name: "Full Stack Engineer"
+    enabled: false
+    priority: 20
+    experience_years: 4
+    max_applications_per_run: 10
+    searches:
+      - keyword: "full stack developer react node"
+        locations: [bengaluru, remote]
+        max_pages: 2
+        sort_by: date
+        freshness_days: 7
+    filters:
+      title_must_include_any: [full stack, fullstack, react, node]
+      title_must_exclude_any: [intern, fresher, php, wordpress]
+      experience:
+        min_years: 2
+        max_years: 8
+      max_posted_days: 15
+      require_easy_apply: true
+      skip_walkin: true

@@ -1,0 +1,495 @@
+"""
+Run orchestrator.
+
+Owns the whole lifecycle of one run:
+
+    open DB -> start run row -> launch browser -> login
+      for each profile (priority order):
+          swap resume -> for each search: scrape -> filter -> apply -> persist
+      -> finish run row -> notify -> tear down
+
+Design decisions:
+
+- **One browser, one page, sequential applies.** Naukri aggressively throttles
+  parallel sessions from one account, and concurrent applies make the "already
+  applied" check racy. Throughput is not the goal; not getting banned is.
+- **Safety valves compose.** A run stops early on: daily cap reached, per-profile
+  cap reached, N consecutive failures (default 5 → likely a markup change or a
+  block), or the global wall-clock timeout. Each one is recorded distinctly so
+  the summary explains itself.
+- **Every outcome is persisted, including skips.** That is what makes the next
+  run cheap: `known_job_ids()` means a job is evaluated once per dedupe window.
+- **Failures never escape a job.** `_process_job` catches everything, screenshots
+  it, records FAILED and moves on. Only fatal errors (bad credentials, captcha)
+  abort the run.
+- **Session recovery mid-run.** If a page shows logged-out markers we
+  re-authenticate once and retry that job instead of losing the remaining work.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import random
+import time
+from datetime import datetime, timezone
+
+from ..browser.artifacts import ArtifactStore
+from ..browser.manager import BrowserManager
+from ..browser.resilience import FatalAgentError, first_visible
+from ..config import AgentConfig, FilterRules, JobProfile, NaukriAccount, Settings
+from ..core.answers import AnswerEngine
+from ..core.filters import FilterEngine
+from ..core.models import (
+    ApplicationStatus,
+    ApplyOutcome,
+    Job,
+    RunStats,
+    RunStatus,
+)
+from ..db.repository import Repository
+from ..logging_setup import bind_context, clear_context, get_logger
+from ..naukri import selectors as S
+from ..naukri.apply import ApplyEngine
+from ..naukri.auth import NaukriAuth
+from ..naukri.resume import ResumeManager
+from ..naukri.search import JobSearcher
+from ..notify.notifier import build_notifier, format_run_summary
+
+log = get_logger(__name__)
+
+
+class StopRun(Exception):
+    """Internal signal: a safety valve tripped, unwind cleanly."""
+
+
+class _CapReached(Exception):
+    """Internal signal: this profile hit its per-run cap; move to the next one."""
+
+
+class Orchestrator:
+    def __init__(
+        self,
+        config: AgentConfig,
+        settings: Settings,
+        *,
+        mode: str = "manual",
+        only_profiles: list[str] | None = None,
+        dry_run: bool = False,
+        account: str | None = None,
+    ) -> None:
+        self.config = config
+        self.settings = settings
+        self.mode = mode
+        self.only_profiles = only_profiles
+        self.dry_run = dry_run or settings.dry_run
+        # One Orchestrator instance == one Naukri account == one browser session.
+        # Accounts are never mixed inside a run: the resume lives on the account,
+        # and the daily cap is a per-account budget.
+        self.account_key = (account or settings.default_account or "primary").strip().lower()
+        self.account: NaukriAccount | None = None
+
+        self.stats = RunStats()
+        self.run_id: int | None = None
+        self.repo: Repository | None = None
+        self.applier: ApplyEngine | None = None
+        self.consecutive_failures = 0
+        self.applied_today = 0
+        self.started_at = time.monotonic()
+        self.notifier = build_notifier(
+            telegram_enabled=config.notifications.telegram_enabled,
+            bot_token=settings.telegram_bot_token,
+            chat_id=settings.telegram_chat_id,
+        )
+
+    # --------------------------------------------------------------- helpers
+    @property
+    def elapsed_s(self) -> float:
+        return time.monotonic() - self.started_at
+
+    def _check_global_limits(self) -> None:
+        if self.elapsed_s > self.config.run.run_timeout_minutes * 60:
+            raise StopRun(f"run timeout of {self.config.run.run_timeout_minutes} minutes reached")
+        if self.consecutive_failures >= self.config.run.max_consecutive_failures:
+            raise StopRun(
+                f"{self.consecutive_failures} consecutive failures — aborting to avoid a ban"
+            )
+        if self.applied_today >= self.config.run.daily_application_cap:
+            raise StopRun(f"daily cap of {self.config.run.daily_application_cap} reached")
+
+    async def _pace(self) -> None:
+        """Randomised gap between applications; the single most important
+        anti-detection measure in the whole agent."""
+        delay = random.uniform(
+            self.config.run.min_delay_between_applies_s,
+            self.config.run.max_delay_between_applies_s,
+        )
+        log.debug("orchestrator.pacing", seconds=round(delay, 1))
+        await asyncio.sleep(delay)
+
+    async def _build_answer_engine(self, profile: JobProfile) -> AnswerEngine:
+        assert self.repo is not None
+        # YAML seeds are synced into Postgres so human-resolved answers and
+        # config answers live in one ordered knowledge base.
+        await self.repo.seed_answer_kb(self.config.answers, profile=None)
+        await self.repo.seed_answer_kb(profile.answers, profile=profile.name)
+        kb = await self.repo.load_answer_kb(profile.name)
+        return AnswerEngine(
+            kb=kb,
+            profile_answers=profile.answers,
+            strict=self.config.run.strict_answers,
+        )
+
+    # ------------------------------------------------------------------- main
+    async def run(self) -> RunStats:
+        # Resolves + validates the credentials for THIS account only, so a run
+        # targeting `secondary` fails loudly instead of silently using account 1.
+        self.account = self.settings.validate_for_run(self.account_key)
+        self.repo = await Repository.create()
+        profiles = self.config.active_profiles(self.only_profiles, account=self.account_key)
+        profile_names = [p.name for p in profiles]
+        if not profile_names:
+            raise RuntimeError(
+                f"No enabled profiles matched the selection for account '{self.account_key}'"
+            )
+
+        self.run_id = await self.repo.start_run(self.mode, profile_names, account=self.account_key)
+        bind_context(run_id=self.run_id, account=self.account_key)
+        self.applied_today = await self.repo.applied_today(account=self.account_key)
+        log.info(
+            "run.start",
+            mode=self.mode,
+            account=self.account_key,
+            email=self.account.masked_email,
+            profiles=profile_names,
+            dry_run=self.dry_run,
+            applied_today=self.applied_today,
+        )
+
+        status = RunStatus.SUCCESS
+        fatal_error: str | None = None
+        artifacts = ArtifactStore(self.settings.artifacts_dir, self.run_id)
+
+        try:
+            async with BrowserManager(
+                self.config.browser,
+                self.repo,
+                session_key=self.account.session_key,
+            ) as browser:
+                auth = NaukriAuth(
+                    browser,
+                    self.account.email,
+                    self.account.password,
+                    artifacts,
+                )
+                page = await auth.ensure_logged_in()
+
+                for profile in profiles:
+                    try:
+                        await self._run_profile(profile, page, auth, artifacts)
+                    except StopRun as stop:
+                        log.warning("run.stopped_early", reason=str(stop))
+                        self.stats.errors.append(f"stopped early: {stop}")
+                        status = RunStatus.PARTIAL
+                        break
+        except FatalAgentError as exc:
+            fatal_error = str(exc)
+            status = RunStatus.FAILED
+            log.error("run.fatal", error=fatal_error)
+        except Exception as exc:  # unexpected: still record and notify
+            fatal_error = f"{type(exc).__name__}: {exc}"
+            status = RunStatus.FAILED
+            log.exception("run.crashed")
+        finally:
+            # Detach the popup listener before the page dies.
+            if self.applier is not None:
+                self.applier.close()
+                self.applier = None
+            if self.stats.failed and status == RunStatus.SUCCESS:
+                status = RunStatus.PARTIAL
+            if self.repo is not None and self.run_id is not None:
+                await self.repo.finish_run(self.run_id, status, self.stats, fatal_error)
+            await self._notify(status, fatal_error)
+            clear_context()
+
+        log.info("run.finished", status=status.value, **self.stats.as_dict()["per_profile"])
+        return self.stats
+
+    # --------------------------------------------------------------- profile
+    async def _run_profile(
+        self,
+        profile: JobProfile,
+        page,
+        auth: NaukriAuth,
+        artifacts: ArtifactStore,
+    ) -> None:
+        assert self.repo is not None
+        bind_context(profile=profile.name)
+        log.info(
+            "profile.start",
+            profile=profile.name,
+            account=profile.account,
+            recommended=profile.use_recommended,
+            searches=len(profile.searches),
+        )
+
+        # Resume swap happens once per profile (see naukri/resume.py rationale).
+        resume_mgr = ResumeManager(page, self.settings.resume_dir)
+        if profile.resume_file:
+            ok = await resume_mgr.ensure_resume(profile.resume_file, profile.name)
+            if not ok:
+                self.stats.errors.append(f"{profile.name}: resume swap failed, using existing CV")
+
+        answers = await self._build_answer_engine(profile)
+        searcher = JobSearcher(
+            page,
+            self.config.browser.min_action_delay_ms,
+            self.config.browser.max_action_delay_ms,
+        )
+
+        # The apply engine is created ONCE per run and its knowledge base swapped
+        # per profile. Building one per profile registered a fresh `popup`
+        # listener on the same page every time, leaking handlers for the run.
+        if self.applier is None:
+            self.applier = ApplyEngine(
+                page,
+                answers,
+                artifacts,
+                dry_run=self.dry_run,
+                nav_timeout_ms=self.config.browser.navigation_timeout_ms,
+                attempts=self.config.run.max_retries_per_job,
+            )
+        else:
+            self.applier.set_answers(answers)
+        applier = self.applier
+
+        known = await self.repo.known_job_ids(
+            profile.name,
+            self.config.run.dedupe_window_days,
+            account=self.account_key,
+        )
+        applied_this_profile = 0
+
+        def remaining() -> int:
+            return profile.max_applications_per_run - applied_this_profile
+
+        async def consume(jobs: list[Job], rules: FilterRules) -> None:
+            """Evaluate + apply a batch, respecting every safety valve."""
+            nonlocal applied_this_profile
+            filters = FilterEngine(rules)
+            for job in jobs:
+                self._check_global_limits()
+                if remaining() <= 0:
+                    log.info(
+                        "profile.cap_reached",
+                        profile=profile.name,
+                        cap=profile.max_applications_per_run,
+                    )
+                    raise _CapReached
+                known.add(job.job_id)
+                outcome = await self._process_job(
+                    job, profile, filters, applier, page, auth, artifacts
+                )
+                if outcome.status == ApplicationStatus.APPLIED:
+                    applied_this_profile += 1
+                    self.applied_today += 1
+                    await self._pace()
+
+        try:
+            # ---- Phase 1: Naukri's recommended feed (the primary source) ----
+            if profile.use_recommended and self.config.recommended.enabled:
+                recommended_jobs = await searcher.search_recommended(
+                    self.config.recommended,
+                    exclude_job_ids=known,
+                )
+                if recommended_jobs:
+                    self.stats.bump(profile.name, "scraped", len(recommended_jobs))
+                    log.info("search.recommended_processing", count=len(recommended_jobs))
+                    # Relaxed ruleset: Naukri already matched these against the
+                    # profile, so inclusion keywords only discard good jobs.
+                    await consume(recommended_jobs, profile.filters_for("recommended"))
+                else:
+                    log.info("search.recommended_empty", profile=profile.name)
+
+            # ---- Phase 2: keyword search, only as a top-up ----
+            if profile.searches and (
+                not profile.search_is_fallback_only or remaining() > 0
+            ):
+                if profile.search_is_fallback_only:
+                    log.info(
+                        "search.fallback_engaged",
+                        profile=profile.name,
+                        remaining=remaining(),
+                    )
+                search_rules = profile.filters_for("search")
+                for spec in profile.searches:
+                    self._check_global_limits()
+                    if remaining() <= 0:
+                        break
+                    for page_no in range(1, spec.max_pages + 1):
+                        self._check_global_limits()
+                        if remaining() <= 0:
+                            break
+                        jobs = await searcher.search_page(
+                            spec,
+                            profile.experience_years,
+                            page_no,
+                            exclude_job_ids=known,
+                        )
+                        if not jobs:
+                            break
+                        self.stats.bump(profile.name, "scraped", len(jobs))
+                        await consume(jobs, search_rules)
+        except _CapReached:
+            pass
+
+        log.info("profile.done", profile=profile.name, applied=applied_this_profile)
+
+    # ------------------------------------------------------------------- job
+    async def _process_job(
+        self,
+        job: Job,
+        profile: JobProfile,
+        filters: FilterEngine,
+        applier: ApplyEngine,
+        page,
+        auth: NaukriAuth,
+        artifacts: ArtifactStore,
+    ) -> ApplyOutcome:
+        assert self.repo is not None
+        bind_context(job_id=job.job_id)
+        self.stats.bump(profile.name, "considered")
+
+        # Phase 1: free, card-level filtering.
+        decision = filters.evaluate_card(job)
+        if not decision.passed:
+            outcome = ApplyOutcome(
+                status=ApplicationStatus.SKIPPED,
+                reason=decision.reason,
+                detail=decision.detail,
+            )
+            self.stats.bump(profile.name, "filtered_out")
+            log.info(
+                "job.filtered",
+                title=job.title[:70],
+                reason=decision.reason.value if decision.reason else "?",
+                detail=decision.detail,
+            )
+            await self.repo.record_outcome(
+                job, profile.name, self.run_id, outcome, account=self.account_key
+            )
+            return outcome
+
+        try:
+            # Phase 2 runs INSIDE apply(): the engine loads the job page, enriches
+            # the description, then calls this gate before clicking Apply. The old
+            # order filtered after submitting, which only logged a regret.
+            outcome = await applier.apply(
+                job, profile.name, pre_submit_check=filters.evaluate_detail
+            )
+
+            # Session may have silently expired mid-flow.
+            if outcome.status == ApplicationStatus.FAILED and await first_visible(
+                page, S.LOGGED_OUT_MARKERS, timeout_ms=2_000
+            ):
+                log.warning("job.session_lost_retrying", job_id=job.job_id)
+                await auth.reauthenticate(page)
+                outcome = await applier.apply(
+                    job, profile.name, pre_submit_check=filters.evaluate_detail
+                )
+
+        except FatalAgentError:
+            raise
+        except Exception as exc:
+            shot = await artifacts.capture_failure(page, "job-crash", profile.name, job.job_id)
+            log.exception("job.unexpected_error", job_id=job.job_id)
+            outcome = ApplyOutcome(
+                status=ApplicationStatus.FAILED,
+                detail=f"{type(exc).__name__}: {str(exc)[:200]}",
+                screenshot_path=shot,
+            )
+
+        await self._record(job, profile, outcome)
+        return outcome
+
+    async def _record(self, job: Job, profile: JobProfile, outcome: ApplyOutcome) -> None:
+        assert self.repo is not None
+
+        if outcome.status == ApplicationStatus.APPLIED:
+            self.stats.bump(profile.name, "applied")
+            self.stats.applied_jobs.append(
+                {
+                    "title": job.title,
+                    "company": job.company,
+                    "url": job.url,
+                    "profile": profile.name,
+                    "account": self.account_key,
+                    "at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+                }
+            )
+            self.consecutive_failures = 0
+        elif outcome.status == ApplicationStatus.FAILED:
+            self.stats.bump(profile.name, "failed")
+            self.consecutive_failures += 1
+            self.stats.errors.append(f"{job.title[:40]}: {outcome.detail[:120]}")
+        elif outcome.status == ApplicationStatus.EXTERNAL:
+            self.stats.bump(profile.name, "external")
+            self.consecutive_failures = 0
+        elif outcome.status == ApplicationStatus.ALREADY_APPLIED:
+            self.stats.bump(profile.name, "already_applied")
+            self.consecutive_failures = 0
+        elif outcome.status == ApplicationStatus.NEEDS_REVIEW:
+            self.stats.bump(profile.name, "needs_review")
+            self.consecutive_failures = 0
+            for question in outcome.unanswered_questions:
+                await self.repo.queue_question_for_review(
+                    profile=profile.name,
+                    question=question["text"],
+                    kind=question.get("kind", "unknown"),
+                    options=question.get("options", []),
+                    job_id=job.job_id,
+                    screenshot_path=outcome.screenshot_path,
+                )
+        else:
+            self.stats.bump(profile.name, "filtered_out")
+
+        await self.repo.record_outcome(
+            job, profile.name, self.run_id, outcome, account=self.account_key
+        )
+        await self.repo.log_event(
+            self.run_id,
+            f"apply.{outcome.status.value}",
+            level="error" if outcome.status == ApplicationStatus.FAILED else "info",
+            job_id=job.job_id,
+            profile=profile.name,
+            payload={
+                "account": self.account_key,
+                "title": job.title,
+                "company": job.company,
+                "reason": outcome.reason.value if outcome.reason else None,
+                "detail": outcome.detail[:500],
+                "questions_answered": outcome.questions_answered,
+            },
+        )
+
+    # ---------------------------------------------------------------- notify
+    async def _notify(self, status: RunStatus, error: str | None) -> None:
+        notifications = self.config.notifications
+        is_error = status == RunStatus.FAILED
+        if is_error and not notifications.notify_on_failure:
+            return
+        if not is_error and not notifications.notify_on_success:
+            return
+
+        body = format_run_summary(
+            self.stats,
+            duration_s=self.elapsed_s,
+            run_id=self.run_id,
+            include_job_list=notifications.include_job_list,
+            max_jobs=notifications.max_jobs_in_message,
+            error=error,
+        )
+        title = (
+            f"Naukri agent [{self.account_key}] {status.value} — "
+            f"{self.stats.applied} applied"
+        )
+        await self.notifier.send(title, body, is_error=is_error)

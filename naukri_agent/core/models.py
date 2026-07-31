@@ -1,0 +1,180 @@
+"""
+Domain models.
+
+These are transport-agnostic dataclasses shared by the scraper, the filter
+engine, the apply engine and the persistence layer. Keeping them separate from
+both Playwright objects and SQL rows means each layer can be unit tested with
+plain Python objects.
+"""
+
+from __future__ import annotations
+
+import hashlib
+import re
+from dataclasses import dataclass, field
+from datetime import datetime, timezone
+from enum import Enum
+from typing import Any
+
+
+class ApplicationStatus(str, Enum):
+    APPLIED = "applied"
+    SKIPPED = "skipped"
+    FAILED = "failed"
+    EXTERNAL = "external"
+    ALREADY_APPLIED = "already_applied"
+    NEEDS_REVIEW = "needs_review"
+
+
+class SkipReason(str, Enum):
+    FILTER_TITLE = "filter_title"
+    FILTER_DESCRIPTION = "filter_description"
+    FILTER_LOCATION = "filter_location"
+    FILTER_COMPANY = "filter_company"
+    FILTER_EXPERIENCE = "filter_experience"
+    FILTER_SALARY = "filter_salary"
+    FILTER_FRESHNESS = "filter_freshness"
+    FILTER_RATING = "filter_rating"
+    WALKIN = "walkin"
+    EXTERNAL_APPLY = "external_apply"
+    ALREADY_APPLIED = "already_applied"
+    SEEN_RECENTLY = "seen_recently"
+    UNANSWERED_QUESTION = "unanswered_question"
+    DAILY_CAP = "daily_cap"
+    PROFILE_CAP = "profile_cap"
+    DRY_RUN = "dry_run"
+
+
+class RunStatus(str, Enum):
+    RUNNING = "running"
+    SUCCESS = "success"
+    PARTIAL = "partial"
+    FAILED = "failed"
+
+
+def _slug(value: str) -> str:
+    return re.sub(r"[^a-z0-9]+", "-", value.lower()).strip("-")
+
+
+@dataclass(slots=True)
+class Job:
+    """A job card scraped from a Naukri search result page."""
+
+    job_id: str
+    title: str
+    company: str
+    url: str
+    location: str = ""
+    experience_text: str = ""
+    salary_text: str = ""
+    posted_text: str = ""
+    rating: float | None = None
+    reviews_count: int | None = None
+    tags: list[str] = field(default_factory=list)
+    description: str = ""
+    is_walkin: bool = False
+    source_keyword: str = ""
+    scraped_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+
+    # --- Derived numeric fields, parsed lazily by the parser module ---------
+    min_experience: float | None = None
+    max_experience: float | None = None
+    min_salary_lpa: float | None = None
+    max_salary_lpa: float | None = None
+    posted_days_ago: int | None = None
+
+    @staticmethod
+    def stable_id(url: str, title: str, company: str) -> str:
+        """
+        Naukri exposes a jobId in the URL, but sponsored/duplicate cards
+        occasionally omit it. Fall back to a deterministic hash so dedupe still
+        works and we never insert the same posting twice.
+        """
+        match = re.search(r"-(\d{6,})(?:\?|$)", url) or re.search(r"jobId=(\d+)", url)
+        if match:
+            return match.group(1)
+        digest = hashlib.sha1(f"{_slug(title)}|{_slug(company)}".encode()).hexdigest()
+        return f"h-{digest[:20]}"
+
+    def to_row(self) -> dict[str, Any]:
+        return {
+            "job_id": self.job_id,
+            "title": self.title,
+            "company": self.company,
+            "url": self.url,
+            "location": self.location,
+            "experience_text": self.experience_text,
+            "salary_text": self.salary_text,
+            "posted_text": self.posted_text,
+            "rating": self.rating,
+            "tags": self.tags,
+            "min_experience": self.min_experience,
+            "max_experience": self.max_experience,
+            "min_salary_lpa": self.min_salary_lpa,
+            "posted_days_ago": self.posted_days_ago,
+            "is_walkin": self.is_walkin,
+            "source_keyword": self.source_keyword,
+        }
+
+
+@dataclass(slots=True)
+class FilterDecision:
+    passed: bool
+    reason: SkipReason | None = None
+    detail: str = ""
+
+
+@dataclass(slots=True)
+class ApplyOutcome:
+    status: ApplicationStatus
+    reason: SkipReason | None = None
+    detail: str = ""
+    screenshot_path: str | None = None
+    questions_answered: int = 0
+    unanswered_questions: list[dict[str, Any]] = field(default_factory=list)
+    attempts: int = 1
+
+
+@dataclass(slots=True)
+class ScreeningQuestion:
+    """One question rendered by Naukri's post-apply chatbot."""
+
+    text: str
+    kind: str  # text | radio | checkbox | dropdown | date | unknown
+    options: list[str] = field(default_factory=list)
+    required: bool = True
+
+
+@dataclass
+class RunStats:
+    scraped: int = 0
+    considered: int = 0
+    filtered_out: int = 0
+    applied: int = 0
+    failed: int = 0
+    external: int = 0
+    already_applied: int = 0
+    needs_review: int = 0
+    per_profile: dict[str, dict[str, int]] = field(default_factory=dict)
+    applied_jobs: list[dict[str, str]] = field(default_factory=list)
+    errors: list[str] = field(default_factory=list)
+
+    def bump(self, profile: str, key: str, amount: int = 1) -> None:
+        setattr(self, key, getattr(self, key, 0) + amount)
+        bucket = self.per_profile.setdefault(profile, {})
+        bucket[key] = bucket.get(key, 0) + amount
+
+    def as_dict(self) -> dict[str, Any]:
+        return {
+            "scraped": self.scraped,
+            "considered": self.considered,
+            "filtered_out": self.filtered_out,
+            "applied": self.applied,
+            "failed": self.failed,
+            "external": self.external,
+            "already_applied": self.already_applied,
+            "needs_review": self.needs_review,
+            "per_profile": self.per_profile,
+            "applied_jobs": self.applied_jobs,
+            "errors": self.errors[:20],
+        }

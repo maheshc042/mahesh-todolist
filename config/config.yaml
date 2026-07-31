@@ -1,0 +1,281 @@
+# ---------------------------------------------------------------------------
+# Naukri auto-apply agent.
+#
+# TWO ACCOUNTS, TWO RESUMES:
+#   primary   (NAUKRI_EMAIL)   -> Full Stack / MERN + AI resume
+#   secondary (NAUKRI_EMAIL_2) -> AI / Python Engineer resume
+#
+# Naukri attaches whatever resume sits on the PROFILE — there is no per-
+# application resume picker — so one account == one resume == one job family.
+# Each profile below is bound to its account with `account:`, and a run only
+# ever touches one account (`run -a primary`, `run --all-accounts` for both,
+# sequentially).
+#
+# SOURCE: Naukri's own "Recommended jobs" feed only. Naukri has already matched
+# those postings against the profile, headline, skills and preferences, so it
+# beats any keyword query. The keyword-search fallback is left configured but
+# disabled (`searches: []`) — see the commented block on the Full-Stack profile
+# to re-enable it.
+# ---------------------------------------------------------------------------
+
+browser:
+  headless: true
+  slow_mo_ms: 0
+  viewport_width: 1440
+  viewport_height: 900
+  locale: en-IN
+  timezone: Asia/Kolkata
+  default_timeout_ms: 30000
+  navigation_timeout_ms: 60000
+  min_action_delay_ms: 350
+  max_action_delay_ms: 1400
+  block_resources: [font, media]
+
+run:
+  # PER ACCOUNT, per calendar day. With two accounts this is a 70/day ceiling in
+  # total; Naukri starts throttling well before that, so treat it as a safety
+  # valve rather than a target.
+  daily_application_cap: 35
+  dedupe_window_days: 90
+  max_consecutive_failures: 5
+  min_delay_between_applies_s: 8
+  max_delay_between_applies_s: 25
+  max_retries_per_job: 2
+  strict_answers: true
+  screenshot_on_failure: true
+  screenshot_on_success: false
+  run_timeout_minutes: 120
+
+# Naukri's recommended feed — the primary (and by default only) job source.
+recommended:
+  enabled: true
+  # Harvested in this order; a tab that does not exist is skipped silently.
+  tabs: ["top candidate", "preferences", "profile", "you might like"]
+  # The feed lazy-loads on scroll; stop once it stops yielding new cards.
+  max_scroll_rounds: 14
+  stall_rounds_before_stop: 3
+  max_jobs: 250
+  follow_show_more: true
+
+schedule:
+  enabled: true
+  # Default, used by any account without an override below.
+  cron: "40 9 * * 1-5"
+  # The two accounts MUST be hours apart: two logins from one IP inside the same
+  # window is the pattern most likely to trigger Naukri's "unusual activity"
+  # challenge. Morning for Full-Stack, afternoon for AI/Python.
+  cron_by_account:
+    primary: "40 9 * * 1-5"
+    secondary: "20 15 * * 1-5"
+  timezone: Asia/Kolkata
+  jitter_seconds: 600
+  run_on_start: false
+
+notifications:
+  telegram_enabled: false
+  notify_on_success: true
+  notify_on_failure: true
+  include_job_list: true
+  max_jobs_in_message: 15
+
+# ---------------------------------------------------------------------------
+# Global screening-question knowledge base. Profile-level `answers:` win over
+# these, so account-specific numbers live on the profile.
+# ---------------------------------------------------------------------------
+answers:
+  # Notice Period & Availability
+  serving notice: "Yes"
+  immediate joiner: "Yes"
+  notice period: "0 days"
+  how soon can you join: "0 days"
+  last working day: "30/04/2026"
+  buyout option: "No"
+
+  # Salary & CTC
+  current ctc: "4"
+  expected ctc: "7"
+  fixed ctc: "3.8"
+  variable ctc: "0"
+
+  # Experience — 2.6 years total career experience
+  total experience: "2.6"
+  relevant experience: "2.6"
+  experience in react: "2.6"
+  experience in node: "2.6"
+  experience in javascript: "2.6"
+  experience in typescript: "2.6"
+  experience in full stack: "2.6"
+  experience in aws: "1.5"
+  experience in testing: "2.6"
+  experience in software testing: "2.6"
+  # AI / Python is the newer track: 6 months hands-on.
+  experience in ai: "0.6"
+  experience in artificial intelligence: "0.6"
+  experience in machine learning: "0.6"
+  experience in python: "0.6"
+  experience in llm: "0.6"
+  experience in generative ai: "0.6"
+  experience in chatbot: "1"
+  experience in .net: "0"
+  experience in java: "0"
+
+  # Academic Details
+  10th percentage: "67"
+  12th percentage: "75"
+  secondary percentage: "75"
+  sslc percentage: "67"
+  puc percentage: "75"
+  graduation percentage: "60"
+  degree percentage: "60"
+  cgpa: "6.5"
+  post graduation: "NA"
+  pg percentage: "NA"
+
+  # College / Tier-1 / Institute Heuristics
+  iit: "No"
+  nit: "No"
+  dtu: "No"
+  iiit: "No"
+  premier institute: "No"
+  tier 1: "No"
+
+  # Residing & Relocation
+  residing: "Yes"
+  relocate: "Yes"
+  relocation: "Yes"
+  residing or willing to relocate: "Yes"
+  willing to relocate: "Yes"
+  ready to relocate: "Yes"
+  open to relocate: "Yes"
+  current location: "Bengaluru"
+  preferred location: "Bengaluru"
+  are you willing to work from office: "Yes"
+  hybrid mode: "Yes"
+
+  # Reason for Change
+  reason for job change: "Looking for better technical growth, challenging engineering problems, and career advancement."
+  why leaving: "Looking for better technical growth, challenging engineering problems, and career advancement."
+  why are you looking for a change: "Looking for better technical growth, challenging engineering problems, and career advancement."
+
+  # General HR
+  do you have a valid passport: "Yes"
+  highest qualification: "B.Tech"
+  graduation year: "2023"
+  any offer in hand: "No"
+  "^yes/no$": "Yes"
+
+# ---------------------------------------------------------------------------
+# Profiles. One per account.
+# ---------------------------------------------------------------------------
+profiles:
+  # =========================================================================
+  # ACCOUNT 1 (primary) — Full Stack / MERN, with AI-adjacent roles welcome.
+  # The Full-Stack + AI resume must be the active CV on this Naukri profile.
+  # =========================================================================
+  - name: "Full Stack / Web Developer"
+    enabled: true
+    priority: 1
+    account: primary
+    experience_years: 2.6
+    use_recommended: true
+    max_applications_per_run: 25
+    resume_label: null
+    resume_file: null
+
+    # Recommended-only. To re-enable the keyword search as a TOP-UP (it only
+    # runs when the feed did not fill max_applications_per_run), move the block
+    # below under `searches:`.
+    searches: []
+    search_is_fallback_only: true
+    # searches:
+    #   - keyword: "Master Full Stack & MERN Search"
+    #     custom_url: "https://www.naukri.com/full-stack-node-dot-js-mern-stack-react-dot-js-nextjs-javascript-typescript-chatbot-fullstack-developer-fullstack-development-jobs?k=full+stack%2C+node.js%2C+mern+stack%2C+react.js%2C+nextjs%2C+javascript%2C+typescript%2C+chatbot%2C+fullstack+developer%2C+fullstack+development&nignbevent_src=jobsearchDeskGNB&experience=2&jobAge=3&ctcFilter=3to6&ctcFilter=6to10"
+    #     max_pages: 25
+
+    # These rules apply to keyword search. The recommended feed automatically
+    # uses `filters.relaxed()`: the inclusion lists and the freshness cap are
+    # dropped (Naukri already matched the job), while every blocklist and the
+    # experience sanity check are kept.
+    filters:
+      title_must_include_any: [full stack, fullstack, mern, react, node, javascript, typescript, frontend, backend, aws, web, software, developer, engineer, ai, chatbot]
+      title_must_exclude_any: [intern, internship, sales, bpo, php, wordpress, .net, dotnet, dot net, c++, spring boot, java developer, mainframe, sap, salesforce, drupal, magento, lead, manager, director, vp, head, architect, sr. manager]
+      description_must_exclude_any: ["bpo", "night shift", "us shift", "commission only", "unpaid", ".net developer", "asp.net", "c#", "spring boot", "ruby on rails", "php developer", "wordpress developer", "registration fee", "security deposit"]
+      allowed_locations: []
+      blocked_locations: []
+      blocked_companies: []
+      experience:
+        min_years: 0
+        max_years: 6
+      min_salary_lpa: null
+      max_posted_days: 3
+      min_rating: null
+      require_easy_apply: true
+      skip_walkin: true
+
+    answers:
+      relevant experience: "2.6"
+      total experience: "2.6"
+      current ctc: "4"
+      expected ctc: "7"
+      notice period: "0 days"
+      last working day: "30/04/2026"
+      reason for job change: "Looking for better technical growth and challenging full-stack projects."
+
+  # =========================================================================
+  # ACCOUNT 2 (secondary) — AI / Python Engineer.
+  # The AI/Python resume must be the active CV on this Naukri profile.
+  # 2.6 years total engineering experience, 6 months of it in AI/Python.
+  # =========================================================================
+  - name: "AI / Python Engineer"
+    enabled: true
+    priority: 1
+    account: secondary
+    experience_years: 2.6
+    use_recommended: true
+    max_applications_per_run: 25
+    resume_label: null
+    resume_file: null
+
+    searches: []
+    search_is_fallback_only: true
+
+    filters:
+      title_must_include_any: [ai, artificial intelligence, machine learning, ml, python, llm, genai, generative ai, nlp, data, backend, chatbot, prompt, agent, developer, engineer]
+      # Excludes senior/lead bands (2.6 yrs will not clear them) and unrelated
+      # stacks that Naukri's feed occasionally mixes in.
+      title_must_exclude_any: [intern, internship, sales, bpo, php, wordpress, .net, dotnet, c++, java developer, mainframe, sap, salesforce, devops, network, hardware, lead, manager, director, vp, head, principal, architect, staff engineer]
+      description_must_exclude_any: ["bpo", "night shift", "us shift", "commission only", "unpaid", "phd required", "8+ years", "10+ years", "registration fee", "security deposit", ".net developer", "asp.net"]
+      allowed_locations: []
+      blocked_locations: []
+      blocked_companies: []
+      experience:
+        min_years: 0
+        max_years: 5
+      min_salary_lpa: null
+      max_posted_days: 3
+      min_rating: null
+      require_easy_apply: true
+      skip_walkin: true
+
+    # Honest split: 2.6 years total, 6 months specifically in AI/Python.
+    # Recruiters cross-check these against the resume, so they must match it.
+    answers:
+      total experience: "2.6"
+      relevant experience: "0.6"
+      experience in ai: "0.6"
+      experience in artificial intelligence: "0.6"
+      experience in machine learning: "0.6"
+      experience in python: "0.6"
+      experience in llm: "0.6"
+      experience in generative ai: "0.6"
+      experience in nlp: "0.6"
+      experience in langchain: "0.6"
+      experience in fastapi: "0.6"
+      experience in tensorflow: "0.6"
+      experience in pytorch: "0.6"
+      experience in data science: "0.6"
+      current ctc: "4"
+      expected ctc: "7"
+      notice period: "0 days"
+      last working day: "30/04/2026"
+      reason for job change: "Transitioning fully into AI/Python engineering after building AI features on top of my full-stack work."
