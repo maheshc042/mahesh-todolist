@@ -168,24 +168,20 @@ class Repository:
             """
             SELECT a.job_id
               FROM applications a
-             WHERE a.profile = $1
-               AND a.account = $3
-               AND a.status <> 'failed'
-               AND a.created_at > now() - ($2 || ' days')::interval
+             WHERE a.status <> 'failed'
+               AND a.created_at > now() - ($1 || ' days')::interval
                AND NOT (
                      a.status = 'needs_review'
                  AND NOT EXISTS (
-                         SELECT 1
-                           FROM question_review q
-                          WHERE q.profile = a.profile
-                            AND q.job_id = a.job_id
-                            AND q.resolved = FALSE
-                     )
-               )
+                          SELECT 1
+                            FROM question_review q
+                           WHERE q.profile = a.profile
+                             AND q.job_id = a.job_id
+                             AND q.resolved = FALSE
+                      )
+                  )
             """,
-            profile,
             str(window_days),
-            account,
         )
         return {row["job_id"] for row in rows}
 

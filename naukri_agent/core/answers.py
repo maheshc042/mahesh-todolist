@@ -428,6 +428,15 @@ class AnswerEngine:
             if exact_single:
                 return ResolvedAnswer(exact_single, pattern, "option-match")
 
+            # Yes/No fallback for experience questions where recruiter rendered Yes/No options instead of numbers
+            has_yes = any(self._polarity(_normalise(opt)) is True for opt in options)
+            has_no = any(self._polarity(_normalise(opt)) is False for opt in options)
+            if has_yes and has_no:
+                target_polarity = (value > 0)
+                for option in options:
+                    if self._polarity(_normalise(option)) == target_polarity:
+                        return ResolvedAnswer(option, pattern, "option-match")
+
         if self.strict:
             return None
         return ResolvedAnswer(options[0], pattern, "option-match")

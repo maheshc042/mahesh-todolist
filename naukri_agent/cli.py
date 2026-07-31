@@ -135,12 +135,18 @@ def run(
     dry_run: bool = typer.Option(
         False, "--dry-run", help="Do everything except submitting an application"
     ),
+    headed: Optional[bool] = typer.Option(
+        None, "--headed/--headless", help="Override headless mode in browser"
+    ),
     config_path: Optional[Path] = typer.Option(None, "--config", help="Path to config.yaml"),
 ) -> None:
     """Apply to jobs once and exit."""
 
     async def _main() -> None:
         settings, config = _bootstrap(config_path)
+        if headed is not None:
+            settings.headless = not headed
+            config.browser.headless = not headed
         targets = _resolve_accounts(account, all_accounts, settings)
         failures = 0
         try:

@@ -1,0 +1,38 @@
+name: Naukri Auto-Apply Agent
+
+on:
+  schedule:
+    # 04:00 UTC = 09:30 AM IST (Monday to Friday)
+    - cron: '0 4 * * 1-5'
+  workflow_dispatch:
+
+jobs:
+  run-agent:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install Dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          playwright install --with-deps chromium
+
+      - name: Run Naukri Agent
+        env:
+          NAUKRI_EMAIL: ${{ secrets.NAUKRI_EMAIL }}
+          NAUKRI_PASSWORD: ${{ secrets.NAUKRI_PASSWORD }}
+          NAUKRI_EMAIL_2: ${{ secrets.NAUKRI_EMAIL_2 }}
+          NAUKRI_PASSWORD_2: ${{ secrets.NAUKRI_PASSWORD_2 }}
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          HEADLESS: "true"
+        run: |
+          python -m naukri_agent run --all-accounts

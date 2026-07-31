@@ -448,16 +448,11 @@ class FilterRules(_Model):
         """
         Ruleset for Naukri's recommended feed.
 
-        Naukri already matched these postings against the profile, headline and
-        preferences, so inclusion keyword lists and the freshness cap only
-        discard good jobs there. Every blocklist and the experience sanity check
-        are kept — those encode "I do not want this", which still holds.
+        Enforces title matching, freshness caps, experience bounds, and blocklists.
         """
         return self.model_copy(
             update={
-                "title_must_include_any": [],
                 "description_must_include_any": [],
-                "max_posted_days": None,
                 "min_rating": None,
             }
         )
