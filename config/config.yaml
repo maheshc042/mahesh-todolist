@@ -113,19 +113,6 @@ answers:
   experience in testing: "2"
   experience in software testing: "2"
 
-experience:
-  total_years: 2.6
-  default_years: 2.6
-  multi_skill_strategy: max
-  skills:
-    html: 2.6
-    css: 2.6
-    javascript: 2.6
-    js: 2.6
-    react: 2.6
-    node: 2.6
-    typescript: 2.6
-    full stack: 2.6
   # AI / Python is the newer track: 6 months hands-on.
   experience in ai: "1"
   experience in artificial intelligence: "1"
@@ -172,7 +159,9 @@ experience:
   hybrid mode: "Yes"
   face to face interview: "Yes"
   ready to relocate for a face to face interview: "Yes"
-  need specifal accomodation for interview: "no"
+  # Both spellings: recruiters type this one wrong at least as often as not.
+  need special accommodation for interview: "No"
+  need specifal accomodation for interview: "No"
 
   # Reason for Change
   reason for job change: "Looking for better technical growth, challenging engineering problems, and career advancement."
@@ -184,7 +173,58 @@ experience:
   highest qualification: "B.Tech"
   graduation year: "2023"
   any offer in hand: "No"
-  "^yes/no$": "Yes"
+  # Regex patterns need the `re:` prefix, otherwise this is matched as literal
+  # text and "^yes/no$" degrades into "any question containing yes and no".
+  "re:^yes\\s*/\\s*no\\??$": "Yes"
+
+# ---------------------------------------------------------------------------
+# Skill -> years map. This answers the open-ended "how many years of X?" family
+# that no finite answer table can cover: the engine detects the intent, sees
+# which of these skills the question names, and combines them with
+# `multi_skill_strategy` ("HTML, CSS, JavaScript" -> max = the stack as a whole).
+# Anything not listed falls back to `default_years`.
+# ---------------------------------------------------------------------------
+experience:
+  total_years: 2.6
+  default_years: 2.6
+  multi_skill_strategy: max
+  skills:
+    html: 2.6
+    css: 2.6
+    javascript: 2.6
+    js: 2.6
+    react: 2.6
+    node: 2.6
+    typescript: 2.6
+    full stack: 2.6
+    # AI / Python is the newer track: 6 months hands-on. Keep these honest —
+    # recruiters cross-check them against the resume.
+    ai: 0.6
+    artificial intelligence: 0.6
+    machine learning: 0.6
+    python: 0.6
+    llm: 0.6
+    generative ai: 0.6
+    nlp: 0.6
+    langchain: 0.6
+    fastapi: 0.6
+    chatbot: 0.6
+
+# ---------------------------------------------------------------------------
+# Daily "touch the profile" pass. Naukri's recruiter search sorts candidates by
+# profile-last-updated, so a stale profile is invisible past page one. This is
+# quota-free and usually generates more inbound contact than applying does.
+# `min_hours_between` is enforced against the profile_updates table, so several
+# runs (or a container restart) still produce exactly one edit per day —
+# repeated edits in one day is what Naukri's abuse heuristics look for.
+# ---------------------------------------------------------------------------
+profile_refresh:
+  enabled: true
+  # First success wins. `skills` is deliberately not listed: the tag editor can
+  # drop a skill chip on a mis-timed keystroke.
+  strategies: ["headline"]
+  min_hours_between: 20
+  verify: true
 
 # ---------------------------------------------------------------------------
 # Profiles. One per account.

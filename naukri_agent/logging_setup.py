@@ -1,14 +1,28 @@
 """
 Structured logging.
 
-Design decision: structlog with a dual sink.
-- stdout in a colourised, human readable format (or JSON when LOG_JSON=1 so
-  Docker/Loki/Datadog can parse it).
-- a rotating file under `logs/` because when a run fails at 03:00 the console
-  output is already gone.
+Every module in the agent does `log = get_logger(__name__)` and then emits
+key/value events (`log.info("apply.success", job_id=...)`) rather than formatted
+sentences. That is a deliberate choice:
 
-Every log line carries `run_id`, `profile` and `job_id` via contextvars, so a
-single grep reconstructs the exact history of one application attempt.
+- A run produces hundreds of events across six subsystems. Key/value events are
+  greppable (`grep apply.no_confirmation`) and machine-parsable, so the same
+  logs drive both debugging and any future dashboard.
+- `bind_context()` uses structlog's contextvars, so `run_id`, `account`,
+  `profile` and `job_id` are attached to EVERY subsequent event automatically.
+  Without it each call site would have to re-pass them and would forget.
+- structlog is routed THROUGH stdlib logging (`ProcessorFormatter`) instead of
+  printing directly. That is what makes Playwright's, asyncpg's and APScheduler's
+  own log records come out in the same shape as ours, and it gives the rotating
+  file handler for free.
+- Two renderers: a human console renderer for interactive/CLI use, and JSON for
+  containers (`LOG_JSON=true`), where the log driver ships lines to a collector.
+- A rotating file handler is added when a log directory is writable, so a crashed
+  scheduled run leaves evidence even if the container's stdout was lost. Failing
+  to open that file is never fatal.
+
+`setup_logging()` is idempotent: the CLI calls it once per process, but tests and
+ad-hoc imports can call `get_logger()` with no setup at all.
 """
 
 from __future__ import annotations
@@ -21,21 +35,22 @@ from typing import Any
 
 import structlog
 
-_CONFIGURED = False
+_configured = False
+
+# Chatty third-party loggers. asyncio's debug output and httpx's per-request
+# INFO line would otherwise dominate a run's logs.
+_NOISY_LOGGERS = (
+    "asyncio",
+    "httpx",
+    "httpcore",
+    "hpack",
+    "apscheduler.executors.default",
+    "apscheduler.scheduler",
+)
 
 
-def configure_logging(
-    level: str = "INFO",
-    json_output: bool = False,
-    log_dir: Path | None = None,
-) -> None:
-    global _CONFIGURED
-    if _CONFIGURED:
-        return
-
-    numeric_level = getattr(logging, level.upper(), logging.INFO)
-
-    shared_processors: list[Any] = [
+def _shared_processors() -> list[Any]:
+    return [
         structlog.contextvars.merge_contextvars,
         structlog.stdlib.add_log_level,
         structlog.stdlib.add_logger_name,
@@ -44,9 +59,40 @@ def configure_logging(
         structlog.processors.UnicodeDecoder(),
     ]
 
+
+def setup_logging(
+    level: str = "INFO",
+    json_logs: bool = False,
+    log_dir: Path | str | None = None,
+    *,
+    force: bool = False,
+) -> None:
+    """Configure structlog + stdlib logging once per process."""
+    global _configured
+    if _configured and not force:
+        return
+
+    numeric_level = getattr(logging, str(level).upper(), logging.INFO)
+    shared = _shared_processors()
+
+    if json_logs:
+        # format_exc_info turns exc_info into a string field; ConsoleRenderer
+        # does its own (prettier) traceback handling, so it is JSON-only.
+        renderer: Any = structlog.processors.JSONRenderer()
+        final: list[Any] = [
+            structlog.stdlib.ProcessorFormatter.remove_processors_meta,
+            structlog.processors.format_exc_info,
+            renderer,
+        ]
+    else:
+        renderer = structlog.dev.ConsoleRenderer(colors=sys.stderr.isatty())
+        final = [structlog.stdlib.ProcessorFormatter.remove_processors_meta, renderer]
+
     structlog.configure(
         processors=[
-            *shared_processors,
+            *shared,
+            # Hands the event dict to the stdlib formatter below instead of
+            # rendering here, so foreign log records go through the same chain.
             structlog.stdlib.ProcessorFormatter.wrap_for_formatter,
         ],
         logger_factory=structlog.stdlib.LoggerFactory(),
@@ -54,57 +100,58 @@ def configure_logging(
         cache_logger_on_first_use=True,
     )
 
-    console_renderer: Any = (
-        structlog.processors.JSONRenderer()
-        if json_output
-        else structlog.dev.ConsoleRenderer(colors=sys.stdout.isatty())
+    formatter = structlog.stdlib.ProcessorFormatter(
+        processors=final,
+        foreign_pre_chain=shared,
     )
 
     root = logging.getLogger()
-    root.handlers.clear()
+    for handler in list(root.handlers):
+        root.removeHandler(handler)
+
+    stream_handler = logging.StreamHandler(sys.stderr)
+    stream_handler.setFormatter(formatter)
+    root.addHandler(stream_handler)
     root.setLevel(numeric_level)
 
-    stream_handler = logging.StreamHandler(sys.stdout)
-    stream_handler.setFormatter(
-        structlog.stdlib.ProcessorFormatter(
-            foreign_pre_chain=shared_processors,
-            processors=[structlog.stdlib.ProcessorFormatter.remove_processors_meta, console_renderer],
-        )
-    )
-    root.addHandler(stream_handler)
-
     if log_dir:
-        log_dir.mkdir(parents=True, exist_ok=True)
-        file_handler = logging.handlers.RotatingFileHandler(
-            log_dir / "naukri-agent.log",
-            maxBytes=10 * 1024 * 1024,
-            backupCount=7,
-            encoding="utf-8",
-        )
-        file_handler.setFormatter(
-            structlog.stdlib.ProcessorFormatter(
-                foreign_pre_chain=shared_processors,
-                processors=[
-                    structlog.stdlib.ProcessorFormatter.remove_processors_meta,
-                    structlog.processors.JSONRenderer(),
-                ],
+        try:
+            directory = Path(log_dir)
+            directory.mkdir(parents=True, exist_ok=True)
+            file_handler = logging.handlers.RotatingFileHandler(
+                directory / "agent.log",
+                maxBytes=10 * 1024 * 1024,
+                backupCount=5,
+                encoding="utf-8",
             )
-        )
-        root.addHandler(file_handler)
+            # The file is for post-mortems, so never colourise it.
+            file_handler.setFormatter(
+                structlog.stdlib.ProcessorFormatter(
+                    processors=[
+                        structlog.stdlib.ProcessorFormatter.remove_processors_meta,
+                        structlog.processors.format_exc_info,
+                        structlog.processors.JSONRenderer(),
+                    ],
+                    foreign_pre_chain=shared,
+                )
+            )
+            root.addHandler(file_handler)
+        except OSError as exc:  # read-only mount, missing volume: not fatal
+            root.warning("could not open log file in %s: %s", log_dir, exc)
 
-    # Playwright and apscheduler are chatty at DEBUG; keep them at WARNING.
-    for noisy in ("asyncio", "apscheduler.executors.default", "httpx", "httpcore"):
-        logging.getLogger(noisy).setLevel(logging.WARNING)
+    for name in _NOISY_LOGGERS:
+        logging.getLogger(name).setLevel(max(numeric_level, logging.WARNING))
 
-    _CONFIGURED = True
+    _configured = True
 
 
-def get_logger(name: str) -> structlog.stdlib.BoundLogger:
+def get_logger(name: str = "naukri_agent") -> Any:
     return structlog.get_logger(name)
 
 
-def bind_context(**kwargs: Any) -> None:
-    structlog.contextvars.bind_contextvars(**kwargs)
+def bind_context(**values: Any) -> None:
+    """Attach key/values to every event emitted later in this task/thread."""
+    structlog.contextvars.bind_contextvars(**values)
 
 
 def unbind_context(*keys: str) -> None:

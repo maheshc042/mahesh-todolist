@@ -1,8 +1,8 @@
-"""Allows `python -m naukri_agent ...`."""
+"""`python -m naukri_agent ...` — the container's entrypoint."""
 
-import sys
+from __future__ import annotations
 
 from .cli import main
 
 if __name__ == "__main__":
-    sys.exit(main())
+    main()

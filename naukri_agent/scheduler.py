@@ -1,132 +1,192 @@
 """
-Scheduler (daemon mode).
+Long-lived scheduler (the container's default command).
 
-Design decisions:
+Design decisions
+----------------
 
-- **APScheduler AsyncIOScheduler in-process.** The agent is already an asyncio
-  program; an in-process cron avoids a second runtime (no system cron, no
-  supervisor) and keeps `docker run` as the entire deployment story.
-- **`max_instances=1` + `coalesce=True`.** A run can legitimately take 90
-  minutes. Without these, a long run overlapping the next trigger would open a
-  second browser on the same Naukri account — a guaranteed way to get flagged.
-  Coalescing also means a container that was asleep does not fire 5 backlogged
-  runs at once.
-- **Randomised jitter.** Firing at exactly 09:30:00 every weekday is a
-  fingerprint; `jitter_seconds` spreads the start.
-- **Graceful SIGTERM/SIGINT.** Docker stop must let an in-flight run finish its
-  DB write instead of leaving a `running` row forever.
+- **One cron job per account, never one job for both.** Two Naukri logins from
+  the same IP inside the same window is the pattern most likely to trigger the
+  "unusual activity" challenge, so `schedule.cron_by_account` staggers them and
+  this module registers them as independent triggers.
+- **A process-wide lock serialises runs anyway.** Even if two crons overlap (a
+  long run, a misfire catch-up), only one browser session exists at a time:
+  Chromium is memory hungry and concurrent applies make the "already applied"
+  check racy.
+- **`max_instances=1` + `coalesce=True` + `misfire_grace_time`.** If the machine
+  was asleep or a run overran, APScheduler must fire once when it wakes up, not
+  five times in a row.
+- **Jitter.** Firing at exactly 10:00:00 every weekday for months is a signature.
+  `schedule.jitter_seconds` spreads the real start over a window.
+- **A crashed run never kills the daemon.** Each tick catches everything, logs it
+  and waits for the next trigger; the notifier has already told the user.
+- **SIGTERM/SIGINT shut down cleanly** so `docker stop` does not leak a Chromium
+  process or a half-written `runs` row.
 """
 
 from __future__ import annotations
 
 import asyncio
 import signal
+from contextlib import suppress
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 
-from .config import AgentConfig, Settings, load_config
+from .config import AgentConfig, ConfigError, Settings
 from .core.orchestrator import Orchestrator
-from .logging_setup import get_logger
+from .db.pool import close_pool
+from .logging_setup import clear_context, get_logger
 
 log = get_logger(__name__)
 
 
 class AgentScheduler:
-    def __init__(self, config: AgentConfig, settings: Settings) -> None:
+    def __init__(
+        self,
+        config: AgentConfig,
+        settings: Settings,
+        *,
+        only_profiles: list[str] | None = None,
+        dry_run: bool = False,
+    ) -> None:
         self.config = config
         self.settings = settings
+        self.only_profiles = only_profiles
+        self.dry_run = dry_run
         self.scheduler = AsyncIOScheduler(timezone=config.schedule.timezone)
-        self._stop = asyncio.Event()
-        # A single global lock, NOT one per account: even on staggered crons a
-        # long run must never overlap another account's run, because two
-        # concurrent Naukri logins from one IP is what triggers the "unusual
-        # activity" challenge.
+        # Serialises every run in this process regardless of trigger overlap.
         self._lock = asyncio.Lock()
+        self._stopping = asyncio.Event()
 
-    async def _job(self, account: str) -> None:
-        if self._lock.locked():
-            # Belt and braces: max_instances already guards a single job.
-            log.warning("scheduler.skipped_overlap", account=account)
+    # --------------------------------------------------------------- targets
+    def target_accounts(self) -> list[str]:
+        """
+        Accounts that are BOTH referenced by an enabled profile AND have
+        credentials. A profile pointing at an unconfigured account is a warning,
+        not a crash: the other account should still run every morning.
+        """
+        configured = {account.key for account in self.settings.configured_accounts()}
+        targets: list[str] = []
+        for key in self.config.accounts_in_use():
+            if key in configured:
+                targets.append(key)
+            else:
+                log.warning("schedule.account_not_configured", account=key)
+        return targets
+
+    # ------------------------------------------------------------------ tick
+    async def _run_account(self, account: str, mode: str) -> None:
+        if self._stopping.is_set():
             return
         async with self._lock:
+            clear_context()
+            log.info("schedule.tick", account=account, mode=mode)
             try:
-                # Reload YAML every run so config edits apply without a restart.
-                config = load_config(self.settings.config_path)
                 orchestrator = Orchestrator(
-                    config, self.settings, mode="scheduled", account=account
+                    self.config,
+                    self.settings,
+                    mode=mode,
+                    only_profiles=self.only_profiles,
+                    dry_run=self.dry_run,
+                    account=account,
                 )
-                await orchestrator.run()
+                stats = await orchestrator.run()
+                log.info(
+                    "schedule.tick_done",
+                    account=account,
+                    applied=stats.applied,
+                    failed=stats.failed,
+                )
+            except ConfigError as exc:
+                log.error("schedule.tick_misconfigured", account=account, error=str(exc))
             except Exception:
-                log.exception("scheduler.run_failed", account=account)
+                # The orchestrator already notified and recorded the run row.
+                log.exception("schedule.tick_crashed", account=account)
+            finally:
+                clear_context()
 
-    def _accounts(self) -> list[str]:
-        """
-        Accounts that have BOTH a profile in config.yaml and credentials in the
-        environment. Anything else is logged and skipped rather than scheduled to
-        fail every morning.
-        """
-        configured = set(self.settings.available_accounts())
-        wanted = self.config.accounts_in_use()
-        usable = [key for key in wanted if key in configured]
-        missing = [key for key in wanted if key not in configured]
-        if missing:
-            log.warning("scheduler.accounts_skipped", accounts=missing)
-        return usable
+    # ----------------------------------------------------------------- start
+    async def start(self) -> None:
+        schedule = self.config.schedule
+        accounts = self.target_accounts()
+        if not accounts:
+            raise ConfigError(
+                "No account is both enabled in config.yaml and configured in .env — "
+                "nothing to schedule."
+            )
+
+        for account in accounts:
+            cron = schedule.cron_for(account)
+            try:
+                trigger = CronTrigger.from_crontab(cron, timezone=schedule.timezone)
+            except ValueError as exc:
+                raise ConfigError(f"schedule cron for '{account}' is invalid ({cron!r}): {exc}") from exc
+            trigger.jitter = schedule.jitter_seconds or None
+            self.scheduler.add_job(
+                self._run_account,
+                trigger=trigger,
+                args=[account, "scheduled"],
+                id=f"apply:{account}",
+                name=f"naukri apply ({account})",
+                max_instances=1,
+                coalesce=True,
+                # A run that misfires by less than an hour (host asleep, previous
+                # run overran) should still happen; older than that, skip it.
+                misfire_grace_time=3_600,
+                replace_existing=True,
+            )
+            log.info(
+                "schedule.registered",
+                account=account,
+                cron=cron,
+                timezone=schedule.timezone,
+                jitter_s=schedule.jitter_seconds,
+            )
+
+        self._install_signal_handlers()
+        self.scheduler.start()
+        for job in self.scheduler.get_jobs():
+            log.info("schedule.next_fire", job=job.id, at=str(job.next_run_time))
+
+        if schedule.run_on_start:
+            log.info("schedule.run_on_start")
+            for account in accounts:
+                await self._run_account(account, "startup")
+
+        try:
+            await self._stopping.wait()
+        finally:
+            await self.shutdown()
 
     def _install_signal_handlers(self) -> None:
         loop = asyncio.get_running_loop()
-        for sig in (signal.SIGTERM, signal.SIGINT):
-            try:
-                loop.add_signal_handler(sig, self._stop.set)
-            except NotImplementedError:  # pragma: no cover - Windows
-                pass
+        for sig in (signal.SIGINT, signal.SIGTERM):
+            with suppress(NotImplementedError, ValueError):
+                loop.add_signal_handler(sig, self._request_stop, sig.name)
 
-    async def start(self) -> None:
-        schedule = self.config.schedule
-        accounts = self._accounts()
-        if not accounts:
-            raise RuntimeError(
-                "No account has both a profile in config.yaml and credentials in the "
-                "environment. Set NAUKRI_EMAIL/NAUKRI_PASSWORD (and _2 for the second "
-                "account) and check the `account:` key on each profile."
-            )
+    def _request_stop(self, signal_name: str) -> None:
+        log.info("schedule.stop_requested", signal=signal_name)
+        self._stopping.set()
 
-        # One cron job per account so the two logins can be hours apart.
-        for account in accounts:
-            cron = schedule.cron_for(account)
-            self.scheduler.add_job(
-                self._job,
-                trigger=CronTrigger.from_crontab(cron, timezone=schedule.timezone),
-                args=[account],
-                id=f"naukri-auto-apply:{account}",
-                name=f"Naukri auto apply ({account})",
-                max_instances=1,
-                coalesce=True,
-                misfire_grace_time=1_800,
-                jitter=schedule.jitter_seconds,
-                replace_existing=True,
-            )
-        self.scheduler.start()
-        self._install_signal_handlers()
+    async def shutdown(self) -> None:
+        if self.scheduler.running:
+            self.scheduler.shutdown(wait=False)
+        # Wait for an in-flight run to finish so the browser and the `runs` row
+        # are closed properly, but do not hang a `docker stop` forever.
+        with suppress(asyncio.TimeoutError):
+            await asyncio.wait_for(self._lock.acquire(), timeout=180)
+            self._lock.release()
+        await close_pool()
+        log.info("schedule.stopped")
 
-        for account in accounts:
-            job = self.scheduler.get_job(f"naukri-auto-apply:{account}")
-            log.info(
-                "scheduler.started",
-                account=account,
-                cron=schedule.cron_for(account),
-                timezone=schedule.timezone,
-                jitter_s=schedule.jitter_seconds,
-                next_run=str(job.next_run_time if job else None),
-            )
 
-        if schedule.run_on_start:
-            log.info("scheduler.run_on_start", accounts=accounts)
-            for account in accounts:
-                await self._job(account)
-
-        await self._stop.wait()
-        log.info("scheduler.stopping")
-        self.scheduler.shutdown(wait=True)
-        log.info("scheduler.stopped")
+async def run_scheduler(
+    config: AgentConfig,
+    settings: Settings,
+    *,
+    only_profiles: list[str] | None = None,
+    dry_run: bool = False,
+) -> None:
+    await AgentScheduler(
+        config, settings, only_profiles=only_profiles, dry_run=dry_run
+    ).start()

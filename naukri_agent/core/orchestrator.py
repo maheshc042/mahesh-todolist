@@ -51,6 +51,7 @@ from ..logging_setup import bind_context, clear_context, get_logger
 from ..naukri import selectors as S
 from ..naukri.apply import ApplyEngine
 from ..naukri.auth import NaukriAuth
+from ..naukri.profile import ProfileRefresher
 from ..naukri.resume import ResumeManager
 from ..naukri.search import JobSearcher
 from ..notify.notifier import build_notifier, format_run_summary
@@ -186,6 +187,10 @@ class Orchestrator:
                 )
                 page = await auth.ensure_logged_in()
 
+                # Ranking first, applying second: the profile touch is quota-free
+                # and worthless if the run later aborts on a cap.
+                await self._refresh_profile(page)
+
                 for profile in profiles:
                     try:
                         await self._run_profile(profile, page, auth, artifacts)
@@ -216,6 +221,85 @@ class Orchestrator:
 
         log.info("run.finished", status=status.value, **self.stats.as_dict()["per_profile"])
         return self.stats
+
+    # ------------------------------------------------------- profile refresh
+    async def _refresh_profile(self, page) -> None:
+        """
+        Move the profile's "last updated" timestamp to today.
+
+        Naukri's recruiter-side search ranks by profile freshness, so this is the
+        cheapest high-value action in the run — and unlike applying it has no
+        daily quota. It is never fatal: losing the ranking boost for one day is
+        not a reason to skip 25 applications.
+
+        The `min_hours_between` gate is evaluated in SQL against
+        `profile_updates`, so several runs a day (or a container restart) still
+        produce exactly one profile edit; repeated edits inside a day is exactly
+        the pattern Naukri's abuse heuristics look for.
+        """
+        assert self.repo is not None
+        settings = self.config.profile_refresh
+        if not settings.enabled:
+            return
+
+        if not await self.repo.profile_refresh_due(self.account_key, settings.min_hours_between):
+            last = await self.repo.last_profile_refresh(self.account_key)
+            log.info(
+                "profile.refresh_not_due",
+                account=self.account_key,
+                hours_ago=round(float((last or {}).get("hours_ago") or 0), 1),
+                min_hours_between=settings.min_hours_between,
+            )
+            return
+
+        if self.dry_run:
+            log.info("profile.refresh_skipped_dry_run", account=self.account_key)
+            return
+
+        refresher = ProfileRefresher(
+            page,
+            self.account_key,
+            strategies=settings.strategies,
+            headline_variants=settings.headline_variants,
+            resume_dir=self.settings.resume_dir,
+            resume_file=self.config.resume_for(self.account_key),
+            verify=settings.verify,
+        )
+        try:
+            result = await refresher.refresh()
+        except FatalAgentError:
+            raise
+        except Exception as exc:
+            log.warning("profile.refresh_crashed", error=str(exc)[:250])
+            await self.repo.record_profile_refresh(
+                self.account_key,
+                self.run_id,
+                ok=False,
+                detail=f"{type(exc).__name__}: {str(exc)[:200]}",
+            )
+            return
+
+        await self.repo.record_profile_refresh(
+            self.account_key,
+            self.run_id,
+            ok=result.ok,
+            strategy=result.strategy,
+            detail=result.detail,
+            headline_before=result.before,
+            headline_after=result.after,
+            last_updated_text=result.last_updated,
+        )
+        await self.repo.log_event(
+            self.run_id,
+            "profile.refresh",
+            level="info" if result.ok else "warning",
+            account=self.account_key,
+            payload=result.as_dict(),
+        )
+        if not result.ok:
+            # Surfaced in the run summary: a silently stale profile is the
+            # failure mode the user would never notice on their own.
+            self.stats.errors.append(f"profile refresh failed: {result.detail[:120]}")
 
     # --------------------------------------------------------------- profile
     async def _run_profile(
