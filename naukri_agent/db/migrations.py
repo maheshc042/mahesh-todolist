@@ -225,6 +225,47 @@ MIGRATIONS: list[tuple[str, str]] = [
         GROUP BY account;
         """,
     ),
+    (
+        "0007_answer_learning",
+        """
+        -- Self-learning answer system: track where KB entries came from, and
+        -- whether review resolutions were auto-resolved by fuzzy matching.
+        ALTER TABLE answer_kb ADD COLUMN IF NOT EXISTS source TEXT NOT NULL DEFAULT 'yaml';
+        ALTER TABLE answer_kb ADD COLUMN IF NOT EXISTS auto_resolved_from INTEGER;
+
+        ALTER TABLE question_review ADD COLUMN IF NOT EXISTS auto_resolved BOOLEAN NOT NULL DEFAULT FALSE;
+        ALTER TABLE question_review ADD COLUMN IF NOT EXISTS resolved_by TEXT;
+
+        -- Index for finding similar unresolved questions during auto-resolve.
+        CREATE INDEX IF NOT EXISTS question_review_unresolved_idx
+            ON question_review(resolved, profile);
+        """,
+    ),
+    (
+        "0008_stats_and_match_score",
+        """
+        -- Weekly application counts view for the stats CLI.
+        CREATE OR REPLACE VIEW weekly_application_counts AS
+        SELECT date_trunc('week', created_at AT TIME ZONE 'Asia/Kolkata')::date AS week_start,
+               account,
+               profile,
+               count(*) FILTER (WHERE status = 'applied') AS applied,
+               count(*) FILTER (WHERE status = 'failed') AS failed,
+               count(*) FILTER (WHERE status = 'skipped') AS skipped,
+               count(*) FILTER (WHERE status = 'needs_review') AS needs_review
+        FROM applications
+        GROUP BY 1, 2, 3;
+
+        -- Match score cache: avoids re-fetching scores for jobs we have seen.
+        CREATE TABLE IF NOT EXISTS match_scores (
+            job_id          TEXT PRIMARY KEY REFERENCES jobs(job_id) ON DELETE CASCADE,
+            keyskills_score INTEGER NOT NULL DEFAULT 0,
+            experience_match BOOLEAN NOT NULL DEFAULT FALSE,
+            overall_score   INTEGER NOT NULL DEFAULT 0,
+            fetched_at      TIMESTAMPTZ NOT NULL DEFAULT now()
+        );
+        """,
+    ),
 ]
 
 

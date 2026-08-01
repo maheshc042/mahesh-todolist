@@ -52,7 +52,8 @@ Design decisions
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from difflib import SequenceMatcher
 
 from ..core.models import ScreeningQuestion
 from ..logging_setup import get_logger
@@ -124,7 +125,8 @@ def _format_years(value: float) -> str:
 class ResolvedAnswer:
     value: str
     matched_pattern: str
-    source: str  # profile | kb | option-match | experience-map
+    source: str  # profile | kb | option-match | experience-map | fuzzy
+    confidence: float = 1.0  # 1.0=exact, 0.9=substring, 0.8=token-set, 0.0-0.79=fuzzy
 
 
 @dataclass(slots=True)
@@ -217,6 +219,10 @@ class AnswerEngine:
         self.experience = experience or ExperienceAnswers()
         # Patterns whose answer was actually used, for hit accounting.
         self.hits: dict[tuple[str, str], int] = {}
+        # Minimum ratio for fuzzy matching (0.0–1.0). Conservative default of
+        # 0.80 means the question must share ≥80% of its character sequences
+        # with a known pattern before we auto-answer it.
+        self.fuzzy_threshold: float = 0.80
 
     # ------------------------------------------------------------- resolution
     def resolve(self, question: ScreeningQuestion) -> ResolvedAnswer | None:
@@ -228,6 +234,13 @@ class AnswerEngine:
         if entry is not None:
             fitted = self._fit_to_options(entry.answer, question, entry.pattern, entry.source)
             if fitted is not None:
+                # Assign confidence based on match stage
+                if entry.regex is not None:
+                    fitted.confidence = 1.0
+                elif entry.pattern in text:
+                    fitted.confidence = 0.9
+                else:
+                    fitted.confidence = 0.8
                 self._record_hit(entry)
                 return fitted
             # The KB knew the answer but it does not map onto the rendered
@@ -243,6 +256,13 @@ class AnswerEngine:
         experience = self._resolve_experience(text, question)
         if experience is not None:
             return experience
+
+        # Stage 4: fuzzy matching — last resort before giving up.
+        # Only fires when strict=False OR when fuzzy_threshold is met, so
+        # legally meaningful answers (CTC, notice period) are never guessed.
+        fuzzy = self._resolve_fuzzy(text, question)
+        if fuzzy is not None:
+            return fuzzy
 
         log.info(
             "answers.unresolved",
@@ -295,6 +315,50 @@ class AnswerEngine:
         """Drain the hit counters so the caller can persist them once per run."""
         hits, self.hits = self.hits, {}
         return hits
+
+    # ------------------------------------------------------- fuzzy matching
+    def _resolve_fuzzy(
+        self, text: str, question: ScreeningQuestion
+    ) -> ResolvedAnswer | None:
+        """
+        Stage 4: fuzzy-match the question against every KB pattern.
+
+        Uses difflib.SequenceMatcher (no external deps) with a conservative
+        0.80 threshold. Only fires for questions the first three stages could
+        not answer, so the performance cost is paid rarely.
+
+        A fuzzy match is logged at INFO level so the operator can decide
+        whether to promote it to a proper KB entry.
+        """
+        best_ratio = 0.0
+        best_entry: _Entry | None = None
+
+        for entry in self.entries:
+            # Skip regex patterns — they are exact by construction.
+            if entry.regex is not None:
+                continue
+            ratio = SequenceMatcher(None, text, entry.pattern, autojunk=False).ratio()
+            if ratio > best_ratio:
+                best_ratio = ratio
+                best_entry = entry
+
+        if best_entry is None or best_ratio < self.fuzzy_threshold:
+            return None
+
+        log.info(
+            "answers.fuzzy_match",
+            question=question.text[:120],
+            matched_pattern=best_entry.pattern[:80],
+            ratio=round(best_ratio, 3),
+            answer=best_entry.answer[:40],
+        )
+        fitted = self._fit_to_options(
+            best_entry.answer, question, best_entry.pattern, "fuzzy"
+        )
+        if fitted is not None:
+            fitted.confidence = round(best_ratio, 3)
+            self._record_hit(best_entry)
+        return fitted
 
     # -------------------------------------------------------- experience map
     def _resolve_experience(

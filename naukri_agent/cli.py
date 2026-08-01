@@ -570,6 +570,293 @@ def version() -> None:
     console.print(f"naukri-agent {__version__}")
 
 
+@app.command()
+def stats(
+    days: int = typer.Option(7, "--days", "-d", help="Look-back window in days (default: 7)."),
+    weekly: bool = typer.Option(False, "--weekly", "-w", help="Show weekly aggregation instead of daily."),
+    profile: Optional[str] = typer.Option(None, "--profile", "-p", help="Filter to a specific profile."),
+) -> None:
+    """
+    Show an analytics dashboard of applications and answer KB health.
+
+    \b
+    Examples:
+      naukri-agent stats                 # 7-day daily breakdown
+      naukri-agent stats --days 30       # 30-day view
+      naukri-agent stats --weekly        # weekly roll-up
+    """
+    setup_logging("INFO", json=False)
+    _run(_stats(days, weekly, profile))
+
+
+async def _stats(days: int, weekly: bool, profile: Optional[str]) -> None:
+    try:
+        settings = get_settings()
+    except ConfigError as exc:
+        console.print(f"[red]Config error:[/red] {exc}")
+        raise typer.Exit(2) from exc
+
+    try:
+        pool = await get_pool()
+        await run_migrations()
+        repo = Repository(pool)
+
+        # ── Headline metrics ────────────────────────────────────────────────
+        sr = await repo.success_rate(days=days)
+        console.print()
+        console.rule(f"[bold cyan]📊  Naukri Agent — {days}-Day Stats[/bold cyan]")
+        console.print()
+
+        headline = Table.grid(padding=(0, 3))
+        headline.add_row(
+            f"[bold green]{sr.get('applied', 0)}[/bold green] applied",
+            f"[bold yellow]{sr.get('needs_review', 0)}[/bold yellow] needs review",
+            f"[bold red]{sr.get('failed', 0)}[/bold red] failed",
+            f"[bold blue]{sr.get('skipped', 0)}[/bold blue] skipped",
+            f"[bold magenta]{sr.get('success_rate_pct', 0):.1f}%[/bold magenta] success rate",
+        )
+        skipped_by_score = sr.get("skipped_by_score", 0)
+        if skipped_by_score:
+            headline.add_row(
+                f"  └─ [dim]{skipped_by_score} skipped by match score pre-filter (saved time)[/dim]",
+                "", "", "", "",
+            )
+        console.print(headline)
+        console.print()
+
+        # ── Daily (or weekly) breakdown ─────────────────────────────────────
+        if weekly:
+            # Pull from the DB view directly
+            rows = await pool.fetch(
+                f"""
+                SELECT week_start, account,
+                       sum(applied) AS applied, sum(failed) AS failed,
+                       sum(skipped) AS skipped, sum(needs_review) AS needs_review
+                  FROM weekly_application_counts
+                 WHERE week_start >= (now() - interval '{days} days')::date
+                   {'AND account = $1' if profile else ''}
+                 GROUP BY week_start, account
+                 ORDER BY week_start DESC, account
+                """,
+                *([profile] if profile else []),
+            )
+            col_label = "Week"
+        else:
+            rows = await repo.daily_stats(days=days)
+            if profile:
+                rows = [r for r in rows if r.get("account", "").lower() == profile.lower()]
+            col_label = "Day"
+
+        if rows:
+            tbl = Table(
+                title=f"{'Weekly' if weekly else 'Daily'} Breakdown",
+                show_lines=False,
+                header_style="bold",
+            )
+            tbl.add_column(col_label, style="dim")
+            tbl.add_column("Account")
+            tbl.add_column("Applied", justify="right", style="green")
+            tbl.add_column("Failed", justify="right", style="red")
+            tbl.add_column("Skipped", justify="right", style="blue")
+            tbl.add_column("Needs Review", justify="right", style="yellow")
+
+            for r in rows:
+                tbl.add_row(
+                    str(r.get("day") or r.get("week_start", "")),
+                    r.get("account", ""),
+                    str(r.get("applied", 0)),
+                    str(r.get("failed", 0)),
+                    str(r.get("skipped", 0)),
+                    str(r.get("needs_review", 0)),
+                )
+            console.print(tbl)
+        else:
+            console.print("[dim]No application data in this window.[/dim]")
+
+        console.print()
+
+        # ── Answer KB coverage ──────────────────────────────────────────────
+        cov = await repo.answer_coverage()
+        cov_tbl = Table(title="Answer KB Coverage", show_header=False, box=None)
+        cov_tbl.add_column("Metric", style="bold")
+        cov_tbl.add_column("Value")
+        cov_tbl.add_row("Questions seen", str(cov.get("total_questions", 0)))
+        cov_tbl.add_row(
+            "Resolved",
+            f"[green]{cov.get('resolved', 0)}[/green]  "
+            f"({cov.get('coverage_pct', 0):.1f}% coverage)",
+        )
+        cov_tbl.add_row(
+            "Auto-resolved by fuzzy matching",
+            f"[cyan]{cov.get('auto_resolved', 0)}[/cyan]",
+        )
+        cov_tbl.add_row("Pending (action required)", f"[yellow]{cov.get('pending', 0)}[/yellow]")
+        cov_tbl.add_row("KB entries total", str(cov.get("kb_entries", 0)))
+        cov_tbl.add_row(
+            "Zero-hit entries (dead weight)",
+            f"[dim]{cov.get('zero_hit_kb_entries', 0)}[/dim]  "
+            f"(run [bold]learn --unused[/bold] to list them)",
+        )
+        console.print(cov_tbl)
+        console.print()
+
+        # ── Top unanswered questions ─────────────────────────────────────────
+        unanswered = await repo.top_unanswered(limit=8)
+        if unanswered:
+            ua_tbl = Table(
+                title="⚠  Top Unanswered Questions (run 'resolve <id> \"answer\"')",
+                show_lines=True,
+                header_style="bold yellow",
+            )
+            ua_tbl.add_column("ID", justify="right", style="dim", width=5)
+            ua_tbl.add_column("Profile")
+            ua_tbl.add_column("Seen", justify="right")
+            ua_tbl.add_column("Question")
+            ua_tbl.add_column("Kind", style="dim")
+            for row in unanswered:
+                ua_tbl.add_row(
+                    str(row.get("id", "")),
+                    row.get("profile", ""),
+                    str(row.get("times_seen", 1)),
+                    (row.get("question") or "")[:80],
+                    row.get("question_kind", ""),
+                )
+            console.print(ua_tbl)
+        else:
+            console.print("[green]✓  No unanswered questions! KB coverage is complete.[/green]")
+
+        console.print()
+        await close_pool()
+
+    except Exception as exc:
+        console.print(f"[red]stats failed:[/red] {exc}")
+        raise typer.Exit(1) from exc
+
+
+@app.command()
+def learn(
+    unused: bool = typer.Option(False, "--unused", help="Show KB entries with zero hits (dead weight)."),
+    fuzzy: bool = typer.Option(False, "--fuzzy", help="Show auto-resolved answers for human verification."),
+    profile: Optional[str] = typer.Option(None, "--profile", "-p", help="Filter to a specific profile."),
+    limit: int = typer.Option(30, "--limit", "-n", help="Max rows to display."),
+) -> None:
+    """
+    Inspect the self-learning answer KB: hit rates, auto-resolved answers, dead weight.
+
+    \b
+    Examples:
+      naukri-agent learn                 # All KB entries by hit count
+      naukri-agent learn --unused        # Entries with 0 hits (safe to remove)
+      naukri-agent learn --fuzzy         # Auto-resolved answers to verify
+    """
+    setup_logging("INFO", json=False)
+    _run(_learn(unused, fuzzy, profile, limit))
+
+
+async def _learn(
+    unused: bool, fuzzy: bool, profile: Optional[str], limit: int
+) -> None:
+    try:
+        await get_pool()
+        await run_migrations()
+        repo = Repository(await get_pool())
+
+        # ── Coverage summary ─────────────────────────────────────────────────
+        cov = await repo.answer_coverage()
+        console.print()
+        console.rule("[bold cyan]🧠  Answer Knowledge Base — Health Report[/bold cyan]")
+        console.print(
+            f"\n  [green]{cov['resolved']}[/green] resolved  "
+            f"[yellow]{cov['pending']}[/yellow] pending  "
+            f"[cyan]{cov['auto_resolved']}[/cyan] auto-resolved by fuzzy  "
+            f"[bold]{cov['coverage_pct']:.1f}%[/bold] coverage\n"
+        )
+
+        # ── KB hit report ────────────────────────────────────────────────────
+        entries = await repo.answer_hit_report(profile=profile, limit=limit)
+
+        if unused:
+            entries = [e for e in entries if (e.get("hits") or 0) == 0]
+            title = f"🗑  Zero-Hit KB Entries (safe to remove from config.yaml)"
+        elif fuzzy:
+            # Show auto-resolved entries from question_review
+            rows = await (await get_pool()).fetch(
+                """
+                SELECT id, profile, question, answer, resolved_by, times_seen, updated_at
+                  FROM question_review
+                 WHERE auto_resolved = TRUE
+                   AND ($1::text IS NULL OR profile = $1)
+                 ORDER BY updated_at DESC
+                 LIMIT $2
+                """,
+                profile, limit,
+            )
+            console.print(f"[bold]Auto-resolved questions[/bold] (verify these answers are correct):\n")
+            if rows:
+                tbl = Table(show_lines=True, header_style="bold cyan")
+                tbl.add_column("ID", width=5)
+                tbl.add_column("Profile")
+                tbl.add_column("Method", style="dim")
+                tbl.add_column("Seen", justify="right")
+                tbl.add_column("Question")
+                tbl.add_column("Answer", style="green")
+                for r in rows:
+                    tbl.add_row(
+                        str(r["id"]),
+                        r.get("profile", ""),
+                        r.get("resolved_by", ""),
+                        str(r.get("times_seen", 1)),
+                        (r.get("question") or "")[:70],
+                        (r.get("answer") or "")[:30],
+                    )
+                console.print(tbl)
+                console.print(
+                    "\n[dim]To correct a wrong auto-answer: "
+                    "naukri-agent resolve <id> \"correct answer\"[/dim]\n"
+                )
+            else:
+                console.print("[dim]No auto-resolved questions yet.[/dim]")
+            await close_pool()
+            return
+        else:
+            title = f"📚  KB Entries by Hit Count (top {limit})"
+
+        if entries:
+            tbl = Table(title=title, show_lines=False, header_style="bold")
+            tbl.add_column("Hits", justify="right", style="bold")
+            tbl.add_column("Priority", justify="right", style="dim")
+            tbl.add_column("Source", style="dim")
+            tbl.add_column("Pattern")
+            tbl.add_column("Answer", style="green")
+
+            for e in entries:
+                hits = e.get("hits") or 0
+                hit_style = "green" if hits > 5 else ("yellow" if hits > 0 else "red dim")
+                tbl.add_row(
+                    f"[{hit_style}]{hits}[/{hit_style}]",
+                    str(e.get("priority", "")),
+                    e.get("source", "yaml"),
+                    (e.get("pattern") or "")[:60],
+                    (e.get("answer") or "")[:35],
+                )
+            console.print(tbl)
+
+            if unused:
+                console.print(
+                    "\n[dim]These patterns were never matched. "
+                    "Remove them from config.yaml answers: to keep the KB lean.[/dim]\n"
+                )
+        else:
+            console.print("[dim]No matching KB entries.[/dim]")
+
+        await close_pool()
+
+    except Exception as exc:
+        console.print(f"[red]learn failed:[/red] {exc}")
+        raise typer.Exit(1) from exc
+
+
+
 def main() -> None:  # console_scripts / python -m entrypoint
     app()
 

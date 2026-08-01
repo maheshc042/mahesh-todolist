@@ -246,6 +246,26 @@ profile_refresh:
   verify: true
 
 # ---------------------------------------------------------------------------
+# Match Score API pre-filter.
+#
+# Calls Naukri's internal matchscore API (no browser required) before
+# navigating to each job page. Jobs with keyskills_score == 0 are
+# irrelevant — skip them and save ~4 seconds per job.
+#
+# Fail-open: if the API is down, times out, or returns an error, the job
+# is NOT skipped — it falls through to the normal Playwright apply flow.
+# This means the API can never block applications.
+#
+# To disable entirely: set enabled: false
+# ---------------------------------------------------------------------------
+match_score_prefilter:
+  enabled: true
+  min_keyskills_score: 1        # 0 = no keyword match at all, skip; 1+ = some overlap, apply
+  request_timeout_s: 5.0
+  max_concurrent: 3             # parallel score fetches (stay under Naukri rate limit)
+  fail_open: true               # on any API error, apply anyway
+
+# ---------------------------------------------------------------------------
 # Profiles. One per account.
 # ---------------------------------------------------------------------------
 profiles:

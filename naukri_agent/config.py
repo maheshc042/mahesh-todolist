@@ -388,6 +388,24 @@ class ProfileRefreshConfig(_Model):
         return cleaned
 
 
+class MatchScoreConfig(_Model):
+    """Use Naukri's internal matchscore API as a fast pre-filter.
+
+    The API returns a skill-match score (0–100) without loading the job page.
+    Jobs scoring below `min_keyskills_score` are skipped before browser
+    navigation, saving ~4 seconds per job.
+
+    Fail-open by default: if the API is down or returns an error, the job
+    proceeds to the normal Playwright flow rather than being skipped.
+    """
+
+    enabled: bool = True
+    min_keyskills_score: int = Field(default=1, ge=0, le=100)
+    request_timeout_s: float = Field(default=5.0, ge=1, le=30)
+    max_concurrent: int = Field(default=3, ge=1, le=10)
+    fail_open: bool = True
+
+
 class SearchSpec(_Model):
     keyword: str
     locations: list[str] = Field(default_factory=list)
@@ -549,6 +567,7 @@ class AgentConfig(_Model):
     schedule: ScheduleConfig = Field(default_factory=ScheduleConfig)
     notifications: NotificationsConfig = Field(default_factory=NotificationsConfig)
     profile_refresh: ProfileRefreshConfig = Field(default_factory=ProfileRefreshConfig)
+    match_score_prefilter: MatchScoreConfig = Field(default_factory=MatchScoreConfig)
     answers: dict[str, str] = Field(default_factory=dict)
     experience: ExperienceConfig = Field(default_factory=ExperienceConfig)
     profiles: list[JobProfile] = Field(default_factory=list)

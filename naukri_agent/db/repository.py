@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import json
 from datetime import datetime, timezone
+from difflib import SequenceMatcher
 from typing import Any
 
 import asyncpg
@@ -361,6 +362,82 @@ class Repository:
         job_id: str | None = None,
         screenshot_path: str | None = None,
     ) -> None:
+        """
+        Queue an unknown question for human review.
+
+        Before inserting a new row, fuzzy-match against already-resolved
+        questions for this profile. If similarity > 0.85, auto-resolve using
+        the existing answer instead of creating a new pending review item —
+        this is the self-learning loop.
+        """
+        q_norm = question.strip()[:1000]
+
+        # --- fuzzy dedup: look for resolved questions with similar text -------
+        resolved_rows = await self.pool.fetch(
+            """
+            SELECT id, question, answer
+              FROM question_review
+             WHERE resolved = TRUE
+               AND answer IS NOT NULL
+               AND profile = $1
+            """,
+            profile,
+        )
+        best_ratio = 0.0
+        best_row: Any = None
+        q_lower = q_norm.lower()
+        for row in resolved_rows:
+            ratio = SequenceMatcher(
+                None, q_lower, (row["question"] or "").lower(), autojunk=False
+            ).ratio()
+            if ratio > best_ratio:
+                best_ratio = ratio
+                best_row = row
+
+        AUTO_RESOLVE_THRESHOLD = 0.85
+        if best_row is not None and best_ratio >= AUTO_RESOLVE_THRESHOLD:
+            # Auto-resolve: this question is close enough to one already answered.
+            await self.pool.execute(
+                """
+                INSERT INTO question_review
+                    (job_id, profile, question, question_kind, options,
+                     screenshot_path, resolved, answer, auto_resolved,
+                     resolved_by, times_seen)
+                VALUES ($1,$2,$3,$4,$5::jsonb,$6,TRUE,$7,TRUE,'auto-fuzzy',1)
+                ON CONFLICT (profile, question) DO UPDATE
+                   SET times_seen = question_review.times_seen + 1,
+                       resolved = TRUE,
+                       answer = EXCLUDED.answer,
+                       auto_resolved = TRUE,
+                       resolved_by = 'auto-fuzzy',
+                       updated_at = now()
+                """,
+                job_id, profile, q_norm, kind,
+                json.dumps(options), screenshot_path, best_row["answer"],
+            )
+            # Also promote to KB so the answer engine uses it immediately.
+            await self.pool.execute(
+                """
+                INSERT INTO answer_kb (profile, pattern, answer, priority, source)
+                VALUES ($1, $2, $3, 20, 'auto-fuzzy')
+                ON CONFLICT (profile, pattern) DO UPDATE
+                   SET answer = EXCLUDED.answer,
+                       priority = LEAST(answer_kb.priority, 20),
+                       source = 'auto-fuzzy',
+                       updated_at = now()
+                """,
+                profile, q_norm.lower(), best_row["answer"],
+            )
+            log.info(
+                "answer_learn.auto_resolved",
+                question=q_norm[:80],
+                matched=best_row["question"][:80],
+                ratio=round(best_ratio, 3),
+                answer=best_row["answer"][:40],
+            )
+            return  # Do NOT create a pending review row
+
+        # --- Normal path: insert as unresolved pending review ----------------
         await self.pool.execute(
             """
             INSERT INTO question_review
@@ -375,7 +452,7 @@ class Repository:
             """,
             job_id,
             profile,
-            question.strip()[:1000],
+            q_norm,
             kind,
             json.dumps(options),
             screenshot_path,
@@ -423,7 +500,7 @@ class Repository:
         row = await self.pool.fetchrow(
             """
             UPDATE question_review
-               SET resolved = TRUE, answer = $2, updated_at = now()
+               SET resolved = TRUE, answer = $2, resolved_by = 'human', updated_at = now()
              WHERE id = $1
             RETURNING profile, question
             """,
@@ -432,18 +509,81 @@ class Repository:
         )
         if not row:
             return False
+        profile = row["profile"]
+        question = row["question"]
+
         # Promote the human answer into the KB with high priority (lower = first).
         await self.pool.execute(
             """
-            INSERT INTO answer_kb (profile, pattern, answer, priority)
-            VALUES ($1, $2, $3, 10)
+            INSERT INTO answer_kb (profile, pattern, answer, priority, source)
+            VALUES ($1, $2, $3, 10, 'human')
             ON CONFLICT (profile, pattern) DO UPDATE
-               SET answer = EXCLUDED.answer, priority = 10, updated_at = now()
+               SET answer = EXCLUDED.answer,
+                   priority = 10,
+                   source = 'human',
+                   updated_at = now()
             """,
-            row["profile"],
-            row["question"].strip().lower(),
+            profile,
+            question.strip().lower(),
             answer,
         )
+
+        # Auto-cascade: find other UNRESOLVED questions for the same profile
+        # that are similar enough to auto-answer with the same value.
+        unresolved = await self.pool.fetch(
+            """
+            SELECT id, question
+              FROM question_review
+             WHERE resolved = FALSE
+               AND profile = $1
+               AND id <> $2
+            """,
+            profile, review_id,
+        )
+        AUTO_CASCADE_THRESHOLD = 0.82
+        cascaded = 0
+        q_lower = question.lower()
+        for pending in unresolved:
+            ratio = SequenceMatcher(
+                None, q_lower, (pending["question"] or "").lower(), autojunk=False
+            ).ratio()
+            if ratio >= AUTO_CASCADE_THRESHOLD:
+                await self.pool.execute(
+                    """
+                    UPDATE question_review
+                       SET resolved = TRUE,
+                           answer = $1,
+                           auto_resolved = TRUE,
+                           resolved_by = 'auto-cascade',
+                           updated_at = now()
+                     WHERE id = $2
+                    """,
+                    answer, pending["id"],
+                )
+                # Also add to KB.
+                await self.pool.execute(
+                    """
+                    INSERT INTO answer_kb (profile, pattern, answer, priority, source)
+                    VALUES ($1, $2, $3, 15, 'auto-cascade')
+                    ON CONFLICT (profile, pattern) DO UPDATE
+                       SET answer = EXCLUDED.answer,
+                           priority = LEAST(answer_kb.priority, 15),
+                           source = 'auto-cascade',
+                           updated_at = now()
+                    """,
+                    profile,
+                    pending["question"].strip().lower(),
+                    answer,
+                )
+                cascaded += 1
+
+        if cascaded:
+            log.info(
+                "answer_learn.cascade_resolved",
+                from_question=question[:80],
+                cascaded=cascaded,
+                answer=answer[:40],
+            )
         return True
 
     # ------------------------------------------------------- profile refresh
@@ -576,3 +716,149 @@ class Repository:
         )
         log.info("db.pruned", events=deleted_events, sessions=deleted_sessions)
         return {"events": deleted_events, "sessions": deleted_sessions}
+
+    # ----------------------------------------------------------- match scores
+    async def cached_match_score(self, job_id: str) -> dict[str, Any] | None:
+        """Return a cached match score if fetched within the last 24 hours."""
+        row = await self.pool.fetchrow(
+            """
+            SELECT keyskills_score, experience_match, overall_score
+              FROM match_scores
+             WHERE job_id = $1
+               AND fetched_at > now() - interval '24 hours'
+            """,
+            job_id,
+        )
+        return dict(row) if row else None
+
+    async def cache_match_score(
+        self,
+        job_id: str,
+        keyskills_score: int,
+        experience_match: bool,
+        overall_score: int,
+    ) -> None:
+        """Persist a match score result to the cache table."""
+        try:
+            await self.pool.execute(
+                """
+                INSERT INTO match_scores
+                    (job_id, keyskills_score, experience_match, overall_score, fetched_at)
+                VALUES ($1, $2, $3, $4, now())
+                ON CONFLICT (job_id) DO UPDATE
+                   SET keyskills_score = EXCLUDED.keyskills_score,
+                       experience_match = EXCLUDED.experience_match,
+                       overall_score = EXCLUDED.overall_score,
+                       fetched_at = now()
+                """,
+                job_id, keyskills_score, experience_match, overall_score,
+            )
+        except Exception as exc:  # pragma: no cover - cache must not raise
+            log.warning("db.match_score_cache_failed", error=str(exc)[:120])
+
+    # ------------------------------------------------------------ analytics
+    async def daily_stats(self, days: int = 7) -> list[dict[str, Any]]:
+        """Per-day, per-account breakdown for the stats CLI."""
+        rows = await self.pool.fetch(
+            """
+            SELECT (created_at AT TIME ZONE 'Asia/Kolkata')::date AS day,
+                   account,
+                   count(*) FILTER (WHERE status = 'applied')      AS applied,
+                   count(*) FILTER (WHERE status = 'failed')       AS failed,
+                   count(*) FILTER (WHERE status = 'skipped')      AS skipped,
+                   count(*) FILTER (WHERE status = 'needs_review') AS needs_review
+              FROM applications
+             WHERE created_at > now() - ($1 || ' days')::interval
+             GROUP BY 1, 2
+             ORDER BY 1 DESC, 2
+            """,
+            str(days),
+        )
+        return [dict(row) for row in rows]
+
+    async def success_rate(self, days: int = 7) -> dict[str, Any]:
+        """Overall success metrics for the requested window."""
+        row = await self.pool.fetchrow(
+            """
+            SELECT
+                count(*) FILTER (WHERE status = 'applied')      AS applied,
+                count(*) FILTER (WHERE status = 'failed')       AS failed,
+                count(*) FILTER (WHERE status = 'needs_review') AS needs_review,
+                count(*) FILTER (WHERE status = 'skipped')      AS skipped,
+                count(*) FILTER (
+                    WHERE status = 'skipped'
+                    AND reason = 'low_match_score'
+                )                                               AS skipped_by_score
+              FROM applications
+             WHERE created_at > now() - ($1 || ' days')::interval
+            """,
+            str(days),
+        )
+        data = dict(row or {})
+        total = (data.get("applied") or 0) + (data.get("failed") or 0) + (data.get("needs_review") or 0)
+        data["success_rate_pct"] = round(100 * (data.get("applied") or 0) / total, 1) if total else 0.0
+        data["days"] = days
+        return data
+
+    async def top_unanswered(self, limit: int = 10) -> list[dict[str, Any]]:
+        """Most-seen unresolved screening questions — your action list."""
+        rows = await self.pool.fetch(
+            """
+            SELECT id, profile, question, question_kind, options, times_seen
+              FROM question_review
+             WHERE resolved = FALSE
+             ORDER BY times_seen DESC, created_at DESC
+             LIMIT $1
+            """,
+            limit,
+        )
+        return [dict(row) for row in rows]
+
+    async def answer_coverage(self) -> dict[str, Any]:
+        """What fraction of screening questions the KB covers, and dead-weight entries."""
+        total_questions = await self.pool.fetchval(
+            "SELECT count(*) FROM question_review"
+        ) or 0
+        resolved = await self.pool.fetchval(
+            "SELECT count(*) FROM question_review WHERE resolved = TRUE"
+        ) or 0
+        pending = await self.pool.fetchval(
+            "SELECT count(*) FROM question_review WHERE resolved = FALSE"
+        ) or 0
+        kb_entries = await self.pool.fetchval(
+            "SELECT count(*) FROM answer_kb"
+        ) or 0
+        zero_hit_entries = await self.pool.fetchval(
+            "SELECT count(*) FROM answer_kb WHERE hits = 0"
+        ) or 0
+        auto_resolved = await self.pool.fetchval(
+            "SELECT count(*) FROM question_review WHERE auto_resolved = TRUE"
+        ) or 0
+        return {
+            "total_questions": total_questions,
+            "resolved": resolved,
+            "pending": pending,
+            "auto_resolved": auto_resolved,
+            "coverage_pct": round(100 * resolved / total_questions, 1) if total_questions else 0.0,
+            "kb_entries": kb_entries,
+            "zero_hit_kb_entries": zero_hit_entries,
+        }
+
+    async def answer_hit_report(
+        self, profile: str | None = None, limit: int = 50
+    ) -> list[dict[str, Any]]:
+        """
+        KB entries sorted by hit count (desc). Entries with zero hits are dead
+        weight — the operator can safely remove them from config.yaml.
+        """
+        rows = await self.pool.fetch(
+            """
+            SELECT pattern, answer, source, hits, priority, updated_at
+              FROM answer_kb
+             WHERE ($1::text IS NULL OR profile = $1 OR profile IS NULL)
+             ORDER BY hits DESC, priority, length(pattern) DESC
+             LIMIT $2
+            """,
+            profile, limit,
+        )
+        return [dict(row) for row in rows]

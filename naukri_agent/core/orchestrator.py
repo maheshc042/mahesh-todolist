@@ -45,12 +45,14 @@ from ..core.models import (
     Job,
     RunStats,
     RunStatus,
+    SkipReason,
 )
 from ..db.repository import Repository
 from ..logging_setup import bind_context, clear_context, get_logger
 from ..naukri import selectors as S
 from ..naukri.apply import ApplyEngine
 from ..naukri.auth import NaukriAuth
+from ..naukri.naukri_api import NaukriApiClient, extract_naukri_token
 from ..naukri.profile import ProfileRefresher
 from ..naukri.resume import ResumeManager
 from ..naukri.search import JobSearcher
@@ -93,6 +95,7 @@ class Orchestrator:
         self.run_id: int | None = None
         self.repo: Repository | None = None
         self.applier: ApplyEngine | None = None
+        self.api_client: NaukriApiClient | None = None
         self.consecutive_failures = 0
         self.applied_today = 0
         self.started_at = time.monotonic()
@@ -191,6 +194,23 @@ class Orchestrator:
                 )
                 page = await auth.ensure_logged_in()
 
+                # Extract session token for the match score API pre-filter.
+                # Best-effort: if extraction fails, the API client stays None
+                # and all jobs go through the normal Playwright flow.
+                ms_cfg = self.config.match_score_prefilter
+                if ms_cfg.enabled:
+                    token = await extract_naukri_token(page)
+                    if token:
+                        self.api_client = NaukriApiClient(
+                            token,
+                            timeout_s=ms_cfg.request_timeout_s,
+                            max_concurrent=ms_cfg.max_concurrent,
+                        )
+                        await self.api_client.__aenter__()
+                        log.info("match_score.api_client_ready")
+                    else:
+                        log.info("match_score.no_token_skipping_api")
+
                 # Ranking first, applying second: the profile touch is quota-free
                 # and worthless if the run later aborts on a cap.
                 await self._refresh_profile(page)
@@ -216,6 +236,9 @@ class Orchestrator:
             if self.applier is not None:
                 self.applier.close()
                 self.applier = None
+            if self.api_client is not None:
+                await self.api_client.__aexit__(None, None, None)
+                self.api_client = None
             if self.stats.failed and status == RunStatus.SUCCESS:
                 status = RunStatus.PARTIAL
             if self.repo is not None and self.run_id is not None:
@@ -305,6 +328,68 @@ class Orchestrator:
             # failure mode the user would never notice on their own.
             self.stats.errors.append(f"profile refresh failed: {result.detail[:120]}")
 
+    # ---------------------------------------------------------- match scoring
+    async def _batch_match_scores(
+        self, jobs: list[Job]
+    ) -> "dict | None":
+        """
+        Fetch match scores for a batch of jobs, using the DB cache first.
+
+        Returns a dict of job_id → MatchScoreResult, or None if the API client
+        is not available. Jobs missing from the result should be treated as
+        passing (fail-open).
+        """
+        from ..naukri.naukri_api import MatchScoreResult as MSR
+
+        ms_cfg = self.config.match_score_prefilter
+        if not ms_cfg.enabled or self.api_client is None or self.repo is None:
+            return None
+
+        scores: dict[str, MSR] = {}
+        to_fetch: list[str] = []
+
+        # Phase 1: check the DB cache (24-hour TTL).
+        for job in jobs:
+            cached = await self.repo.cached_match_score(job.job_id)
+            if cached:
+                scores[job.job_id] = MSR(
+                    job_id=job.job_id,
+                    keyskills_score=cached["keyskills_score"],
+                    experience_match=cached["experience_match"],
+                    overall_score=cached["overall_score"],
+                )
+            else:
+                to_fetch.append(job.job_id)
+
+        # Phase 2: fetch uncached scores from the API.
+        if to_fetch and self.api_client:
+            try:
+                fresh = await self.api_client.batch_match_scores(to_fetch)
+                for job_id, result in fresh.items():
+                    scores[job_id] = result
+                    await self.repo.cache_match_score(
+                        job_id,
+                        result.keyskills_score,
+                        result.experience_match,
+                        result.overall_score,
+                    )
+            except Exception as exc:
+                # Any API-layer failure must never block a run.
+                log.warning(
+                    "match_score.batch_failed",
+                    error=str(exc)[:120],
+                    falling_back="apply anyway",
+                )
+
+        log.info(
+            "match_score.batch_done",
+            total=len(jobs),
+            cached=len(jobs) - len(to_fetch),
+            fetched=len(to_fetch),
+            scored=len(scores),
+        )
+        return scores
+
     # --------------------------------------------------------------- profile
     async def _run_profile(
         self,
@@ -367,6 +452,11 @@ class Orchestrator:
             """Evaluate + apply a batch, respecting every safety valve."""
             nonlocal applied_this_profile
             filters = FilterEngine(rules)
+
+            # Match score pre-filter: fetch scores for ALL jobs in the batch
+            # in parallel before any browser navigation. This is ~4s per skip.
+            scores = await self._batch_match_scores(jobs)
+
             for job in jobs:
                 self._check_global_limits()
                 if remaining() <= 0:
@@ -376,6 +466,32 @@ class Orchestrator:
                         cap=profile.max_applications_per_run,
                     )
                     raise _CapReached
+
+                # Apply match score gate before card-level filtering.
+                if scores is not None and job.job_id in scores:
+                    score = scores[job.job_id]
+                    ms_cfg = self.config.match_score_prefilter
+                    if score.keyskills_score < ms_cfg.min_keyskills_score:
+                        outcome = ApplyOutcome(
+                            status=ApplicationStatus.SKIPPED,
+                            reason=SkipReason.LOW_MATCH_SCORE,
+                            detail=f"keyskills_score={score.keyskills_score}",
+                        )
+                        self.stats.bump(profile.name, "filtered_out")
+                        log.debug(
+                            "job.skipped_low_score",
+                            job_id=job.job_id,
+                            title=job.title[:60],
+                            keyskills=score.keyskills_score,
+                        )
+                        assert self.repo is not None
+                        await self.repo.record_outcome(
+                            job, profile.name, self.run_id, outcome,
+                            account=self.account_key,
+                        )
+                        known.add(job.job_id)
+                        continue
+
                 known.add(job.job_id)
                 outcome = await self._process_job(
                     job, profile, filters, applier, page, auth, artifacts

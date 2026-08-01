@@ -43,6 +43,7 @@ class SkipReason(str, Enum):
     DAILY_CAP = "daily_cap"
     PROFILE_CAP = "profile_cap"
     DRY_RUN = "dry_run"
+    LOW_MATCH_SCORE = "low_match_score"
 
 
 class RunStatus(str, Enum):
