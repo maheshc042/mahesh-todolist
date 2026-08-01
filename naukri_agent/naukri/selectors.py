@@ -27,21 +27,28 @@ APPLIED_JOBS_URL = f"{BASE_URL}/mnjuser/myapply"
 LOGIN_EMAIL_INPUT = [
     "input#usernameField",
     "input[placeholder*='Email' i]",
+    "input[placeholder*='Username' i]",
+    "input[placeholder*='Mobile' i]",
     "input[name='email']",
+    "input[name='username']",
     "input[type='text'][id*='user' i]",
+    "input[type='text']",
 ]
 
 LOGIN_PASSWORD_INPUT = [
     "input#passwordField",
     "input[type='password']",
     "input[placeholder*='password' i]",
+    "input[name='password']",
 ]
 
 LOGIN_SUBMIT = [
     "button[type='submit'].loginButton",
     "button.loginButton",
     "button[type='submit']:has-text('Login')",
+    "button:has-text('Login')",
     "//button[contains(., 'Login')]",
+    "div.form-row button[type='submit']",
 ]
 
 LOGIN_ERROR = [
@@ -254,8 +261,16 @@ APPLY_SUCCESS = [
 ]
 
 APPLY_ERROR_TOAST = [
+    "div:has-text('not accepted')",
+    "div:has-text('incomplete information')",
+    "div:has-text('mandatory questions')",
+    "div:has-text('Please answer all')",
+    "p:has-text('not accepted')",
+    "span:has-text('not accepted')",
     "div.apply-message-error",
     "div[class*='error-toast']",
+    "div[class*='errorMsg']",
+    "p[class*='errorMsg']",
     "div:has-text('Something went wrong')",
 ]
 
@@ -346,8 +361,15 @@ HEADLINE_EDIT_TRIGGER = [
     "div.resumeHeadline span.edit.icon",
     "div.resumeHeadline span[class*='edit']",
     "div[class*='resumeHeadline'] span[class*='edit']",
+    "div.resumeHeadline i",
+    "div.resumeHeadline span.icon",
+    "div.resumeHeadline span.edit",
     "span#resumeHeadline .edit",
-    "//div[contains(., 'Resume headline')]//span[contains(@class,'edit')]",
+    "//div[contains(@class,'resumeHeadline')]//*[contains(@class,'edit') or contains(@class,'icon')]",
+    "div:has-text('Resume headline') span.edit",
+    "div:has-text('Resume headline') i",
+    "section:has-text('Resume headline') span[class*='edit']",
+    "span:has-text('Resume headline') ~ span",
 ]
 # Current headline text as rendered on the profile page (read-only view).
 HEADLINE_TEXT = [

@@ -47,14 +47,30 @@ DEFAULT_UA = (
     "(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
 )
 
+EXTRA_HTTP_HEADERS = {
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8",
+    "Accept-Language": "en-US,en;q=0.9,hi;q=0.8",
+    "Sec-Ch-Ua": '"Google Chrome";v="131", "Chromium";v="131", "Not_A Brand";v="24"',
+    "Sec-Ch-Ua-Mobile": "?0",
+    "Sec-Ch-Ua-Platform": '"Windows"',
+    "Sec-Fetch-Dest": "document",
+    "Sec-Fetch-Mode": "navigate",
+    "Sec-Fetch-Site": "same-origin",
+    "Sec-Fetch-User": "?1",
+    "Upgrade-Insecure-Requests": "1",
+}
+
 # Executed in every page before any site script runs.
 STEALTH_SCRIPT = """
 Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
-Object.defineProperty(navigator, 'languages', { get: () => ['en-IN', 'en'] });
+try {
+  delete Object.getPrototypeOf(navigator).webdriver;
+} catch(e) {}
+Object.defineProperty(navigator, 'languages', { get: () => ['en-IN', 'en-US', 'en'] });
 Object.defineProperty(navigator, 'plugins', { get: () => [1, 2, 3, 4, 5] });
 Object.defineProperty(navigator, 'hardwareConcurrency', { get: () => 8 });
 Object.defineProperty(navigator, 'deviceMemory', { get: () => 8 });
-window.chrome = window.chrome || { runtime: {} };
+window.chrome = window.chrome || { runtime: {}, loadTimes: () => {}, csi: () => {} };
 const originalQuery = window.navigator.permissions.query;
 window.navigator.permissions.query = (parameters) => (
   parameters.name === 'notifications'
@@ -126,6 +142,7 @@ class BrowserManager:
                 "height": self.config.viewport_height,
             },
             user_agent=self.config.user_agent or DEFAULT_UA,
+            extra_http_headers=EXTRA_HTTP_HEADERS,
             locale=self.config.locale,
             timezone_id=self.config.timezone,
             storage_state=storage_state,  # type: ignore[arg-type]

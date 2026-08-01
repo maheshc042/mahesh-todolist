@@ -49,11 +49,10 @@ run:
 # Naukri's recommended feed — the primary (and by default only) job source.
 recommended:
   enabled: true
-  # Only harvest the main feed once — eliminates duplicate multi-tab scanning loops.
-  tabs: ["default"]
-  max_scroll_rounds: 5
-  stall_rounds_before_stop: 2
-  max_jobs: 150
+  tabs: ["default", "all"]
+  max_scroll_rounds: 20
+  stall_rounds_before_stop: 4
+  max_jobs: 200
   follow_show_more: true
 
 schedule:
@@ -229,6 +228,8 @@ experience:
     # recruiters cross-check them against the resume.
     ai: 0.6
     artificial intelligence: 0.6
+    agentic ai: 0.6
+    agentic: 0.6
     machine learning: 0.6
     python: 0.6
     llm: 0.6
@@ -257,7 +258,7 @@ profile_refresh:
   # First success wins. `skills` is deliberately not listed: the tag editor can
   # drop a skill chip on a mis-timed keystroke.
   strategies: ["headline"]
-  min_hours_between: 20
+  min_hours_between: 14
   verify: true
 
 # ---------------------------------------------------------------------------
@@ -296,11 +297,8 @@ profiles:
     use_recommended: true
     max_applications_per_run: 25
     resume_label: "Full Stack Engineer"
-    resume_file: "resumes/Mahesh_Chitakoti_FullStack_Engineer.pdf"
+    resume_file: null
 
-    # Recommended-only. To re-enable the keyword search as a TOP-UP (it only
-    # runs when the feed did not fill max_applications_per_run), move the block
-    # below under `searches:`.
     searches: []
     search_is_fallback_only: true
     # searches:
@@ -350,14 +348,14 @@ profiles:
     use_recommended: true
     max_applications_per_run: 25
     resume_label: "AI / Python Engineer"
-    resume_file: "resumes/Mahesh_Chitakoti_AI_Engineer.pdf"
+    resume_file: null
 
     searches: []
     search_is_fallback_only: true
 
     filters:
       title_must_include_any: [ai, artificial intelligence, machine learning, ml, python, llm, genai, generative ai, nlp, chatbot, prompt, agent, data science, data engineer, python developer, ai engineer, ml engineer, qa, testing, tester, backend, developer, engineer]
-      title_must_exclude_any: [intern, internship, sales, bpo, php, wordpress, .net, dotnet, c++, java developer, java, devops, network, hardware, lead, manager, director, vp, head, principal, architect, staff engineer]
+      title_must_exclude_any: [intern, internship, sales, bpo, php, wordpress, .net, dotnet, dot net, asp.net, c#, c++, java developer, java, devops, network, hardware, lead, manager, director, vp, head, principal, architect, staff engineer]
       description_must_exclude_any: ["bpo", "night shift", "us shift", "commission only", "unpaid", "phd required", "8+ years", "10+ years", "registration fee", "security deposit", ".net developer", "asp.net", "prefers women", "women diversity", "women only", "female only"]
       allowed_locations: []
       blocked_locations: []

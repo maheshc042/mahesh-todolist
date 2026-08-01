@@ -213,6 +213,9 @@ class ProfileRefresher:
     async def _open_profile(self) -> None:
         await self.page.goto(S.PROFILE_URL, wait_until="domcontentloaded", timeout=60_000)
         await dismiss_overlays(self.page)
+        content = (await self.page.content()).lower()
+        if "access denied" in content:
+            raise RuntimeError("Access Denied returned by Naukri CDN — session expired or blocked")
         await human_pause(600, 1_400)
 
     async def _read_last_updated(self) -> str:
@@ -252,8 +255,7 @@ class ProfileRefresher:
     async def _refresh_headline(self) -> tuple[bool, str, str, str] | None:
         trigger = await first_visible(self.page, S.HEADLINE_EDIT_TRIGGER, timeout_ms=8_000)
         if trigger is None:
-            # Not an error: some profile layouts need the section scrolled into
-            # view before the pencil renders. Try once more after scrolling.
+            # Scroll section into view and retry
             section = await first_visible(self.page, S.HEADLINE_SECTION, timeout_ms=4_000)
             if section is not None:
                 try:
@@ -262,7 +264,34 @@ class ProfileRefresher:
                     pass
                 await human_pause(400, 900)
                 trigger = await first_visible(self.page, S.HEADLINE_EDIT_TRIGGER, timeout_ms=5_000)
+
         if trigger is None:
+            # Robust text & XPath fallback for Resume Headline edit pencil
+            try:
+                selectors_xpath = [
+                    "//div[contains(translate(., 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), 'resume headline')]//span[contains(@class,'edit') or contains(@class,'icon')]",
+                    "//section[contains(translate(., 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), 'resume headline')]//span[contains(@class,'edit') or contains(@class,'icon')]",
+                    "//span[contains(translate(., 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), 'resume headline')]/following::span[contains(@class,'edit') or contains(@class,'icon')][1]",
+                    "//div[contains(@class,'resumeHeadline')]//*[contains(@class,'edit') or contains(@class,'icon') or contains(@class,'pencil')]",
+                ]
+                for xp in selectors_xpath:
+                    loc = self.page.locator(xp).first
+                    if await loc.count() and await loc.is_visible():
+                        trigger = loc
+                        break
+            except Exception as exc:
+                log.debug("profile.headline_xpath_failed", error=str(exc)[:150])
+
+        if trigger is None:
+            # Save HTML snapshot for diagnostic debugging if trigger is missing
+            try:
+                from pathlib import Path
+                html_path = Path("scratch/profile_debug.html")
+                html_path.parent.mkdir(parents=True, exist_ok=True)
+                html_path.write_text(await self.page.content(), encoding="utf-8")
+                log.warning("profile.headline_trigger_missing", debug_dump=str(html_path))
+            except Exception:
+                pass
             return None
 
         await trigger.click(timeout=8_000)
@@ -311,35 +340,8 @@ class ProfileRefresher:
 
     # ---------------------------------------------------------------- resume
     async def _refresh_resume(self) -> tuple[bool, str, str, str] | None:
-        """
-        Re-upload the same resume file. Strongest freshness signal Naukri has,
-        but it needs the file on disk, so it is skipped (not failed) when absent.
-        """
-        if not self.resume_file or self.resume_dir is None:
-            return None
-        path = Path(self.resume_file)
-        if not path.is_absolute():
-            path = self.resume_dir / self.resume_file
-        if not path.exists():
-            log.warning("profile.resume_missing", account=self.account, expected=str(path))
-            return None
-
-        file_input = None
-        for selector in S.RESUME_UPLOAD_INPUT:
-            locator = self.page.locator(selector).first
-            if await locator.count():
-                file_input = locator
-                break
-        if file_input is None:
-            return None
-
-        # The real <input type=file> is hidden behind a styled label, so set the
-        # files directly rather than clicking.
-        await file_input.set_input_files(str(path))
-        confirmed = await first_visible(self.page, S.RESUME_SUCCESS, timeout_ms=30_000)
-        if confirmed is None:
-            return False, "resume re-upload was not confirmed", path.name, path.name
-        return True, f"resume re-uploaded ({path.name})", path.name, path.name
+        """Disabled as requested: resume file re-upload is commented out."""
+        return None
 
     # ------------------------------------------------------------- key skills
     async def _refresh_key_skills(self) -> tuple[bool, str, str, str] | None:

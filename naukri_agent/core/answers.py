@@ -474,21 +474,27 @@ class AnswerEngine:
                 if self._polarity(_normalise(option)) == polarity:
                     return ResolvedAnswer(option, pattern, "option-match")
 
-        # 4. numeric answer against numeric buckets ("0-2 years", "3-5 years")
+        # 4. numeric answer against numeric buckets ("0-2 years", "<3 years", "3-5 years", ">6 years")
         number = _NUMBER.search(wanted)
         if number:
             value = float(number.group())
             exact_single: str | None = None
             for option in options:
+                opt_low = option.lower()
                 bounds = [float(v) for v in _NUMBER.findall(option)]
                 if len(bounds) >= 2 and min(bounds) <= value <= max(bounds):
                     return ResolvedAnswer(option, pattern, "option-match")
                 if len(bounds) == 1:
-                    if bounds[0] == value:
+                    target_b = bounds[0]
+                    if target_b == value:
                         exact_single = option
-                    # "5+ years" style open-ended bucket.
-                    elif "+" in option and value >= bounds[0]:
+                    elif ("<" in option or "less than" in opt_low or "under" in opt_low) and value < target_b:
+                        return ResolvedAnswer(option, pattern, "option-match")
+                    elif (">" in option or "+" in option or "more than" in opt_low or "greater than" in opt_low) and value >= target_b:
                         exact_single = exact_single or option
+                elif not bounds:
+                    if ("no experience" in opt_low or "none" in opt_low or "fresher" in opt_low) and value == 0:
+                        return ResolvedAnswer(option, pattern, "option-match")
             if exact_single:
                 return ResolvedAnswer(exact_single, pattern, "option-match")
 

@@ -408,12 +408,12 @@ class Orchestrator:
             searches=len(profile.searches),
         )
 
-        # Resume swap happens once per profile (see naukri/resume.py rationale).
-        resume_mgr = ResumeManager(page, self.settings.resume_dir)
-        if profile.resume_file:
-            ok = await resume_mgr.ensure_resume(profile.resume_file, profile.name)
-            if not ok:
-                self.stats.errors.append(f"{profile.name}: resume swap failed, using existing CV")
+        # Resume swap disabled as requested — user manages resume manually on Naukri
+        # resume_mgr = ResumeManager(page, self.settings.resume_dir)
+        # if profile.resume_file:
+        #     ok = await resume_mgr.ensure_resume(profile.resume_file, profile.name)
+        #     if not ok:
+        #         self.stats.errors.append(f"{profile.name}: resume swap failed, using existing CV")
 
         answers = await self._build_answer_engine(profile)
         searcher = JobSearcher(

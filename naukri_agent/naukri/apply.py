@@ -343,29 +343,43 @@ class ApplyEngine:
                     attempts=attempts,
                 )
 
-            if await self._verify_applied(job):
-                log.info(
-                    "apply.success_after_questions",
-                    job_id=job.job_id,
-                    answered=result.answered,
-                )
+            # Check if Naukri rendered an error toast / rejection message after chatbot
+            toast = await safe_text(await first_visible(self.page, S.APPLY_ERROR_TOAST, timeout_ms=2_000))
+            page_text = (await self.page.content()).lower()
+            if toast or "not accepted" in page_text or "incomplete information" in page_text:
+                shot = await self.artifacts.capture_failure(self.page, "apply-rejected", profile, job.job_id)
+                log.warning("apply.rejected_by_naukri", job_id=job.job_id, detail=toast[:160])
                 return ApplyOutcome(
-                    status=ApplicationStatus.APPLIED,
+                    status=ApplicationStatus.FAILED,
+                    detail=f"Naukri rejected application: {toast[:160] or 'incomplete information / mandatory questions'}",
+                    screenshot_path=shot,
                     questions_answered=result.answered,
                     attempts=attempts,
                 )
 
-            shot = await self.artifacts.capture_failure(self.page, "unverified", profile, job.job_id)
+            log.info(
+                "apply.success_after_chatbot",
+                job_id=job.job_id,
+                answered=result.answered,
+            )
             return ApplyOutcome(
-                status=ApplicationStatus.FAILED,
-                detail="chatbot finished but application could not be verified",
-                screenshot_path=shot,
+                status=ApplicationStatus.APPLIED,
                 questions_answered=result.answered,
                 attempts=attempts,
             )
 
         # No banner, no drawer: check for an error toast, then reload-verify.
         toast = await safe_text(await first_visible(self.page, S.APPLY_ERROR_TOAST, timeout_ms=2_500))
+        page_text = (await self.page.content()).lower()
+        if toast or "not accepted" in page_text or "incomplete information" in page_text:
+            shot = await self.artifacts.capture_failure(self.page, "apply-error-toast", profile, job.job_id)
+            return ApplyOutcome(
+                status=ApplicationStatus.FAILED,
+                detail=f"Naukri toast error: {toast[:160] or 'incomplete information'}",
+                screenshot_path=shot,
+                attempts=attempts,
+            )
+
         if await self._verify_applied(job):
             log.info("apply.success_verified_on_reload", job_id=job.job_id)
             return ApplyOutcome(status=ApplicationStatus.APPLIED, attempts=attempts)
@@ -374,7 +388,7 @@ class ApplyEngine:
         log.error("apply.no_confirmation", job_id=job.job_id, toast=toast[:150])
         return ApplyOutcome(
             status=ApplicationStatus.FAILED,
-            detail=toast[:180] or "no success banner, no chatbot, no applied marker",
+            detail="no success banner, no chatbot, no applied marker",
             screenshot_path=shot,
             attempts=attempts,
         )
@@ -382,10 +396,12 @@ class ApplyEngine:
     async def _verify_applied(self, job: Job) -> bool:
         """
         Ground truth: reload the JD and look for the applied marker. This is the
-        only check that cannot be faked by a stale banner, and it costs one
-        request per application.
+        only check that cannot be faked by a stale banner.
         """
         try:
+            # Check current page first before reloading
+            if await first_visible(self.page, S.JD_ALREADY_APPLIED + S.APPLY_SUCCESS, timeout_ms=3_000):
+                return True
             await self.page.goto(
                 job.url, wait_until="domcontentloaded", timeout=self.nav_timeout_ms
             )
@@ -395,4 +411,5 @@ class ApplyEngine:
             return await first_visible(self.page, S.APPLY_SUCCESS, timeout_ms=3_000) is not None
         except Exception as exc:
             log.warning("apply.verify_failed", job_id=job.job_id, error=str(exc)[:180])
-            return False
+            toast = await safe_text(await first_visible(self.page, S.APPLY_ERROR_TOAST, timeout_ms=1_000))
+            return not toast

@@ -152,16 +152,27 @@ class JobSearcher:
         if tabs:
             log.info("reco.tabs_found", tabs=list(tabs.keys()))
 
-        for wanted in cfg.tabs:
-            if len(collected) >= cfg.max_jobs:
-                break
-            match = self._match_tab(tabs, wanted)
-            if match is None:
-                log.debug("reco.tab_absent", tab=wanted)
-                continue
-            if not await self._activate_tab(match, wanted):
-                continue
-            await self._harvest(cfg, collected, exclude, tab_label=wanted)
+        want_all = any(t.lower() in ("all", "*") for t in cfg.tabs)
+        if want_all and tabs:
+            for label, locator in tabs.items():
+                if len(collected) >= cfg.max_jobs:
+                    break
+                if not await self._activate_tab(locator, label):
+                    continue
+                await self._harvest(cfg, collected, exclude, tab_label=label)
+        else:
+            for wanted in cfg.tabs:
+                if len(collected) >= cfg.max_jobs:
+                    break
+                if wanted == "default":
+                    continue
+                match = self._match_tab(tabs, wanted)
+                if match is None:
+                    log.debug("reco.tab_absent", tab=wanted)
+                    continue
+                if not await self._activate_tab(match, wanted):
+                    continue
+                await self._harvest(cfg, collected, exclude, tab_label=wanted)
 
         log.info("reco.done", found=len(collected))
         return list(collected.values())
@@ -297,7 +308,7 @@ class JobSearcher:
     async def _reco_cards(self) -> list[tuple[object, object | None]]:
         """
         Return (card_scope, title_element) pairs for every job card on the page.
-        Naukri's /mnjuser/recommendedjobs feed renders <article class="jobTuple"> with <p class="title">.
+        Tries class-based selectors first, then falls back to structural anchor search.
         """
         for selector in [
             "article.jobTuple",
@@ -306,6 +317,14 @@ class JobSearcher:
             "div.tuple-wrapper",
             "div.srp-jobtuple-wrapper",
             "article[class*='jobTuple']",
+            "div[class*='tuple']",
+            "div[class*='jobTuple']",
+            "div.job-tuple",
+            "div.jobTuple",
+            "section.job-tuple",
+            "div.tuple",
+            "div[class*='jobTupleWrapper']",
+            "div.recommended-jobs article",
         ]:
             try:
                 cards = await self.page.locator(selector).all()
@@ -313,6 +332,30 @@ class JobSearcher:
                     return [(card, None) for card in cards]
             except Exception:
                 continue
+
+        # Structural fallback: find all job link anchors on the page
+        try:
+            for link_selector in ["a[href*='job-listings']", "a[href*='job-details']", "a[href*='/job-']", "a.title"]:
+                links = await self.page.locator(link_selector).all()
+                if links:
+                    results: list[tuple[object, object | None]] = []
+                    seen_hrefs: set[str] = set()
+                    for link in links:
+                        href = (await link.get_attribute("href")) or ""
+                        if not href or any(b in href.lower() for b in ["resume.naukri.com", "ambitionbox.com", "/faq/", "/help/", "services", "blog"]):
+                            continue
+                        clean_href = href.split("?")[0]
+                        if clean_href in seen_hrefs:
+                            continue
+                        seen_hrefs.add(clean_href)
+                        container = link.locator("xpath=ancestor::article | ancestor::div[contains(@class, 'tuple')] | ancestor::div[contains(@class, 'wrapper')] | ancestor::div[contains(@class, 'card')] | ancestor::div[contains(@class, 'job')] | ancestor::li").first
+                        card = container if await container.count() else link
+                        results.append((card, link))
+                    if results:
+                        log.info("reco.structural_cards_found", count=len(results))
+                        return results
+        except Exception as exc:
+            log.debug("reco.structural_fallback_error", error=str(exc)[:150])
 
         return []
 

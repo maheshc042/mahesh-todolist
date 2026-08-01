@@ -56,11 +56,19 @@ class NaukriAuth:
 
     # ------------------------------------------------------------------ checks
     async def is_logged_in(self, page: Page) -> bool:
+        try:
+            content = (await page.content()).lower()
+            if "access denied" in content or "unusual activity" in content:
+                log.warning("auth.access_denied_or_blocked")
+                return False
+        except Exception:
+            pass
+
         marker = await first_visible(page, S.LOGGED_IN_MARKERS, timeout_ms=6_000)
         if marker is not None:
             return True
         logged_out = await first_visible(page, S.LOGGED_OUT_MARKERS, timeout_ms=2_000)
-        return logged_out is None and "nlogin" not in page.url
+        return logged_out is None and "nlogin" not in page.url and ("homepage" in page.url or "mnjuser" in page.url)
 
     async def _detect_challenge(self, page: Page) -> None:
         if await first_visible(page, S.CAPTCHA_MARKERS, timeout_ms=1_500):
@@ -75,11 +83,28 @@ class NaukriAuth:
     # ------------------------------------------------------------------- login
     async def _submit_login(self, page: Page) -> None:
         log.info("auth.login_start", email=self.email.split("@")[0] + "@…")
-        await page.goto(S.LOGIN_URL, wait_until="domcontentloaded")
+        await page.goto(S.LOGIN_URL, wait_until="domcontentloaded", timeout=45_000)
         await dismiss_overlays(page)
         await self._detect_challenge(page)
 
-        email_input = await first_visible(page, S.LOGIN_EMAIL_INPUT, timeout_ms=15_000)
+        email_input = await first_visible(page, S.LOGIN_EMAIL_INPUT, timeout_ms=10_000)
+        if email_input is None:
+            # Fallback: Navigate to homepage and click Login button to open login drawer
+            try:
+                await page.goto(S.BASE_URL, wait_until="domcontentloaded", timeout=45_000)
+                await dismiss_overlays(page)
+                login_btn = await first_visible(
+                    page,
+                    ["a#login_Layer", "a:has-text('Login')", "div.nI-gNb-header__login-btn", "a.title:has-text('Login')"],
+                    timeout_ms=6_000,
+                )
+                if login_btn is not None:
+                    await login_btn.click(timeout=5_000)
+                    await human_pause(600, 1_200)
+                    email_input = await first_visible(page, S.LOGIN_EMAIL_INPUT, timeout_ms=10_000)
+            except Exception as exc:
+                log.debug("auth.login_nav_fallback_failed", error=str(exc)[:150])
+
         password_input = await first_visible(page, S.LOGIN_PASSWORD_INPUT, timeout_ms=8_000)
         if email_input is None or password_input is None:
             await self.artifacts.capture_failure(page, "login-form-missing")

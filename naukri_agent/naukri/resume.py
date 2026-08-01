@@ -40,9 +40,22 @@ class ResumeManager:
 
     def _resolve(self, resume_file: str) -> Path | None:
         candidate = Path(resume_file)
-        if not candidate.is_absolute():
-            candidate = self.resume_dir / resume_file
-        return candidate if candidate.exists() else None
+        if candidate.is_absolute():
+            return candidate if candidate.exists() else None
+
+        if candidate.exists():
+            return candidate.resolve()
+
+        in_resume_dir = self.resume_dir / resume_file
+        if in_resume_dir.exists():
+            return in_resume_dir.resolve()
+
+        if candidate.parts and candidate.parts[0] == self.resume_dir.name:
+            stripped = self.resume_dir.parent / candidate
+            if stripped.exists():
+                return stripped.resolve()
+
+        return None
 
     async def current_resume_name(self) -> str:
         if self._current is not None:
@@ -57,22 +70,12 @@ class ResumeManager:
             self._current = ""
         return self._current or ""
 
-    async def ensure_resume(self, resume_file: str | None, profile: str) -> bool:
-        """Returns True when the correct resume is attached (or none was requested)."""
-        if not resume_file:
-            return True
-
-        path = self._resolve(resume_file)
-        if path is None:
-            log.error(
-                "resume.file_missing",
-                profile=profile,
-                expected=str(self.resume_dir / resume_file),
-            )
-            return False
+    async def ensure_resume(self, resume_file: str | None, profile: str, force_upload: bool = True) -> bool:
+        """Disabled as requested — manual resume management on Naukri."""
+        return True
 
         current = await self.current_resume_name()
-        if current and path.stem.lower() in current.lower():
+        if not force_upload and current and path.stem.lower() in current.lower():
             log.info("resume.already_current", profile=profile, resume=current)
             return True
 

@@ -284,6 +284,7 @@ def login(
 def refresh_profile(
     account: Optional[str] = typer.Option(None, "--account", "-a", help="Which login to use"),
     force: bool = typer.Option(False, "--force", help="Ignore the min_hours_between guard"),
+    headed: bool = typer.Option(False, "--headed/--headless", help="Show the browser window"),
     config_path: Optional[Path] = typer.Option(None, "--config", help="Path to config.yaml"),
 ) -> None:
     """
@@ -312,8 +313,9 @@ def refresh_profile(
                 return
 
             artifacts = ArtifactStore(settings.artifacts_dir, "refresh")
+            browser_config = config.browser.model_copy(update={"headless": not headed})
             async with BrowserManager(
-                config.browser, repo, session_key=target.session_key
+                browser_config, repo, session_key=target.session_key
             ) as browser:
                 auth = NaukriAuth(browser, target.email, target.password, artifacts)
                 page = await auth.ensure_logged_in()

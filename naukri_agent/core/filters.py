@@ -21,9 +21,22 @@ from ..config import FilterRules
 from ..core.models import FilterDecision, Job, SkipReason
 
 
+import re
+
+
+def _normalise_str(text: str) -> str:
+    """Normalize string and unify tech synonyms like Dot Net / .NET / dot.net -> dotnet."""
+    low = (text or "").lower()
+    return re.sub(r"\bdot[\s.-]?net\b|\b\.net\b", "dotnet", low)
+
+
 def _contains_any(haystack: str, needles: list[str]) -> str | None:
+    norm_haystack = _normalise_str(haystack)
     for needle in needles:
-        if needle and needle in haystack:
+        if not needle:
+            continue
+        norm_needle = _normalise_str(needle)
+        if norm_needle in norm_haystack or needle in haystack:
             return needle
     return None
 
