@@ -37,8 +37,8 @@ jobs:
       - name: Download Latest Resumes from Vercel
         run: |
           mkdir -p resumes
-          curl --fail --retry 3 --retry-all-errors --silent --show-error --location "https://my-resume-mahesh.vercel.app/Mahesh_Chitakoti_FullStack_Engineer.pdf" -o resumes/Mahesh_Chitakoti_FullStack_Engineer.pdf
-          curl --fail --retry 3 --retry-all-errors --silent --show-error --location "https://my-resume-mahesh.vercel.app/Mahesh_Chitakoti_AI_Engineer.pdf" -o resumes/Mahesh_Chitakoti_AI_Engineer.pdf
+          curl --fail --retry 3 --retry-all-errors --silent --show-error --location "https://mahesh-resume.vercel.app/Mahesh_Chitakoti_FullStack_Engineer.pdf" -o resumes/Mahesh_Chitakoti_FullStack_Engineer.pdf
+          curl --fail --retry 3 --retry-all-errors --silent --show-error --location "https://mahesh-resume.vercel.app/Mahesh_Chitakoti_AI_Engineer.pdf" -o resumes/Mahesh_Chitakoti_AI_Engineer.pdf
           test -s resumes/Mahesh_Chitakoti_FullStack_Engineer.pdf
           test -s resumes/Mahesh_Chitakoti_AI_Engineer.pdf
 
