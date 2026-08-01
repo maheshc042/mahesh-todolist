@@ -165,6 +165,7 @@ answers:
   interviews in person on weekdays: "Yes"
   interviews in person on weekends: "Yes"
   interviews in person: "Yes"
+  "re:available for f2f|available for interview|f2f interview on|interview on": "Yes"
   # Both spellings: recruiters type this one wrong at least as often as not.
   need special accommodation for interview: "No"
   need specifal accomodation for interview: "No"
@@ -192,6 +193,14 @@ answers:
   brief description of the projects: "Built full-stack & AI applications using Python, FastAPI, Node.js, React & AWS. Implemented REST APIs."
   description of the projects: "Built full-stack & AI applications using Python, FastAPI, Node.js, React & AWS. Implemented REST APIs."
   key contributions and technical skills: "Built full-stack & AI applications using Python, FastAPI, Node.js, React & AWS. Implemented REST APIs."
+  # Tech Stack & Framework Preferences
+  which backend framework have you used: "Express.js, FastAPI"
+  backend framework: "Express.js, FastAPI"
+  which database have you worked with: "MongoDB, PostgreSQL, Redis"
+  database worked with: "MongoDB, PostgreSQL, Redis"
+  which programming language are you most comfortable with: "Python"
+  programming language most comfortable with: "Python"
+  most comfortable programming language: "Python"
   # External Form Links (Google Forms, forms.gle, etc.)
   "re:forms\\.gle|google\\.com/forms|fill out the form|fill the form|mandatory form": "Yes -Filled the form"
   "re:^yes\\s*/\\s*no\\??$": "Yes"
@@ -228,6 +237,12 @@ experience:
     langchain: 0.6
     fastapi: 0.6
     chatbot: 0.6
+    unix: 2.6
+    linux: 2.6
+    cloud: 2.0
+    aws: 2.0
+    aml: 0
+    fircosoft: 0
 
 # ---------------------------------------------------------------------------
 # Daily "touch the profile" pass. Naukri's recruiter search sorts candidates by

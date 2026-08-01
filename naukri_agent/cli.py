@@ -34,7 +34,6 @@ from rich.table import Table
 from .browser.artifacts import ArtifactStore
 from .browser.manager import BrowserManager
 from .config import ACCOUNT_KEYS, AgentConfig, ConfigError, Settings, get_settings, load_config
-from .core.models import RunStatus
 from .core.orchestrator import Orchestrator
 from .db.migrations import run_migrations
 from .db.pool import close_pool, get_pool
@@ -147,6 +146,7 @@ def run(
         if headed is not None:
             settings.headless = not headed
             config.browser.headless = not headed
+        await run_migrations()
         targets = _resolve_accounts(account, all_accounts, settings)
         failures = 0
         try:
@@ -591,7 +591,7 @@ def stats(
 
 async def _stats(days: int, weekly: bool, profile: Optional[str]) -> None:
     try:
-        settings = get_settings()
+        _ = get_settings()
     except ConfigError as exc:
         console.print(f"[red]Config error:[/red] {exc}")
         raise typer.Exit(2) from exc
@@ -777,7 +777,7 @@ async def _learn(
 
         if unused:
             entries = [e for e in entries if (e.get("hits") or 0) == 0]
-            title = f"🗑  Zero-Hit KB Entries (safe to remove from config.yaml)"
+            title = "🗑  Zero-Hit KB Entries (safe to remove from config.yaml)"
         elif fuzzy:
             # Show auto-resolved entries from question_review
             rows = await (await get_pool()).fetch(
@@ -791,7 +791,7 @@ async def _learn(
                 """,
                 profile, limit,
             )
-            console.print(f"[bold]Auto-resolved questions[/bold] (verify these answers are correct):\n")
+            console.print("[bold]Auto-resolved questions[/bold] (verify these answers are correct):\n")
             if rows:
                 tbl = Table(show_lines=True, header_style="bold cyan")
                 tbl.add_column("ID", width=5)

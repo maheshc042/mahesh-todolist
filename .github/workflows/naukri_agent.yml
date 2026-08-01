@@ -8,9 +8,17 @@ on:
     - cron: '0 10 * * 1-5'
   workflow_dispatch:
 
+concurrency:
+  group: naukri-auto-apply-agent
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
 jobs:
   run-agent:
     runs-on: ubuntu-latest
+    timeout-minutes: 120
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
@@ -29,8 +37,25 @@ jobs:
       - name: Download Latest Resumes from Vercel
         run: |
           mkdir -p resumes
-          curl -sSL "https://my-resume-mahesh.vercel.app/Mahesh_Chitakoti_FullStack_Engineer.pdf" -o resumes/Mahesh_Chitakoti_FullStack_Engineer.pdf || true
-          curl -sSL "https://my-resume-mahesh.vercel.app/Mahesh_Chitakoti_AI_Engineer.pdf" -o resumes/Mahesh_Chitakoti_AI_Engineer.pdf || true
+          curl --fail --retry 3 --retry-all-errors --silent --show-error --location "https://my-resume-mahesh.vercel.app/Mahesh_Chitakoti_FullStack_Engineer.pdf" -o resumes/Mahesh_Chitakoti_FullStack_Engineer.pdf
+          curl --fail --retry 3 --retry-all-errors --silent --show-error --location "https://my-resume-mahesh.vercel.app/Mahesh_Chitakoti_AI_Engineer.pdf" -o resumes/Mahesh_Chitakoti_AI_Engineer.pdf
+          test -s resumes/Mahesh_Chitakoti_FullStack_Engineer.pdf
+          test -s resumes/Mahesh_Chitakoti_AI_Engineer.pdf
+
+      - name: Validate required configuration
+        env:
+          NAUKRI_EMAIL: ${{ secrets.NAUKRI_EMAIL }}
+          NAUKRI_PASSWORD: ${{ secrets.NAUKRI_PASSWORD }}
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        run: |
+          test -n "$NAUKRI_EMAIL"
+          test -n "$NAUKRI_PASSWORD"
+          test -n "$DATABASE_URL"
+
+      - name: Migrate database schema
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        run: python -m naukri_agent migrate
 
       - name: Run Naukri Agent
         env:
@@ -44,3 +69,14 @@ jobs:
           HEADLESS: "true"
         run: |
           python -m naukri_agent run --all-accounts
+
+      - name: Upload diagnostics
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: naukri-agent-diagnostics-${{ github.run_id }}
+          path: |
+            logs/
+            artifacts/
+          if-no-files-found: ignore
+          retention-days: 14

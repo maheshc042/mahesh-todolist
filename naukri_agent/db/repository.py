@@ -17,7 +17,6 @@ from typing import Any
 import asyncpg
 
 from ..core.models import (
-    ApplicationStatus,
     ApplyOutcome,
     Job,
     RunStats,
