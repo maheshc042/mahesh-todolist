@@ -2,10 +2,8 @@ name: Naukri Auto-Apply Agent
 
 on:
   schedule:
-    # 04:00 UTC = 09:30 AM IST (Monday to Friday) - Profile Refresh + Apply Batch 1 (25 apps/account)
-    - cron: '0 4 * * 1-5'
-    # 10:00 UTC = 03:30 PM IST (Monday to Friday) - Apply Batch 2 (25 apps/account)
-    - cron: '0 10 * * 1-5'
+    # 04:00 UTC = 09:30 AM IST (Every day) - Single daily high-relevance batch (35 jobs/account)
+    - cron: '0 4 * * *'
   workflow_dispatch:
 
 concurrency:

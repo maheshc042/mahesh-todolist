@@ -587,7 +587,7 @@ def stats(
       naukri-agent stats --days 30       # 30-day view
       naukri-agent stats --weekly        # weekly roll-up
     """
-    setup_logging("INFO", json=False)
+    setup_logging("INFO", json_logs=False)
     _run(_stats(days, weekly, profile))
 
 
@@ -751,7 +751,7 @@ def learn(
       naukri-agent learn --unused        # Entries with 0 hits (safe to remove)
       naukri-agent learn --fuzzy         # Auto-resolved answers to verify
     """
-    setup_logging("INFO", json=False)
+    setup_logging("INFO", json_logs=False)
     _run(_learn(unused, fuzzy, profile, limit))
 
 

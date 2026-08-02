@@ -329,6 +329,15 @@ class RecommendedConfig(_Model):
     max_jobs: int = Field(default=250, ge=1, le=2_000)
     follow_show_more: bool = True
 
+    @model_validator(mode="after")
+    def _validate_rounds(self) -> "RecommendedConfig":
+        if self.max_scroll_rounds < self.stall_rounds_before_stop:
+            raise ValueError(
+                f"recommended.max_scroll_rounds ({self.max_scroll_rounds}) "
+                f"must be >= stall_rounds_before_stop ({self.stall_rounds_before_stop})"
+            )
+        return self
+
 
 class ScheduleConfig(_Model):
     enabled: bool = True

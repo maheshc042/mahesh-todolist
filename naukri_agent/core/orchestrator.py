@@ -29,15 +29,20 @@ Design decisions:
 from __future__ import annotations
 
 import asyncio
+import csv
+import json
 import random
 import time
 from datetime import datetime, timezone
+from pathlib import Path
 
 from ..browser.artifacts import ArtifactStore
 from ..browser.manager import BrowserManager
 from ..browser.resilience import FatalAgentError, first_visible
-from ..config import AgentConfig, FilterRules, JobProfile, NaukriAccount, Settings
+from ..config import AgentConfig, FilterRules, JobProfile, NaukriAccount, Settings, PROJECT_ROOT
 from ..core.answers import AnswerEngine
+from ..core.application_planner import ApplicationPlan, ApplicationPlanner
+from ..core.reporting import ReportExporter
 from ..core.filters import FilterEngine
 from ..core.models import (
     ApplicationStatus,
@@ -47,6 +52,7 @@ from ..core.models import (
     RunStatus,
     SkipReason,
 )
+from ..core.ranking import CandidateProfile, RankedJob, RankingWeights
 from ..db.repository import Repository
 from ..logging_setup import bind_context, clear_context, get_logger
 from ..naukri import selectors as S
@@ -67,6 +73,85 @@ class StopRun(Exception):
 
 class _CapReached(Exception):
     """Internal signal: this profile hit its per-run cap; move to the next one."""
+
+
+def _export_plan_reports(analysis_dir: Path, collected_jobs: list[Job], plan: ApplicationPlan) -> None:
+    """Export collected, ranked, selected, and rejected job reports to analysis/ directory."""
+    try:
+        analysis_dir.mkdir(parents=True, exist_ok=True)
+
+        # 1. collected_jobs.csv
+        with (analysis_dir / "collected_jobs.csv").open("w", encoding="utf-8", newline="") as f:
+            w = csv.writer(f)
+            w.writerow(["job_id", "tab", "position", "total_jobs_in_tab", "company", "title", "url", "scraped_at"])
+            for j in collected_jobs:
+                w.writerow([j.job_id, j.recommendation_tab, j.recommendation_position or "", j.total_jobs_in_tab or "", j.company, j.title, j.url, j.scraped_at.isoformat()])
+
+        # 2. ranked_jobs.csv
+        with (analysis_dir / "ranked_jobs.csv").open("w", encoding="utf-8", newline="") as f:
+            w = csv.writer(f)
+            w.writerow(["rank", "score", "job_id", "tab", "position", "company", "title", "url", "reasons"])
+            for rj in plan.eligible_jobs:
+                w.writerow([rj.rank, rj.score, rj.job.job_id, rj.job.recommendation_tab, rj.job.recommendation_position or "", rj.job.company, rj.job.title, rj.job.url, " | ".join(rj.reasons)])
+
+        # 3. selected_jobs.csv
+        with (analysis_dir / "selected_jobs.csv").open("w", encoding="utf-8", newline="") as f:
+            w = csv.writer(f)
+            w.writerow(["rank", "score", "job_id", "tab", "position", "company", "title", "url", "reasons"])
+            for rj in plan.selected_jobs:
+                w.writerow([rj.rank, rj.score, rj.job.job_id, rj.job.recommendation_tab, rj.job.recommendation_position or "", rj.job.company, rj.job.title, rj.job.url, " | ".join(rj.reasons)])
+
+        # 4. rejected_jobs.csv
+        with (analysis_dir / "rejected_jobs.csv").open("w", encoding="utf-8", newline="") as f:
+            w = csv.writer(f)
+            w.writerow(["job_id", "reason", "detail", "company", "title", "url"])
+            for rinfo in plan.rejected_jobs:
+                reason_str = rinfo.reason.value if rinfo.reason else "other"
+                w.writerow([rinfo.job.job_id, reason_str, rinfo.detail, rinfo.job.company, rinfo.job.title, rinfo.job.url])
+
+        log.info("reports.plan_exported", directory=str(analysis_dir))
+    except Exception as exc:
+        log.warning("reports.plan_export_failed", error=str(exc))
+
+
+def _export_outcome_reports(
+    analysis_dir: Path,
+    applied_outcomes: list[tuple[Job, ApplyOutcome]],
+    failed_outcomes: list[tuple[Job, ApplyOutcome]],
+    stats_dict: dict,
+) -> None:
+    """Export applied_jobs.csv, failed_jobs.csv, and summary.json to analysis/ directory."""
+    try:
+        analysis_dir.mkdir(parents=True, exist_ok=True)
+
+        # 5. applied_jobs.csv
+        with (analysis_dir / "applied_jobs.csv").open("w", encoding="utf-8", newline="") as f:
+            w = csv.writer(f)
+            w.writerow(["job_id", "status", "company", "title", "url", "attempts", "detail"])
+            for j, outcome in applied_outcomes:
+                w.writerow([j.job_id, outcome.status.value, j.company, j.title, j.url, outcome.attempts, outcome.detail])
+
+        # 6. failed_jobs.csv
+        with (analysis_dir / "failed_jobs.csv").open("w", encoding="utf-8", newline="") as f:
+            w = csv.writer(f)
+            w.writerow(["job_id", "status", "reason", "detail", "company", "title", "url"])
+            for j, outcome in failed_outcomes:
+                reason_str = outcome.reason.value if outcome.reason else "error"
+                w.writerow([j.job_id, outcome.status.value, reason_str, outcome.detail, j.company, j.title, j.url])
+
+        # 7. summary.json
+        summary_payload = {
+            "plan_stats": stats_dict,
+            "applied_count": len(applied_outcomes),
+            "failed_count": len(failed_outcomes),
+            "generated_at": datetime.now(timezone.utc).isoformat(),
+        }
+        with (analysis_dir / "summary.json").open("w", encoding="utf-8") as f:
+            json.dump(summary_payload, f, indent=2, default=str)
+
+        log.info("reports.outcomes_exported", directory=str(analysis_dir))
+    except Exception as exc:
+        log.warning("reports.outcomes_export_failed", error=str(exc))
 
 
 class Orchestrator:
@@ -328,68 +413,6 @@ class Orchestrator:
             # failure mode the user would never notice on their own.
             self.stats.errors.append(f"profile refresh failed: {result.detail[:120]}")
 
-    # ---------------------------------------------------------- match scoring
-    async def _batch_match_scores(
-        self, jobs: list[Job]
-    ) -> "dict | None":
-        """
-        Fetch match scores for a batch of jobs, using the DB cache first.
-
-        Returns a dict of job_id → MatchScoreResult, or None if the API client
-        is not available. Jobs missing from the result should be treated as
-        passing (fail-open).
-        """
-        from ..naukri.naukri_api import MatchScoreResult as MSR
-
-        ms_cfg = self.config.match_score_prefilter
-        if not ms_cfg.enabled or self.api_client is None or self.repo is None:
-            return None
-
-        scores: dict[str, MSR] = {}
-        to_fetch: list[str] = []
-
-        # Phase 1: check the DB cache (24-hour TTL).
-        for job in jobs:
-            cached = await self.repo.cached_match_score(job.job_id)
-            if cached:
-                scores[job.job_id] = MSR(
-                    job_id=job.job_id,
-                    keyskills_score=cached["keyskills_score"],
-                    experience_match=cached["experience_match"],
-                    overall_score=cached["overall_score"],
-                )
-            else:
-                to_fetch.append(job.job_id)
-
-        # Phase 2: fetch uncached scores from the API.
-        if to_fetch and self.api_client:
-            try:
-                fresh = await self.api_client.batch_match_scores(to_fetch)
-                for job_id, result in fresh.items():
-                    scores[job_id] = result
-                    await self.repo.cache_match_score(
-                        job_id,
-                        result.keyskills_score,
-                        result.experience_match,
-                        result.overall_score,
-                    )
-            except Exception as exc:
-                # Any API-layer failure must never block a run.
-                log.warning(
-                    "match_score.batch_failed",
-                    error=str(exc)[:120],
-                    falling_back="apply anyway",
-                )
-
-        log.info(
-            "match_score.batch_done",
-            total=len(jobs),
-            cached=len(jobs) - len(to_fetch),
-            fetched=len(to_fetch),
-            scored=len(scores),
-        )
-        return scores
-
     # --------------------------------------------------------------- profile
     async def _run_profile(
         self,
@@ -405,15 +428,7 @@ class Orchestrator:
             profile=profile.name,
             account=profile.account,
             recommended=profile.use_recommended,
-            searches=len(profile.searches),
         )
-
-        # Resume swap disabled as requested — user manages resume manually on Naukri
-        # resume_mgr = ResumeManager(page, self.settings.resume_dir)
-        # if profile.resume_file:
-        #     ok = await resume_mgr.ensure_resume(profile.resume_file, profile.name)
-        #     if not ok:
-        #         self.stats.errors.append(f"{profile.name}: resume swap failed, using existing CV")
 
         answers = await self._build_answer_engine(profile)
         searcher = JobSearcher(
@@ -425,18 +440,20 @@ class Orchestrator:
         # The apply engine is created ONCE per run and its knowledge base swapped
         # per profile. Building one per profile registered a fresh `popup`
         # listener on the same page every time, leaking handlers for the run.
-        if self.applier is None:
-            self.applier = ApplyEngine(
-                page,
-                answers,
-                artifacts,
-                dry_run=self.dry_run,
-                nav_timeout_ms=self.config.browser.navigation_timeout_ms,
-                attempts=self.config.run.max_retries_per_job,
-            )
-        else:
-            self.applier.set_answers(answers)
-        applier = self.applier
+        applier = None
+        if not self.dry_run:
+            if self.applier is None:
+                self.applier = ApplyEngine(
+                    page,
+                    answers,
+                    artifacts,
+                    dry_run=False,
+                    nav_timeout_ms=self.config.browser.navigation_timeout_ms,
+                    attempts=self.config.run.max_retries_per_job,
+                )
+            else:
+                self.applier.set_answers(answers)
+            applier = self.applier
 
         known = await self.repo.known_job_ids(
             profile.name,
@@ -448,107 +465,109 @@ class Orchestrator:
         def remaining() -> int:
             return profile.max_applications_per_run - applied_this_profile
 
-        async def consume(jobs: list[Job], rules: FilterRules) -> None:
-            """Evaluate + apply a batch, respecting every safety valve."""
-            nonlocal applied_this_profile
-            filters = FilterEngine(rules)
+        # Step 1: Collect Recommendation Jobs
+        collected_jobs: list[Job] = []
+        if profile.use_recommended and self.config.recommended.enabled:
+            collected_jobs = await searcher.search_recommended(
+                self.config.recommended,
+                exclude_job_ids=known,
+            )
+            if collected_jobs:
+                self.stats.bump(profile.name, "scraped", len(collected_jobs))
 
-            # Match score pre-filter: fetch scores for ALL jobs in the batch
-            # in parallel before any browser navigation. This is ~4s per skip.
-            scores = await self._batch_match_scores(jobs)
+        if not collected_jobs:
+            log.info("search.recommended_empty", profile=profile.name)
+            return
 
-            for job in jobs:
+        # Step 2: Generate ApplicationPlan via ApplicationPlanner
+        candidate = CandidateProfile(
+            title_keywords=getattr(profile, "title_keywords", None) or ["python", "software", "backend", "ai", "developer"],
+            core_skills=getattr(profile, "core_skills", None) or ["python", "fastapi", "django", "postgresql", "rest api"],
+            secondary_skills=getattr(profile, "secondary_skills", None) or ["docker", "redis", "celery", "aws", "git"],
+            bonus_skills=getattr(profile, "bonus_skills", None) or ["linux", "jira"],
+            target_experience_years=profile.experience_years or 2.5,
+            min_acceptable_salary_lpa=getattr(profile, "min_salary_lpa", None),
+        )
+        planner = ApplicationPlanner(
+            candidate=candidate,
+            rules=profile.filters_for("recommended"),
+            daily_limit=profile.max_applications_per_run,
+        )
+        plan = planner.create_plan(collected_jobs)
+
+        # Step 3: Export Plan CSV Reports & Enriched Summary
+        profile_start_time = time.monotonic()
+        analysis_dir = PROJECT_ROOT / "analysis"
+        exporter = ReportExporter(analysis_dir, run_id=self.run_id)
+        exporter.export_plan_reports(plan, profile_name=profile.name)
+
+        # Step 4: Print Concise Summary & Full Application Plan Report
+        s = plan.stats
+        report_text = plan.generate_report()
+        log.info(
+            "plan.summary",
+            collected=s.collected_count,
+            rejected=s.rejected_count,
+            eligible=s.eligible_count,
+            selected=s.selected_count,
+            dry_run=self.dry_run,
+        )
+        print(report_text)
+
+        # Step 5: Dry Run Gate — Stop before ApplyEngine
+        if self.dry_run:
+            log.info("dry_run.complete", selected_count=len(plan.selected_jobs))
+            duration = time.monotonic() - profile_start_time
+            exporter.export_summary_json(
+                plan,
+                applied_count=0,
+                failed_count=0,
+                profile_name=profile.name,
+                dry_run=True,
+                duration_seconds=duration,
+            )
+            return
+
+        # Step 6: Pass ONLY Selected Jobs to ApplyEngine (Live Run)
+        applied_outcomes: list[tuple[Job, ApplyOutcome]] = []
+        failed_outcomes: list[tuple[Job, ApplyOutcome]] = []
+        filters = FilterEngine(profile.filters_for("recommended"))
+
+        try:
+            for rjob in plan.selected_jobs:
                 self._check_global_limits()
                 if remaining() <= 0:
-                    log.info(
-                        "profile.cap_reached",
-                        profile=profile.name,
-                        cap=profile.max_applications_per_run,
-                    )
-                    raise _CapReached
+                    log.info("profile.cap_reached", profile=profile.name, cap=profile.max_applications_per_run)
+                    break
 
-                # Apply match score gate before card-level filtering.
-                if scores is not None and job.job_id in scores:
-                    score = scores[job.job_id]
-                    ms_cfg = self.config.match_score_prefilter
-                    if score.keyskills_score < ms_cfg.min_keyskills_score:
-                        outcome = ApplyOutcome(
-                            status=ApplicationStatus.SKIPPED,
-                            reason=SkipReason.LOW_MATCH_SCORE,
-                            detail=f"keyskills_score={score.keyskills_score}",
-                        )
-                        self.stats.bump(profile.name, "filtered_out")
-                        log.debug(
-                            "job.skipped_low_score",
-                            job_id=job.job_id,
-                            title=job.title[:60],
-                            keyskills=score.keyskills_score,
-                        )
-                        assert self.repo is not None
-                        await self.repo.record_outcome(
-                            job, profile.name, self.run_id, outcome,
-                            account=self.account_key,
-                        )
-                        known.add(job.job_id)
-                        continue
-
+                job = rjob.job
                 known.add(job.job_id)
+
                 outcome = await self._process_job(
                     job, profile, filters, applier, page, auth, artifacts
                 )
+
                 if outcome.status == ApplicationStatus.APPLIED:
                     applied_this_profile += 1
                     self.applied_today += 1
+                    applied_outcomes.append((job, outcome))
                     await self._pace()
-
-        try:
-            # ---- Phase 1: Naukri's recommended feed (the primary source) ----
-            if profile.use_recommended and self.config.recommended.enabled:
-                recommended_jobs = await searcher.search_recommended(
-                    self.config.recommended,
-                    exclude_job_ids=known,
-                )
-                if recommended_jobs:
-                    self.stats.bump(profile.name, "scraped", len(recommended_jobs))
-                    log.info("search.recommended_processing", count=len(recommended_jobs))
-                    # Relaxed ruleset: Naukri already matched these against the
-                    # profile, so inclusion keywords only discard good jobs.
-                    await consume(recommended_jobs, profile.filters_for("recommended"))
                 else:
-                    log.info("search.recommended_empty", profile=profile.name)
-
-            # ---- Phase 2: keyword search, only as a top-up ----
-            if profile.searches and (
-                not profile.search_is_fallback_only or remaining() > 0
-            ):
-                if profile.search_is_fallback_only:
-                    log.info(
-                        "search.fallback_engaged",
-                        profile=profile.name,
-                        remaining=remaining(),
-                    )
-                search_rules = profile.filters_for("search")
-                for spec in profile.searches:
-                    self._check_global_limits()
-                    if remaining() <= 0:
-                        break
-                    for page_no in range(1, spec.max_pages + 1):
-                        self._check_global_limits()
-                        if remaining() <= 0:
-                            break
-                        jobs = await searcher.search_page(
-                            spec,
-                            profile.experience_years,
-                            page_no,
-                            exclude_job_ids=known,
-                        )
-                        if not jobs:
-                            break
-                        self.stats.bump(profile.name, "scraped", len(jobs))
-                        await consume(jobs, search_rules)
+                    failed_outcomes.append((job, outcome))
         except _CapReached:
             pass
 
+        # Step 7: Export Outcome Reports & Enriched Summary JSON
+        duration = time.monotonic() - profile_start_time
+        exporter.export_outcome_reports(applied_outcomes, failed_outcomes, profile_name=profile.name)
+        exporter.export_summary_json(
+            plan,
+            applied_count=len(applied_outcomes),
+            failed_count=len(failed_outcomes),
+            profile_name=profile.name,
+            dry_run=False,
+            duration_seconds=duration,
+        )
         log.info("profile.done", profile=profile.name, applied=applied_this_profile)
 
     # ------------------------------------------------------------------- job

@@ -143,12 +143,23 @@ RECO_TAB_STRIP = [
     "div[class*='tab-list']",
     "div[class*='tabsWrapper']",
     "div[class*='nav-tabs']",
+    "div[class*='slider-container']",
+    "div[class*='cross-link']",
+    "div[class*='tabBar']",
+    "div[class*='tabs']",
+    "ul[class*='tab']",
+    "nav[class*='tab']",
 ]
 RECO_TAB_ITEM = [
     "[role='tab']",
     "li.tab",
     "a.tab",
     "div.tab",
+    "li[class*='tab']",
+    "div[class*='tabItem']",
+    "div[class*='tab-item']",
+    "button[class*='tab']",
+    "span[class*='tab']",
     "li",
     "button",
 ]

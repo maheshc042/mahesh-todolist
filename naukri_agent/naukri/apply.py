@@ -21,6 +21,8 @@ Design decisions:
   misconfiguration). We register a `page.on("popup")` handler that closes any new
   tab immediately and flags the job external, instead of leaving orphan pages
   that leak memory across a long run.
+- **Event-based post-click reaction.** Replaced fixed sleeps with `_wait_for_post_apply_event()`,
+  racing success banners, chatbot drawers, popup flags, and error toasts.
 - **Success is verified, never assumed.** A click landing without an exception
   proves nothing. We require one of: success banner, "already applied" marker,
   or the chatbot reporting completion. Anything else is FAILED with artifacts.
@@ -127,14 +129,6 @@ class ApplyEngine:
     async def _state(self) -> str:
         """
         Classify the loaded detail page into one actionable state.
-
-        Ordering matters and used to be wrong. `JD_APPLY_BUTTON` contains the
-        text selector `button:has-text('Apply')`, which ALSO matches Naukri's
-        "Apply on company site" button — so external postings were classified as
-        easy_apply, clicked, and only caught afterwards by the popup guard. That
-        made a hard requirement ("never open a third-party tab") depend on a
-        safety net. We now resolve the unambiguous ID selectors first and only
-        fall back to text matching once both IDs are absent.
         """
         if await first_visible(self.page, S.JD_ALREADY_APPLIED, timeout_ms=2_500):
             return "already_applied"
@@ -177,11 +171,6 @@ class ApplyEngine:
     ) -> ApplyOutcome:
         """
         Full flow for a single job. Never raises; always returns an outcome.
-
-        `pre_submit_check` runs after the full job description has been loaded
-        but BEFORE the Apply click, so description-level blocklists can actually
-        stop an application. Previously the JD filter ran after submitting and
-        only logged that we had applied to something we did not want.
         """
         self._popup_opened = False
         attempt_used = 0
@@ -208,7 +197,7 @@ class ApplyEngine:
             )
         except Exception as exc:
             shot = await self.artifacts.capture_failure(self.page, "open-failed", profile, job.job_id)
-            log.error("apply.open_failed", job_id=job.job_id, error=str(exc)[:250])
+            log.error("apply.open_failed", job_id=job.job_id, profile=profile, attempt=attempt_used, error=str(exc)[:250])
             return ApplyOutcome(
                 status=ApplicationStatus.FAILED,
                 detail=f"could not classify job page: {str(exc)[:180]}",
@@ -217,7 +206,7 @@ class ApplyEngine:
             )
 
         if state == "already_applied":
-            log.info("apply.already_applied", job_id=job.job_id, title=job.title[:80])
+            log.info("apply.already_applied", job_id=job.job_id, profile=profile, attempt=attempt_used, title=job.title[:80])
             return ApplyOutcome(
                 status=ApplicationStatus.ALREADY_APPLIED,
                 reason=SkipReason.ALREADY_APPLIED,
@@ -226,7 +215,7 @@ class ApplyEngine:
             )
 
         if state == "external":
-            log.info("apply.external_skip", job_id=job.job_id, company=job.company[:60])
+            log.info("apply.external_skip", job_id=job.job_id, profile=profile, attempt=attempt_used, company=job.company[:60])
             return ApplyOutcome(
                 status=ApplicationStatus.EXTERNAL,
                 reason=SkipReason.EXTERNAL_APPLY,
@@ -234,14 +223,14 @@ class ApplyEngine:
                 attempts=attempt_used,
             )
 
-        # Description-level rules, evaluated against the full JD we just loaded
-        # and enforced BEFORE any click. This is the last chance to walk away.
         if pre_submit_check is not None:
             decision = pre_submit_check(job)
             if not decision.passed:
                 log.info(
                     "apply.blocked_by_jd_filter",
                     job_id=job.job_id,
+                    profile=profile,
+                    attempt=attempt_used,
                     title=job.title[:70],
                     detail=decision.detail,
                 )
@@ -253,7 +242,7 @@ class ApplyEngine:
                 )
 
         if self.dry_run:
-            log.info("apply.dry_run", job_id=job.job_id, title=job.title[:80])
+            log.info("apply.dry_run", job_id=job.job_id, profile=profile, attempt=attempt_used, title=job.title[:80])
             return ApplyOutcome(
                 status=ApplicationStatus.SKIPPED,
                 reason=SkipReason.DRY_RUN,
@@ -263,9 +252,23 @@ class ApplyEngine:
 
         return await self._submit(job, profile, attempt_used)
 
+    async def _wait_for_post_apply_event(self) -> str:
+        """Race-free event-driven wait for post-apply UI reaction (P1-1 & P1-2)."""
+        for _ in range(25):  # Max 3.75s event-driven poll (150ms interval)
+            if self._popup_opened:
+                return "popup"
+            if await first_visible(self.page, S.APPLY_SUCCESS, timeout_ms=50):
+                return "success"
+            if await first_visible(self.page, S.CHATBOT_DRAWER, timeout_ms=50):
+                return "chatbot"
+            if await first_visible(self.page, S.APPLY_ERROR_TOAST, timeout_ms=50):
+                return "toast"
+            if await first_visible(self.page, S.JD_ALREADY_APPLIED, timeout_ms=50):
+                return "already_applied"
+            await asyncio.sleep(0.15)
+        return "timeout"
+
     async def _submit(self, job: Job, profile: str, attempts: int) -> ApplyOutcome:
-        # `#apply-button` first for the same reason as in `_state()`: the generic
-        # text selector can resolve to "Apply on company site".
         apply_btn = await first_visible(
             self.page, ["button#apply-button", *S.JD_APPLY_BUTTON], timeout_ms=8_000
         )
@@ -284,7 +287,7 @@ class ApplyEngine:
             await apply_btn.click(timeout=10_000)
         except Exception as exc:
             shot = await self.artifacts.capture_failure(self.page, "apply-click", profile, job.job_id)
-            log.error("apply.click_failed", job_id=job.job_id, error=str(exc)[:200])
+            log.error("apply.click_failed", job_id=job.job_id, profile=profile, attempt=attempts, error=str(exc)[:200])
             return ApplyOutcome(
                 status=ApplicationStatus.FAILED,
                 detail=f"apply click failed: {str(exc)[:180]}",
@@ -292,9 +295,10 @@ class ApplyEngine:
                 attempts=attempts,
             )
 
-        await asyncio.sleep(2.0)  # let Naukri decide: banner, drawer, or tab
+        # Race-free event-driven wait (P1-1 & P1-2)
+        event_type = await self._wait_for_post_apply_event()
 
-        if self._popup_opened:
+        if event_type == "popup" or self._popup_opened:
             return ApplyOutcome(
                 status=ApplicationStatus.EXTERNAL,
                 reason=SkipReason.EXTERNAL_APPLY,
@@ -302,15 +306,15 @@ class ApplyEngine:
                 attempts=attempts,
             )
 
-        # Fast path: immediate confirmation, no questions.
-        if await first_visible(self.page, S.APPLY_SUCCESS, timeout_ms=4_000):
-            log.info("apply.success_immediate", job_id=job.job_id, title=job.title[:80])
+        # Fast path: immediate confirmation
+        if event_type in ("success", "already_applied") or await first_visible(self.page, S.APPLY_SUCCESS, timeout_ms=2_000):
+            log.info("apply.success_immediate", job_id=job.job_id, profile=profile, attempt=attempts, title=job.title[:80])
             return ApplyOutcome(status=ApplicationStatus.APPLIED, attempts=attempts)
 
-        # Questions path.
+        # Questions path
         chatbot = ChatbotHandler(self.page, self.answers, max_questions=self.max_questions)
-        if await chatbot.is_open(timeout_ms=6_000):
-            log.info("apply.chatbot_opened", job_id=job.job_id)
+        if event_type == "chatbot" or await chatbot.is_open(timeout_ms=3_000):
+            log.info("apply.chatbot_opened", job_id=job.job_id, profile=profile, attempt=attempts)
             result = await chatbot.run()
 
             if result.unanswered:
@@ -318,6 +322,8 @@ class ApplyEngine:
                 log.warning(
                     "apply.needs_review",
                     job_id=job.job_id,
+                    profile=profile,
+                    attempt=attempts,
                     unanswered=len(result.unanswered),
                 )
                 return ApplyOutcome(
@@ -343,12 +349,12 @@ class ApplyEngine:
                     attempts=attempts,
                 )
 
-            # Check if Naukri rendered an error toast / rejection message after chatbot
+            # Check for error toast or rejection text
             toast = await safe_text(await first_visible(self.page, S.APPLY_ERROR_TOAST, timeout_ms=2_000))
-            page_text = (await self.page.content()).lower()
-            if toast or "not accepted" in page_text or "incomplete information" in page_text:
+            is_rejected_text = await self.page.locator("text=/not accepted|incomplete information/i").first.count() > 0 if not toast else True
+            if toast or is_rejected_text:
                 shot = await self.artifacts.capture_failure(self.page, "apply-rejected", profile, job.job_id)
-                log.warning("apply.rejected_by_naukri", job_id=job.job_id, detail=toast[:160])
+                log.warning("apply.rejected_by_naukri", job_id=job.job_id, profile=profile, attempt=attempts, detail=toast[:160])
                 return ApplyOutcome(
                     status=ApplicationStatus.FAILED,
                     detail=f"Naukri rejected application: {toast[:160] or 'incomplete information / mandatory questions'}",
@@ -360,6 +366,8 @@ class ApplyEngine:
             log.info(
                 "apply.success_after_chatbot",
                 job_id=job.job_id,
+                profile=profile,
+                attempt=attempts,
                 answered=result.answered,
             )
             return ApplyOutcome(
@@ -368,10 +376,10 @@ class ApplyEngine:
                 attempts=attempts,
             )
 
-        # No banner, no drawer: check for an error toast, then reload-verify.
-        toast = await safe_text(await first_visible(self.page, S.APPLY_ERROR_TOAST, timeout_ms=2_500))
-        page_text = (await self.page.content()).lower()
-        if toast or "not accepted" in page_text or "incomplete information" in page_text:
+        # Check for error toast
+        toast = await safe_text(await first_visible(self.page, S.APPLY_ERROR_TOAST, timeout_ms=2_000))
+        is_rejected_text = await self.page.locator("text=/not accepted|incomplete information/i").first.count() > 0 if not toast else True
+        if toast or is_rejected_text:
             shot = await self.artifacts.capture_failure(self.page, "apply-error-toast", profile, job.job_id)
             return ApplyOutcome(
                 status=ApplicationStatus.FAILED,
@@ -381,11 +389,11 @@ class ApplyEngine:
             )
 
         if await self._verify_applied(job):
-            log.info("apply.success_verified_on_reload", job_id=job.job_id)
+            log.info("apply.success_verified_on_reload", job_id=job.job_id, profile=profile, attempt=attempts)
             return ApplyOutcome(status=ApplicationStatus.APPLIED, attempts=attempts)
 
         shot = await self.artifacts.capture_failure(self.page, "no-confirmation", profile, job.job_id)
-        log.error("apply.no_confirmation", job_id=job.job_id, toast=toast[:150])
+        log.error("apply.no_confirmation", job_id=job.job_id, profile=profile, attempt=attempts, toast=toast[:150])
         return ApplyOutcome(
             status=ApplicationStatus.FAILED,
             detail="no success banner, no chatbot, no applied marker",
@@ -395,11 +403,9 @@ class ApplyEngine:
 
     async def _verify_applied(self, job: Job) -> bool:
         """
-        Ground truth: reload the JD and look for the applied marker. This is the
-        only check that cannot be faked by a stale banner.
+        Ground truth: reload the JD and look for the applied marker.
         """
         try:
-            # Check current page first before reloading
             if await first_visible(self.page, S.JD_ALREADY_APPLIED + S.APPLY_SUCCESS, timeout_ms=3_000):
                 return True
             await self.page.goto(
@@ -411,5 +417,5 @@ class ApplyEngine:
             return await first_visible(self.page, S.APPLY_SUCCESS, timeout_ms=3_000) is not None
         except Exception as exc:
             log.warning("apply.verify_failed", job_id=job.job_id, error=str(exc)[:180])
-            toast = await safe_text(await first_visible(self.page, S.APPLY_ERROR_TOAST, timeout_ms=1_000))
-            return not toast
+            # Conservative verification fallback (P2-4 Fix)
+            return False

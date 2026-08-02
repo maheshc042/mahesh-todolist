@@ -13,15 +13,20 @@ Design decisions:
 - **Two-phase filtering.** `evaluate_card()` runs on listing data only (free);
   `evaluate_detail()` re-checks description rules after the JD page is loaded.
   This keeps expensive page loads proportional to real candidates.
+- **Token-aware matching.** Enforces word boundaries (\b) to prevent short terms (e.g. 'c', 'java')
+  from matching unrelated substrings ('react', 'javascript').
+- **Expanded Remote Detection.** Includes 'remote', 'work from home', 'wfh', 'hybrid remote'.
+- **Pre-normalized Rule Caching.** Caches normalized filter lists in FilterEngine init for high performance.
 """
 
 from __future__ import annotations
 
+import re
+
 from ..config import FilterRules
 from ..core.models import FilterDecision, Job, SkipReason
 
-
-import re
+REMOTE_KEYWORDS = ("remote", "work from home", "wfh", "hybrid remote")
 
 
 def _normalise_str(text: str) -> str:
@@ -31,19 +36,34 @@ def _normalise_str(text: str) -> str:
 
 
 def _contains_any(haystack: str, needles: list[str]) -> str | None:
+    """Token-aware keyword matching using word boundaries (P1-3)."""
     norm_haystack = _normalise_str(haystack)
     for needle in needles:
         if not needle:
             continue
         norm_needle = _normalise_str(needle)
-        if norm_needle in norm_haystack or needle in haystack:
+        pattern = r"\b" + re.escape(norm_needle) + r"\b"
+        if re.search(pattern, norm_haystack) or (len(needle) > 3 and needle in haystack):
             return needle
     return None
+
+
+def experience_matches(candidate_years: float, job_min: float | None, job_max: float | None) -> bool:
+    """Centralized experience window evaluation (P1-1)."""
+    if job_min is not None and job_min > candidate_years + 1.0:
+        return False
+    if job_max is not None and job_max < max(0.0, candidate_years - 1.5):
+        return False
+    return True
 
 
 class FilterEngine:
     def __init__(self, rules: FilterRules) -> None:
         self.rules = rules
+        # Pre-normalize rule lists for zero-overhead evaluation (P2-1)
+        self._norm_blocked_companies = [c.lower() for c in (rules.blocked_companies or [])]
+        self._norm_blocked_locations = [l.lower() for l in (rules.blocked_locations or [])]
+        self._norm_allowed_locations = [l.lower() for l in (rules.allowed_locations or [])]
 
     # ------------------------------------------------------------ phase one
     def evaluate_card(self, job: Job) -> FilterDecision:
@@ -66,24 +86,25 @@ class FilterEngine:
                     False, SkipReason.FILTER_TITLE, f"title contains blocked term '{hit}'"
                 )
 
-        if rules.blocked_companies:
-            hit = _contains_any(company, rules.blocked_companies)
+        if self._norm_blocked_companies:
+            hit = _contains_any(company, self._norm_blocked_companies)
             if hit:
                 return FilterDecision(
                     False, SkipReason.FILTER_COMPANY, f"blocked company '{hit}'"
                 )
 
-        if rules.blocked_locations:
-            hit = _contains_any(location, rules.blocked_locations)
+        if self._norm_blocked_locations:
+            hit = _contains_any(location, self._norm_blocked_locations)
             if hit:
                 return FilterDecision(
                     False, SkipReason.FILTER_LOCATION, f"blocked location '{hit}'"
                 )
 
-        if rules.allowed_locations:
-            # "remote" in the title/tags counts as an allowed location.
-            remote_ok = "remote" in f"{title} {location} {' '.join(job.tags)}"
-            if _contains_any(location, rules.allowed_locations) is None and not remote_ok:
+        if self._norm_allowed_locations:
+            # Expanded remote keyword detection (P1-2)
+            haystack = f"{title} {location} {' '.join(job.tags)}".lower()
+            remote_ok = any(kw in haystack for kw in REMOTE_KEYWORDS)
+            if _contains_any(location, self._norm_allowed_locations) is None and not remote_ok:
                 return FilterDecision(
                     False, SkipReason.FILTER_LOCATION, f"location '{job.location}' not allowed"
                 )
@@ -91,7 +112,7 @@ class FilterEngine:
         if rules.skip_walkin and job.is_walkin:
             return FilterDecision(False, SkipReason.WALKIN, "walk-in drive")
 
-        # --- numeric rules: only applied when the data actually parsed -------
+        # --- numeric rules: only applied when data is disclosed -------
         exp = rules.experience
         if job.min_experience is not None and job.min_experience > exp.max_years:
             return FilterDecision(

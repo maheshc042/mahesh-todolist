@@ -51,20 +51,20 @@ recommended:
   enabled: true
   tabs: ["default", "all"]
   max_scroll_rounds: 20
-  stall_rounds_before_stop: 4
+  stall_rounds_before_stop: 2
   max_jobs: 200
   follow_show_more: true
 
 schedule:
   enabled: true
   # Default, used by any account without an override below.
-  cron: "40 9 * * 1-5"
+  cron: "40 9 * * *"
   # The two accounts MUST be hours apart: two logins from one IP inside the same
   # window is the pattern most likely to trigger Naukri's "unusual activity"
   # challenge. Morning for Full-Stack, afternoon for AI/Python.
   cron_by_account:
-    primary: "0 10 * * 1-5"    # 10:00 AM IST (Peak morning recruiter search window)
-    secondary: "30 10 * * 1-5" # 10:30 AM IST (Peak morning recruiter search window)
+    primary: "0 10 * * *"    # 10:00 AM IST (Peak morning recruiter search window)
+    secondary: "30 10 * * *" # 10:30 AM IST (Peak morning recruiter search window)
   timezone: Asia/Kolkata
   jitter_seconds: 600
   run_on_start: false
@@ -202,6 +202,12 @@ answers:
   most comfortable programming language: "Python"
   # External Form Links (Google Forms, forms.gle, etc.)
   "re:forms\\.gle|google\\.com/forms|fill out the form|fill the form|mandatory form": "Yes -Filled the form"
+  "re:c2h|contract to hire": "Yes"
+  "ready to work for c2h": "Yes"
+  "completed your education through regular": "yes"
+  "education through regular/full-time mode": "yes"
+  "regular/full-time mode": "yes"
+  "ai backend developer": "Yes"
   "re:^yes\\s*/\\s*no\\??$": "Yes"
 
 # ---------------------------------------------------------------------------

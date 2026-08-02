@@ -26,6 +26,33 @@ class ApplicationStatus(str, Enum):
     NEEDS_REVIEW = "needs_review"
 
 
+class RecommendationTab(str, Enum):
+    DEFAULT = "default"
+    PROFILE = "profile"
+    TOP_CANDIDATE = "top_candidate"
+    APPLIES = "applies"
+    PREFERENCES = "preferences"
+    YOU_MIGHT_LIKE = "you_might_like"
+    OTHER = "other"
+
+    @classmethod
+    def normalize(cls, label: str) -> RecommendationTab:
+        low = (label or "").strip().lower()
+        if "profile" in low:
+            return cls.PROFILE
+        if "top candidate" in low or "candidate" in low:
+            return cls.TOP_CANDIDATE
+        if "applies" in low or "apply" in low:
+            return cls.APPLIES
+        if "preference" in low:
+            return cls.PREFERENCES
+        if "might like" in low or "you might" in low:
+            return cls.YOU_MIGHT_LIKE
+        if "default" in low or not low:
+            return cls.DEFAULT
+        return cls.OTHER
+
+
 class SkipReason(str, Enum):
     FILTER_TITLE = "filter_title"
     FILTER_DESCRIPTION = "filter_description"
@@ -75,6 +102,9 @@ class Job:
     description: str = ""
     is_walkin: bool = False
     source_keyword: str = ""
+    recommendation_tab: str = "default"
+    recommendation_position: int | None = None
+    total_jobs_in_tab: int | None = None
     scraped_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
 
     # --- Derived numeric fields, parsed lazily by the parser module ---------
@@ -115,6 +145,9 @@ class Job:
             "posted_days_ago": self.posted_days_ago,
             "is_walkin": self.is_walkin,
             "source_keyword": self.source_keyword,
+            "recommendation_tab": self.recommendation_tab,
+            "recommendation_position": self.recommendation_position,
+            "total_jobs_in_tab": self.total_jobs_in_tab,
         }
 
 
