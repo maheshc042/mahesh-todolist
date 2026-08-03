@@ -2,8 +2,8 @@ name: Naukri Auto-Apply Agent
 
 on:
   schedule:
-    # 04:00 UTC = 09:30 AM IST (Every day) - Single daily high-relevance batch (35 jobs/account)
-    - cron: '0 4 * * *'
+    # 04:17 UTC = 09:47 AM IST (Every day) - Off-peak minute to avoid GitHub runner queue delays
+    - cron: '17 4 * * *'
   workflow_dispatch:
 
 concurrency:

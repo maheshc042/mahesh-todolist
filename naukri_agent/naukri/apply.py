@@ -35,7 +35,8 @@ Design decisions:
 from __future__ import annotations
 
 import asyncio
-from typing import Callable
+import time
+from typing import Awaitable, Callable
 
 from playwright.async_api import Page, TimeoutError as PWTimeoutError
 
@@ -55,6 +56,7 @@ from ..core.models import (
     Job,
     SkipReason,
 )
+from ..core.runtime_metrics import JobTiming, RuntimeMetrics
 from ..logging_setup import get_logger
 from . import selectors as S
 from .chatbot import ChatbotHandler
@@ -73,6 +75,7 @@ class ApplyEngine:
         max_questions: int = 15,
         nav_timeout_ms: int = 45_000,
         attempts: int = 2,
+        metrics: RuntimeMetrics | None = None,
     ) -> None:
         self.page = page
         self.answers = answers
@@ -81,6 +84,7 @@ class ApplyEngine:
         self.max_questions = max_questions
         self.nav_timeout_ms = nav_timeout_ms
         self.attempts = attempts
+        self.metrics = metrics
         self._popup_opened = False
         self._popup_tasks: set[asyncio.Task] = set()
         self.page.on("popup", self._on_popup)
@@ -172,15 +176,24 @@ class ApplyEngine:
         """
         Full flow for a single job. Never raises; always returns an outcome.
         """
+        t_job_start = time.perf_counter()
+        jt = JobTiming(job_id=job.job_id, title=job.title)
         self._popup_opened = False
         attempt_used = 0
 
         async def navigate_and_classify() -> str:
             nonlocal attempt_used
             attempt_used += 1
+
+            t_goto_0 = time.perf_counter()
             await self._open_job(job)
+            jt.goto_s += time.perf_counter() - t_goto_0
+
+            t_ready_0 = time.perf_counter()
             await self.enrich(job)
             state = await self._state()
+            jt.readiness_s += time.perf_counter() - t_ready_0
+
             if state == "unknown":
                 # Could be a soft 5xx or a partially hydrated page: worth a retry.
                 raise PWTimeoutError("apply button not resolvable")
@@ -198,6 +211,9 @@ class ApplyEngine:
         except Exception as exc:
             shot = await self.artifacts.capture_failure(self.page, "open-failed", profile, job.job_id)
             log.error("apply.open_failed", job_id=job.job_id, profile=profile, attempt=attempt_used, error=str(exc)[:250])
+            jt.total_s = time.perf_counter() - t_job_start
+            if self.metrics:
+                self.metrics.job_timings.append(jt)
             return ApplyOutcome(
                 status=ApplicationStatus.FAILED,
                 detail=f"could not classify job page: {str(exc)[:180]}",
@@ -207,6 +223,9 @@ class ApplyEngine:
 
         if state == "already_applied":
             log.info("apply.already_applied", job_id=job.job_id, profile=profile, attempt=attempt_used, title=job.title[:80])
+            jt.total_s = time.perf_counter() - t_job_start
+            if self.metrics:
+                self.metrics.job_timings.append(jt)
             return ApplyOutcome(
                 status=ApplicationStatus.ALREADY_APPLIED,
                 reason=SkipReason.ALREADY_APPLIED,
@@ -216,6 +235,9 @@ class ApplyEngine:
 
         if state == "external":
             log.info("apply.external_skip", job_id=job.job_id, profile=profile, attempt=attempt_used, company=job.company[:60])
+            jt.total_s = time.perf_counter() - t_job_start
+            if self.metrics:
+                self.metrics.job_timings.append(jt)
             return ApplyOutcome(
                 status=ApplicationStatus.EXTERNAL,
                 reason=SkipReason.EXTERNAL_APPLY,
@@ -234,6 +256,9 @@ class ApplyEngine:
                     title=job.title[:70],
                     detail=decision.detail,
                 )
+                jt.total_s = time.perf_counter() - t_job_start
+                if self.metrics:
+                    self.metrics.job_timings.append(jt)
                 return ApplyOutcome(
                     status=ApplicationStatus.SKIPPED,
                     reason=decision.reason or SkipReason.FILTER_DESCRIPTION,
@@ -243,6 +268,9 @@ class ApplyEngine:
 
         if self.dry_run:
             log.info("apply.dry_run", job_id=job.job_id, profile=profile, attempt=attempt_used, title=job.title[:80])
+            jt.total_s = time.perf_counter() - t_job_start
+            if self.metrics:
+                self.metrics.job_timings.append(jt)
             return ApplyOutcome(
                 status=ApplicationStatus.SKIPPED,
                 reason=SkipReason.DRY_RUN,
@@ -250,7 +278,11 @@ class ApplyEngine:
                 attempts=attempt_used,
             )
 
-        return await self._submit(job, profile, attempt_used)
+        outcome = await self._submit(job, profile, attempt_used, jt)
+        jt.total_s = time.perf_counter() - t_job_start
+        if self.metrics:
+            self.metrics.job_timings.append(jt)
+        return outcome
 
     async def _wait_for_post_apply_event(self) -> str:
         """Race-free event-driven wait for post-apply UI reaction (P1-1 & P1-2)."""
@@ -268,10 +300,12 @@ class ApplyEngine:
             await asyncio.sleep(0.15)
         return "timeout"
 
-    async def _submit(self, job: Job, profile: str, attempts: int) -> ApplyOutcome:
+    async def _submit(self, job: Job, profile: str, attempts: int, jt: JobTiming) -> ApplyOutcome:
+        t_btn_0 = time.perf_counter()
         apply_btn = await first_visible(
             self.page, ["button#apply-button", *S.JD_APPLY_BUTTON], timeout_ms=8_000
         )
+        jt.btn_detect_s += time.perf_counter() - t_btn_0
         if apply_btn is None:
             shot = await self.artifacts.capture_failure(self.page, "apply-btn-gone", profile, job.job_id)
             return ApplyOutcome(
@@ -281,6 +315,7 @@ class ApplyEngine:
                 attempts=attempts,
             )
 
+        t_click_0 = time.perf_counter()
         try:
             await apply_btn.scroll_into_view_if_needed(timeout=5_000)
             await human_pause(250, 700)
@@ -288,15 +323,19 @@ class ApplyEngine:
         except Exception as exc:
             shot = await self.artifacts.capture_failure(self.page, "apply-click", profile, job.job_id)
             log.error("apply.click_failed", job_id=job.job_id, profile=profile, attempt=attempts, error=str(exc)[:200])
+            jt.click_s += time.perf_counter() - t_click_0
             return ApplyOutcome(
                 status=ApplicationStatus.FAILED,
                 detail=f"apply click failed: {str(exc)[:180]}",
                 screenshot_path=shot,
                 attempts=attempts,
             )
+        jt.click_s += time.perf_counter() - t_click_0
 
         # Race-free event-driven wait (P1-1 & P1-2)
+        t_qdet_0 = time.perf_counter()
         event_type = await self._wait_for_post_apply_event()
+        jt.q_detect_s += time.perf_counter() - t_qdet_0
 
         if event_type == "popup" or self._popup_opened:
             return ApplyOutcome(
@@ -315,7 +354,9 @@ class ApplyEngine:
         chatbot = ChatbotHandler(self.page, self.answers, max_questions=self.max_questions)
         if event_type == "chatbot" or await chatbot.is_open(timeout_ms=3_000):
             log.info("apply.chatbot_opened", job_id=job.job_id, profile=profile, attempt=attempts)
+            t_qans_0 = time.perf_counter()
             result = await chatbot.run()
+            jt.q_answer_s += time.perf_counter() - t_qans_0
 
             if result.unanswered:
                 shot = await self.artifacts.screenshot(self.page, "unanswered", profile, job.job_id)
@@ -388,7 +429,10 @@ class ApplyEngine:
                 attempts=attempts,
             )
 
-        if await self._verify_applied(job):
+        t_ver_0 = time.perf_counter()
+        verified = await self._verify_applied(job)
+        jt.verify_s += time.perf_counter() - t_ver_0
+        if verified:
             log.info("apply.success_verified_on_reload", job_id=job.job_id, profile=profile, attempt=attempts)
             return ApplyOutcome(status=ApplicationStatus.APPLIED, attempts=attempts)
 

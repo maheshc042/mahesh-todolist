@@ -53,6 +53,7 @@ from ..core.models import (
     SkipReason,
 )
 from ..core.ranking import CandidateProfile, RankedJob, RankingWeights
+from ..core.runtime_metrics import RuntimeMetrics
 from ..db.repository import Repository
 from ..logging_setup import bind_context, clear_context, get_logger
 from ..naukri import selectors as S
@@ -177,6 +178,7 @@ class Orchestrator:
         self.account: NaukriAccount | None = None
 
         self.stats = RunStats()
+        self.metrics = RuntimeMetrics()
         self.run_id: int | None = None
         self.repo: Repository | None = None
         self.applier: ApplyEngine | None = None
@@ -266,18 +268,22 @@ class Orchestrator:
         artifacts = ArtifactStore(self.settings.artifacts_dir, self.run_id)
 
         try:
+            t_b_0 = time.perf_counter()
             async with BrowserManager(
                 self.config.browser,
                 self.repo,
                 session_key=self.account.session_key,
             ) as browser:
+                self.metrics.browser_startup_s = time.perf_counter() - t_b_0
                 auth = NaukriAuth(
                     browser,
                     self.account.email,
                     self.account.password,
                     artifacts,
                 )
+                t_login_0 = time.perf_counter()
                 page = await auth.ensure_logged_in()
+                self.metrics.login_s = time.perf_counter() - t_login_0
 
                 # Extract session token for the match score API pre-filter.
                 # Best-effort: if extraction fails, the API client stays None
@@ -298,7 +304,9 @@ class Orchestrator:
 
                 # Ranking first, applying second: the profile touch is quota-free
                 # and worthless if the run later aborts on a cap.
+                t_ref_0 = time.perf_counter()
                 await self._refresh_profile(page)
+                self.metrics.resume_switch_s = time.perf_counter() - t_ref_0
 
                 for profile in profiles:
                     try:
@@ -329,6 +337,12 @@ class Orchestrator:
             if self.repo is not None and self.run_id is not None:
                 await self.repo.finish_run(self.run_id, status, self.stats, fatal_error)
             await self._notify(status, fatal_error)
+            
+            # Print & Log structured Runtime Summary report
+            summary_report = self.metrics.generate_report()
+            print(summary_report)
+            log.info("runtime.summary_report", report=summary_report)
+
             clear_context()
 
         log.info("run.finished", status=status.value, **self.stats.as_dict()["per_profile"])
@@ -435,6 +449,7 @@ class Orchestrator:
             page,
             self.config.browser.min_action_delay_ms,
             self.config.browser.max_action_delay_ms,
+            metrics=self.metrics,
         )
 
         # The apply engine is created ONCE per run and its knowledge base swapped
@@ -450,6 +465,7 @@ class Orchestrator:
                     dry_run=False,
                     nav_timeout_ms=self.config.browser.navigation_timeout_ms,
                     attempts=self.config.run.max_retries_per_job,
+                    metrics=self.metrics,
                 )
             else:
                 self.applier.set_answers(answers)
@@ -480,26 +496,25 @@ class Orchestrator:
             return
 
         # Step 2: Generate ApplicationPlan via ApplicationPlanner
-        candidate = CandidateProfile(
-            title_keywords=getattr(profile, "title_keywords", None) or ["python", "software", "backend", "ai", "developer"],
-            core_skills=getattr(profile, "core_skills", None) or ["python", "fastapi", "django", "postgresql", "rest api"],
-            secondary_skills=getattr(profile, "secondary_skills", None) or ["docker", "redis", "celery", "aws", "git"],
-            bonus_skills=getattr(profile, "bonus_skills", None) or ["linux", "jira"],
-            target_experience_years=profile.experience_years or 2.5,
-            min_acceptable_salary_lpa=getattr(profile, "min_salary_lpa", None),
-        )
+        t_plan_0 = time.perf_counter()
+        candidate = profile.to_candidate_profile(self.config)
         planner = ApplicationPlanner(
             candidate=candidate,
             rules=profile.filters_for("recommended"),
             daily_limit=profile.max_applications_per_run,
         )
         plan = planner.create_plan(collected_jobs)
+        t_plan_1 = time.perf_counter()
+        self.metrics.planner_s += (t_plan_1 - t_plan_0)
+        self.metrics.ranking_s += getattr(planner, "last_ranking_time_s", 0.0)
 
         # Step 3: Export Plan CSV Reports & Enriched Summary
         profile_start_time = time.monotonic()
+        t_exp_0 = time.perf_counter()
         analysis_dir = PROJECT_ROOT / "analysis"
         exporter = ReportExporter(analysis_dir, run_id=self.run_id)
         exporter.export_plan_reports(plan, profile_name=profile.name)
+        self.metrics.reporting_s += time.perf_counter() - t_exp_0
 
         # Step 4: Print Concise Summary & Full Application Plan Report
         s = plan.stats
@@ -533,6 +548,7 @@ class Orchestrator:
         failed_outcomes: list[tuple[Job, ApplyOutcome]] = []
         filters = FilterEngine(profile.filters_for("recommended"))
 
+        t_apply_loop_0 = time.perf_counter()
         try:
             for rjob in plan.selected_jobs:
                 self._check_global_limits()
@@ -556,9 +572,12 @@ class Orchestrator:
                     failed_outcomes.append((job, outcome))
         except _CapReached:
             pass
+        finally:
+            self.metrics.total_apply_phase_s += time.perf_counter() - t_apply_loop_0
 
         # Step 7: Export Outcome Reports & Enriched Summary JSON
         duration = time.monotonic() - profile_start_time
+        t_exp_out_0 = time.perf_counter()
         exporter.export_outcome_reports(applied_outcomes, failed_outcomes, profile_name=profile.name)
         exporter.export_summary_json(
             plan,
@@ -568,6 +587,7 @@ class Orchestrator:
             dry_run=False,
             duration_seconds=duration,
         )
+        self.metrics.reporting_s += time.perf_counter() - t_exp_out_0
         log.info("profile.done", profile=profile.name, applied=applied_this_profile)
 
     # ------------------------------------------------------------------- job
@@ -718,4 +738,6 @@ class Orchestrator:
             f"Naukri agent [{self.account_key}] {status.value} — "
             f"{self.stats.applied} applied"
         )
+        t_notif_0 = time.perf_counter()
         await self.notifier.send(title, body, is_error=is_error)
+        self.metrics.telegram_s += time.perf_counter() - t_notif_0

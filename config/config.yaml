@@ -87,6 +87,10 @@ answers:
   notice period: "0 days"
   how soon can you join: "0 days"
   last working day: "30/04/2026"
+  last working date: "30/04/2026"
+  lwd: "30/04/2026"
+  relieving date: "30/04/2026"
+  end date of notice: "30/04/2026"
   buyout option: "No"
 
   # Salary & CTC
@@ -219,7 +223,7 @@ answers:
 # ---------------------------------------------------------------------------
 experience:
   total_years: 2.6
-  default_years: 2.6
+  default_years: 2.0
   multi_skill_strategy: max
   skills:
     html: 2.6
@@ -230,6 +234,33 @@ experience:
     node: 2.6
     typescript: 2.6
     full stack: 2.6
+    mern: 2.6
+    mern stack: 2.6
+    mean: 2.6
+    express: 2.6
+    express.js: 2.6
+    postgresql: 2.6
+    postgres: 2.6
+    mongodb: 2.6
+    mongo: 2.6
+    sql: 2.6
+    rest api: 2.6
+    restful api: 2.6
+    microservices: 2.0
+    git: 2.6
+    github: 2.6
+    c++: 2.0
+    cpp: 2.0
+    c: 2.0
+    docker: 2.0
+    next.js: 2.0
+    nextjs: 2.0
+    vue: 2.0
+    angular: 2.0
+    testing: 2.0
+    software testing: 2.0
+    qa: 2.0
+    devops: 2.0
     # AI / Python is the newer track: 6 months hands-on. Keep these honest —
     # recruiters cross-check them against the resume.
     ai: 0.6

@@ -551,6 +551,12 @@ class JobProfile(_Model):
     answers: dict[str, str] = Field(default_factory=dict)
     experience: ExperienceConfig | None = None
 
+    # Optional ranking overrides
+    title_keywords: list[str] = Field(default_factory=list)
+    core_skills: list[str] = Field(default_factory=list)
+    secondary_skills: list[str] = Field(default_factory=list)
+    bonus_skills: list[str] = Field(default_factory=list)
+
     @field_validator("answers", mode="before")
     @classmethod
     def _answers(cls, value: Any) -> dict[str, str]:
@@ -567,6 +573,91 @@ class JobProfile(_Model):
     def filters_for(self, source: str) -> FilterRules:
         """`recommended` gets the relaxed ruleset; keyword search gets the full one."""
         return self.filters.relaxed() if source == "recommended" else self.filters
+
+    def to_candidate_profile(self, config: "AgentConfig | None" = None) -> Any:
+        """
+        Derive CandidateProfile from the active JobProfile without hardcoded defaults.
+        Fails with ConfigError if insufficient info exists to build a CandidateProfile.
+        """
+        from .core.ranking import CandidateProfile
+
+        # 1. Derive title keywords
+        title_kws = [k.strip() for k in self.title_keywords if k.strip()]
+        if not title_kws:
+            if self.filters and self.filters.title_must_include_any:
+                title_kws = [k.strip() for k in self.filters.title_must_include_any if k.strip()]
+            elif self.name:
+                title_kws = [w.strip().lower() for w in re.split(r"[/,|\s]+", self.name) if len(w.strip()) > 2]
+
+        # 2. Derive skill tiers
+        c_skills = [s.strip() for s in self.core_skills if s.strip()]
+        s_skills = [s.strip() for s in self.secondary_skills if s.strip()]
+        b_skills = [s.strip() for s in self.bonus_skills if s.strip()]
+
+        if not c_skills:
+            skill_years: dict[str, float] = {}
+
+            # Include profile answers ("experience in <skill>": "<years>")
+            for key, val in self.answers.items():
+                k_low = key.lower().strip()
+                if k_low.startswith("experience in "):
+                    skill_name = k_low.replace("experience in ", "").strip()
+                    try:
+                        yrs = float(val)
+                        if yrs > 0:
+                            skill_years[skill_name] = max(skill_years.get(skill_name, 0.0), yrs)
+                    except ValueError:
+                        pass
+
+            # Include config experience skill map if provided
+            if config is not None:
+                exp_ans = config.experience_for(self)
+                if exp_ans and exp_ans.skills:
+                    for s, yrs in exp_ans.skills.items():
+                        if yrs > 0:
+                            skill_name = s.strip().lower()
+                            skill_years[skill_name] = max(skill_years.get(skill_name, 0.0), yrs)
+
+            # Fallback to tech words from title_must_include_any if no explicit skill years found
+            if not skill_years and self.filters and self.filters.title_must_include_any:
+                excluded_generic = {"developer", "engineer", "software", "qa", "testing", "tester", "lead", "manager"}
+                for term in self.filters.title_must_include_any:
+                    t = term.strip().lower()
+                    if t and t not in excluded_generic:
+                        skill_years[t] = 1.0
+
+            if skill_years:
+                sorted_skills = [s for s, y in sorted(skill_years.items(), key=lambda item: (-item[1], item[0]))]
+                broad_role_words = {"developer", "engineer", "software", "web", "full stack", "fullstack"}
+                tech_skills = [s for s in sorted_skills if s not in broad_role_words] or sorted_skills
+
+                c_skills = tech_skills[:6]
+                if not s_skills:
+                    s_skills = tech_skills[6:12]
+                if not b_skills:
+                    b_skills = tech_skills[12:]
+
+        # Validation: raise ConfigError if profile lacks sufficient data
+        if not title_kws and not c_skills:
+            raise ConfigError(
+                f"Profile '{self.name}' does not contain enough information "
+                "(title keywords or skills) to construct a CandidateProfile for ranking."
+            )
+
+        target_exp = self.experience_years
+        if target_exp <= 0 and config is not None and config.experience.total_years:
+            target_exp = config.experience.total_years
+        if target_exp <= 0:
+            target_exp = 1.0
+
+        return CandidateProfile(
+            title_keywords=title_kws,
+            core_skills=c_skills,
+            secondary_skills=s_skills,
+            bonus_skills=b_skills,
+            target_experience_years=target_exp,
+            min_acceptable_salary_lpa=self.filters.min_salary_lpa if self.filters else None,
+        )
 
 
 class AgentConfig(_Model):

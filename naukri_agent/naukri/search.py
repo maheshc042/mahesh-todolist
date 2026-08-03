@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import csv
 import re
+import time
 from typing import Any
 
 from playwright.async_api import Locator, Page
@@ -38,6 +39,7 @@ from ..browser.resilience import (
 )
 from ..config import RecommendedConfig, SearchSpec
 from ..core.models import Job, RecommendationTab
+from ..core.runtime_metrics import RuntimeMetrics, TabTiming
 from ..logging_setup import get_logger
 from . import selectors as S
 from .parser import (
@@ -170,11 +172,13 @@ class JobSearcher:
         min_delay_ms: int = 350,
         max_delay_ms: int = 1_400,
         artifacts: ArtifactStore | None = None,
+        metrics: RuntimeMetrics | None = None,
     ) -> None:
         self.page = page
         self.min_delay_ms = min_delay_ms
         self.max_delay_ms = max_delay_ms
         self.artifacts = artifacts
+        self.metrics = metrics
 
     # -------------------------------------------------- keyword search fallback
     async def search_page(
@@ -258,6 +262,7 @@ class JobSearcher:
         """
         Harvest Naukri's "Recommended jobs" feed across all recommendation tabs.
         """
+        t_reco_start = time.perf_counter()
         cfg = settings or RecommendedConfig()
         exclude = exclude_job_ids or set()
         log.info("reco.start", url=S.RECOMMENDED_JOBS_URL, tabs=cfg.tabs)
@@ -283,7 +288,15 @@ class JobSearcher:
         before_default = len(collected)
         tabs_visited.append("default")
         log.info("reco.tab_start", tab="default")
-        await self._harvest(cfg, collected, exclude, raw_tab_label="default")
+        
+        t_tab_start = time.perf_counter()
+        tab_timing = TabTiming(tab_name="default")
+        await self._harvest(cfg, collected, exclude, raw_tab_label="default", tab_timing=tab_timing)
+        tab_timing.total_s = time.perf_counter() - t_tab_start
+        tab_timing.jobs_found = len(collected) - before_default
+        if self.metrics:
+            self.metrics.tab_timings["default"] = tab_timing
+
         after_default = len(collected)
         log.info(
             "reco.tab_stats",
@@ -309,7 +322,14 @@ class JobSearcher:
                     continue
 
                 before_tab = len(collected)
-                await self._harvest(cfg, collected, exclude, raw_tab_label=label)
+                t_tab_start = time.perf_counter()
+                tab_timing = TabTiming(tab_name=label)
+                await self._harvest(cfg, collected, exclude, raw_tab_label=label, tab_timing=tab_timing)
+                tab_timing.total_s = time.perf_counter() - t_tab_start
+                tab_timing.jobs_found = len(collected) - before_tab
+                if self.metrics:
+                    self.metrics.tab_timings[label] = tab_timing
+
                 after_tab = len(collected)
 
                 log.info(
@@ -318,6 +338,9 @@ class JobSearcher:
                     new_jobs_collected=after_tab - before_tab,
                     total_unique_jobs=after_tab,
                 )
+
+        if self.metrics:
+            self.metrics.total_collection_s = time.perf_counter() - t_reco_start
 
         jobs_list = list(collected.values())
         log.info(
@@ -488,6 +511,7 @@ class JobSearcher:
         collected: dict[str, Job],
         exclude: set[str],
         raw_tab_label: str,
+        tab_timing: TabTiming | None = None,
     ) -> None:
         """
         Incremental Card Harvest.
@@ -525,6 +549,7 @@ class JobSearcher:
                 if len(collected) >= cfg.max_jobs:
                     break
 
+                t_dupe_start = time.perf_counter()
                 # P1-2: Extract fast lightweight key BEFORE calling expensive _parse_card
                 try:
                     card_key = (
@@ -537,16 +562,24 @@ class JobSearcher:
 
                 # P1-1: Incremental check - skip already-processed DOM elements immediately
                 if card_key and card_key in seen_card_keys:
+                    if tab_timing:
+                        tab_timing.dupe_check_s += time.perf_counter() - t_dupe_start
                     duplicates_skipped += 1
                     continue
 
                 if card_key:
                     seen_card_keys.add(card_key)
                     if card_key in exclude or f"reco-{card_key}" in exclude:
+                        if tab_timing:
+                            tab_timing.dupe_check_s += time.perf_counter() - t_dupe_start
                         duplicates_skipped += 1
                         continue
 
+                if tab_timing:
+                    tab_timing.dupe_check_s += time.perf_counter() - t_dupe_start
+
                 # Parse ONLY new cards
+                t_parse_start = time.perf_counter()
                 job = await self._parse_card(
                     card,
                     keyword="recommended",
@@ -554,6 +587,8 @@ class JobSearcher:
                     tab_enum=tab_enum,
                     total_in_tab=tab_total,
                 )
+                if tab_timing:
+                    tab_timing.parse_s += time.perf_counter() - t_parse_start
 
                 if job is None:
                     parse_failures += 1
@@ -592,19 +627,23 @@ class JobSearcher:
                 break
 
             # Deep scroll trigger on window and feed list containers for infinite-scroll lazy loading
+            t_scroll_start = time.perf_counter()
             try:
                 await self.page.evaluate(
                     "window.scrollTo(0, document.body.scrollHeight); window.dispatchEvent(new Event('scroll'));"
                 )
                 for scroll_sel in (
                     "div[class*='recommended']",
+                    "div[class*='feed']",
                     "div[class*='list']",
                     "div[class*='wrapper']",
                 ):
                     try:
-                        await self.page.locator(scroll_sel).first.evaluate(
-                            "el => { el.scrollTop = el.scrollHeight; el.dispatchEvent(new Event('scroll')); }"
-                        )
+                        container = self.page.locator(scroll_sel).first
+                        if await container.count():
+                            await container.evaluate(
+                                "el => { el.scrollTop = el.scrollHeight; el.dispatchEvent(new Event('scroll')); }"
+                            )
                     except Exception:
                         pass
             except Exception:
@@ -614,6 +653,9 @@ class JobSearcher:
                 await click_if_present(self.page, S.RECO_SHOW_MORE, timeout_ms=1_500)
 
             await scroll_page(self.page, steps=3)
+
+            if tab_timing:
+                tab_timing.scroll_s += time.perf_counter() - t_scroll_start
 
         log.info(
             "reco.tab_audit_report",

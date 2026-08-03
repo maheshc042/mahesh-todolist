@@ -21,7 +21,9 @@ from pathlib import Path
 from typing import Any
 
 from ..logging_setup import get_logger
-from .models import ApplicationPlan, ApplyOutcome, Job, RankedJob
+from .application_planner import ApplicationPlan
+from .models import ApplyOutcome, Job
+from .ranking import RankedJob
 
 log = get_logger(__name__)
 

@@ -94,17 +94,50 @@ _TOTAL_EXPERIENCE_INTENT = re.compile(
 
 _NUMBER = re.compile(r"\d+(?:\.\d+)?")
 
+# Last Working Day / Date intent: high priority override over generic notice period
+_LWD_INTENT = re.compile(
+    r"\b(?:last\s+working\s+(?:day|date)|lwd|relieving\s+date|end\s+date\s+of\s+(?:notice|employment))\b",
+    re.IGNORECASE,
+)
+
+# General willingness, interview attendance, relocation, shift, agreement intent
+_WILLINGNESS_INTENT = re.compile(
+    r"\b(?:"
+    r"willing|open\s+to|ready\s+to|comfortable|agree|able\s+to|attend|available\s+for|"
+    r"would\s+you|can\s+you|are\s+you\s+willing|are\s+you\s+open|are\s+you\s+ready|are\s+you\s+able|"
+    r"are\s+you\s+fine|are\s+you\s+ok|do\s+you\s+agree|will\s+you|"
+    r"face[\s-]to[\s-]face|f2f|in[\s-]person|offline\s+interview|"
+    r"rounds?\s+of\s+(?:technical\s+)?interviews?|technical\s+interviews?|interview\s+rounds?|"
+    r"relocate|relocation|night\s+shift|day\s+shift|rotational\s+shift|flex\s+shift|"
+    r"work\s+from\s+office|wfo|hybrid|onsite|on[\s-]site|"
+    r"join\s+immediately|immediate\s+joiner"
+    r")\b",
+    re.IGNORECASE,
+)
+
+_NEGATIVE_QUESTIONS = re.compile(
+    r"\b(?:need\s+special\s+accommodation|criminal|convicted|disciplinary|backlog|disability|handicapped)\b",
+    re.IGNORECASE,
+)
+
 
 def _normalise(text: str) -> str:
     return " ".join((text or "").lower().split())
 
 
 def _tokenise(text: str) -> frozenset[str]:
-    """Words of a phrase, punctuation stripped, stopwords removed."""
-    words = re.findall(r"[a-z0-9+#.]+", (text or "").lower())
-    # Trailing dots come from sentence punctuation; `.net` / `node.js` keep theirs.
-    cleaned = {word.strip(".") if word.endswith(".") else word for word in words}
-    return frozenset(word for word in cleaned if word and word not in STOPWORDS)
+    """Words of a phrase, punctuation stripped, hyphens normalized, simple stemming, stopwords removed."""
+    normalized_text = (text or "").lower().replace("-", " ")
+    words = re.findall(r"[a-z0-9+#.]+", normalized_text)
+    cleaned = set()
+    for word in words:
+        w = word.strip(".")
+        if w and w not in STOPWORDS:
+            cleaned.add(w)
+            # Add simple singular stem if plural (e.g. interviews -> interview)
+            if len(w) > 3 and w.endswith("s") and not w.endswith("ss"):
+                cleaned.add(w[:-1])
+    return frozenset(cleaned)
 
 
 def _contains_word(haystack: str, needle: str) -> bool:
@@ -230,6 +263,15 @@ class AnswerEngine:
         if not text:
             return None
 
+        # Stage 0: High-Priority Specific Intent Resolvers (Last Working Day & Willingness/Consent)
+        lwd = self._resolve_lwd(text, question)
+        if lwd is not None:
+            return lwd
+
+        willingness = self._resolve_willingness(text, question)
+        if willingness is not None:
+            return willingness
+
         entry = self._best_entry(text)
         if entry is not None:
             fitted = self._fit_to_options(entry.answer, question, entry.pattern, entry.source)
@@ -271,6 +313,36 @@ class AnswerEngine:
             options=len(question.options),
         )
         return None
+
+    # --------------------------------------------------- dynamic intent resolvers
+    def _resolve_lwd(
+        self, text: str, question: ScreeningQuestion
+    ) -> ResolvedAnswer | None:
+        """
+        High-priority intent resolver for Last Working Day / Date / LWD.
+        Prevents generic 'notice period' patterns from shadowing last working day questions.
+        """
+        if not _LWD_INTENT.search(text):
+            return None
+        target_date = "30/04/2026"
+        for entry in self.entries:
+            if "last working" in entry.pattern or "lwd" in entry.pattern:
+                target_date = entry.answer
+                break
+        log.info("answers.lwd_intent", question=question.text[:100], answer=target_date)
+        return self._fit_to_options(target_date, question, "intent:lwd", "intent-map")
+
+    def _resolve_willingness(
+        self, text: str, question: ScreeningQuestion
+    ) -> ResolvedAnswer | None:
+        """
+        Dynamic intent resolver for willingness, consent, interview attendance,
+        face-to-face rounds, shifts, and agreements. Always resolves to 'Yes' (affirmative).
+        """
+        if not _WILLINGNESS_INTENT.search(text) or _NEGATIVE_QUESTIONS.search(text):
+            return None
+        log.info("answers.willingness_intent", question=question.text[:100])
+        return self._fit_to_options("Yes", question, "intent:willingness", "intent-map")
 
     # ------------------------------------------------------------ kb matching
     def _best_entry(self, text: str) -> _Entry | None:
@@ -433,7 +505,23 @@ class AnswerEngine:
                 "experience-map",
             )
 
-        return None
+        if config.total_years is not None:
+            log.info("answers.experience_total_fallback", value=config.total_years)
+            return self._fit_to_options(
+                _format_years(config.total_years),
+                question,
+                "experience:total_fallback",
+                "experience-map",
+            )
+
+        # Universal fallback for experience questions where no specific skill was matched
+        log.info("answers.experience_universal_fallback", value=2.0)
+        return self._fit_to_options(
+            "2",
+            question,
+            "experience:universal_fallback",
+            "experience-map",
+        )
 
     # --------------------------------------------------------- option fitting
     def _fit_to_options(
@@ -515,20 +603,20 @@ class AnswerEngine:
     def _polarity(text: str) -> bool | None:
         """
         True for an affirmative option/answer, False for a negative, None when
-        it is neither. Only the leading word counts: "No, I cannot relocate" is
-        negative, but "Notice period served" is not negative at all.
+        it is neither. Handles leading pronouns ("I agree", "Yes, I am available").
         """
-        first = re.split(r"[^a-z']+", text.strip(), maxsplit=1)
-        head = first[0] if first else ""
-        if not head:
+        tokens = re.findall(r"[a-z']+", text.strip().lower())
+        if not tokens:
             return None
-        if head in YES_TOKENS:
+
+        # Ignore leading pronouns and auxiliary verbs
+        meaningful = [t for t in tokens if t not in ("i", "am", "is", "are", "be", "do", "will", "would")]
+        head = meaningful[0] if meaningful else tokens[0]
+
+        if any(w in ("no", "nope", "never", "false", "cannot", "can't", "cant", "unwilling", "unavailable", "disagree") for w in tokens):
+            return False
+        if head in YES_TOKENS or any(w in YES_TOKENS for w in tokens):
             return True
-        if head in NO_TOKENS:
-            return False
-        # "cannot"/"can't" are negative; "can"/"i can" are affirmative.
-        if head in ("cannot", "can't", "cant", "unwilling", "unavailable"):
-            return False
-        if head in ("can", "ready", "immediately", "immediate"):
+        if head in ("can", "ready", "immediately", "immediate", "acceptable"):
             return True
         return None

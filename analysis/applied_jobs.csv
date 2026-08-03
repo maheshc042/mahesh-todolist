@@ -1,1 +1,9 @@
-job_id,status,company,title,url,attempts,detail
+job_id,status,company,title,url,detail,reason,attempts
+reco-010826007437,applied,Hexaware Technologies,Mern Full Stack Developer,https://www.naukri.com/job-listings-010826007437,,,1
+reco-280726030292,applied,Netscribes,Mern Full Stack Developer,https://www.naukri.com/job-listings-280726030292,,,1
+reco-310726927722,applied,Capgemini,Senior Software Engineer,https://www.naukri.com/job-listings-310726927722,,,1
+reco-310726916060,applied,ABB,Software Engineer,https://www.naukri.com/job-listings-310726916060,,,1
+reco-300726021803,applied,TJS,"AI/ML Engineer, AI/ML Developer",https://www.naukri.com/job-listings-300726021803,,,1
+reco-300726017119,applied,Mobifly,Fullstack Developer,https://www.naukri.com/job-listings-300726017119,,,1
+reco-310726915596,applied,Newgen,Software Engineer/Senior Software Engineer,https://www.naukri.com/job-listings-310726915596,,,1
+reco-180326018875,applied,021 Trade,Flutter Developer,https://www.naukri.com/job-listings-180326018875,,,1

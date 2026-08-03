@@ -24,6 +24,7 @@ Design principles:
 
 from __future__ import annotations
 
+import time
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any
@@ -181,7 +182,9 @@ class ApplicationPlanner:
             eligible_raw.append(job)
 
         # 2. Ranking Phase
+        t_rk_0 = time.perf_counter()
         ranked_eligible = self.ranking_engine.rank_jobs(eligible_raw)
+        self.last_ranking_time_s = time.perf_counter() - t_rk_0
 
         # 3. Partition into Selected vs Overflow based on Daily Cap Limit
         selected = ranked_eligible[:cap]
