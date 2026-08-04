@@ -275,6 +275,28 @@ experience:
     langchain: 0.6
     fastapi: 0.6
     chatbot: 0.6
+    conversational ai: 0.6
+    language models: 0.6
+    ai engineer: 0.6
+    front end: 2.6
+    frontend: 2.6
+    back end: 2.6
+    backend: 2.6
+    ui: 2.6
+    ux: 2.6
+    ui/ux: 2.6
+    apis: 2.6
+    api: 2.6
+    rest: 2.6
+    agile: 2.6
+    use cases: 2.6
+    business processes: 2.0
+    customer engagement: 2.0
+    emerging technologies: 2.0
+    cloud services: 2.0
+    cloud platforms: 2.0
+    azure: 2.0
+    microsoft azure: 2.0
     unix: 2.6
     linux: 2.6
     cloud: 2.0
@@ -332,25 +354,29 @@ profiles:
     account: primary
     experience_years: 2.6
     use_recommended: true
-    max_applications_per_run: 25
+    max_applications_per_run: 35
     resume_label: "Full Stack Engineer"
     resume_file: null
 
+    # Primary skills required: AT LEAST ONE of core_skills MUST match in every job
+    core_skills: ["react", "react.js", "reactjs", "node", "node.js", "nodejs", "javascript", "typescript", "express", "next.js", "nextjs", "python", "fastapi", "flask", "frontend", "front end", "backend", "back end", "ui", "ux", "chatbot"]
+    secondary_skills: ["microservices", "microservice", "messaging queue", "message queue", "rabbitmq", "kafka", "analytics", "monitoring", "api integration", "apis", "rest", "workflows", "automation", "application development", "agile", "use cases", "emerging technologies", "cloud services", "cloud platforms", "business processes", "customer engagement", "sql", "postgresql", "postgres", "mongodb", "docker", "kubernetes", "k8s", "aws", "gcp", "azure", "microsoft azure", "cloud run", "cloud", "git", "rest api", "html", "css", "crm", "erp", "billing", "information technology", "enterprise systems", "ai coding", "ai tools"]
+    bonus_skills: ["testing"]
+
     searches: []
     search_is_fallback_only: true
-    # searches:
-    #   - keyword: "Master Full Stack & MERN Search"
-    #     custom_url: "https://www.naukri.com/full-stack-node-dot-js-mern-stack-react-dot-js-nextjs-javascript-typescript-chatbot-fullstack-developer-fullstack-development-jobs?k=full+stack%2C+node.js%2C+mern+stack%2C+react.js%2C+nextjs%2C+javascript%2C+typescript%2C+chatbot%2C+fullstack+developer%2C+fullstack+development&nignbevent_src=jobsearchDeskGNB&experience=2&jobAge=3&ctcFilter=3to6&ctcFilter=6to10"
-    #     max_pages: 25
 
-    # These rules apply to keyword search. The recommended feed automatically
-    # uses `filters.relaxed()`: the inclusion lists and the freshness cap are
-    # dropped (Naukri already matched the job), while every blocklist and the
-    # experience sanity check are kept.
     filters:
       title_must_include_any: [full stack, fullstack, mern, react, node, javascript, typescript, frontend, backend, web, software, developer, engineer, ai, artificial intelligence, machine learning, ml, python, llm, genai, generative ai, chatbot, prompt, qa, testing, tester]
       title_must_exclude_any: [intern, internship, sales, bpo, php, wordpress, .net, dotnet, dot net, c++, spring boot, java developer, java, mainframe, sap, salesforce, drupal, magento, lead, manager, director, vp, head, architect, sr. manager]
-      description_must_exclude_any: ["bpo", "night shift", "us shift", "commission only", "unpaid", ".net developer", "asp.net", "c#", "spring boot", "ruby on rails", "php developer", "wordpress developer", "registration fee", "security deposit", "prefers women", "women diversity", "women only", "female only"]
+      description_must_exclude_any: [
+        "bpo", "commission only", "unpaid",
+        "intern", "internship", "sales", "registration fee", "security deposit",
+        ".net", "asp.net", "c#", "spring boot", "ruby on rails", "php", "wordpress",
+        "java developer", "c++", "cpp", "mainframe", "sap", "salesforce", "drupal", "magento",
+        "lead", "manager", "director", "vp", "head", "architect", "sr. manager",
+        "prefers women", "women diversity", "women-only", "women only", "female only", "female diversity", "diversity drive"
+      ]
       allowed_locations: []
       blocked_locations: []
       blocked_companies: []
@@ -383,9 +409,14 @@ profiles:
     account: secondary
     experience_years: 2.6
     use_recommended: true
-    max_applications_per_run: 25
+    max_applications_per_run: 35
     resume_label: "AI / Python Engineer"
     resume_file: null
+
+    # Primary skills required: AT LEAST ONE of core_skills MUST match in every job
+    core_skills: ["python", "fastapi", "flask", "llm", "langchain", "crewai", "generative ai", "ai", "artificial intelligence", "machine learning", "rag", "nlp", "chatbot", "conversational ai", "language models", "ai engineer", "vertex ai", "vertex", "react", "react.js", "node", "node.js", "nodejs"]
+    secondary_skills: ["microservices", "microservice", "messaging queue", "message queue", "rabbitmq", "kafka", "analytics", "monitoring", "api integration", "apis", "rest", "workflows", "automation", "application development", "agile", "use cases", "emerging technologies", "cloud services", "cloud platforms", "business processes", "customer engagement", "sql", "postgresql", "postgres", "docker", "kubernetes", "k8s", "cloud run", "gcp", "azure", "microsoft azure", "aws", "cloud", "enterprise systems", "redis", "rest api", "pandas", "numpy", "crm", "erp", "billing", "information technology", "ai coding", "ai tools"]
+    bonus_skills: ["typescript"]
 
     searches: []
     search_is_fallback_only: true
@@ -393,7 +424,14 @@ profiles:
     filters:
       title_must_include_any: [ai, artificial intelligence, machine learning, ml, python, llm, genai, generative ai, nlp, chatbot, prompt, agent, data science, data engineer, python developer, ai engineer, ml engineer, qa, testing, tester, backend, developer, engineer]
       title_must_exclude_any: [intern, internship, sales, bpo, php, wordpress, .net, dotnet, dot net, asp.net, c#, c++, java developer, java, devops, network, hardware, lead, manager, director, vp, head, principal, architect, staff engineer]
-      description_must_exclude_any: ["bpo", "night shift", "us shift", "commission only", "unpaid", "phd required", "8+ years", "10+ years", "registration fee", "security deposit", ".net developer", "asp.net", "prefers women", "women diversity", "women only", "female only"]
+      description_must_exclude_any: [
+        "bpo", "night shift", "us shift", "commission only", "unpaid", "phd required",
+        "intern", "internship", "sales", "registration fee", "security deposit",
+        ".net", "asp.net", "c#", "spring boot", "ruby on rails", "php", "wordpress",
+        "java developer", "c++", "cpp", "devops", "network", "hardware",
+        "lead", "manager", "director", "vp", "head", "principal", "architect", "staff engineer",
+        "prefers women", "women diversity", "women-only", "women only", "female only", "female diversity", "diversity drive"
+      ]
       allowed_locations: []
       blocked_locations: []
       blocked_companies: []

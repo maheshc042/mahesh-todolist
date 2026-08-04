@@ -210,14 +210,29 @@ class HardFilter:
     Never scores or ranks.
     """
 
-    def __init__(self, rules: FilterRules) -> None:
+    def __init__(self, rules: FilterRules, candidate: CandidateProfile | None = None) -> None:
         self.rules = rules
+        self.candidate = candidate
 
     def evaluate(self, job: Job) -> FilterDecision:
         rules = self.rules
         title = job.title.lower()
         company = job.company.lower()
         location = job.location.lower()
+
+        # Core Skill Match Requirement: At least 1 primary core skill MUST match in the job
+        if self.candidate and self.candidate.core_skills:
+            haystack = _build_searchable_haystack(job)
+            has_core_match = any(
+                _exact_word_match(skill, haystack) or _normalize_tech_text(skill) in haystack
+                for skill in self.candidate.core_skills
+            )
+            if not has_core_match:
+                return FilterDecision(
+                    False,
+                    SkipReason.FILTER_DESCRIPTION,
+                    f"job lacks any required primary skill ({', '.join(self.candidate.core_skills[:5])})",
+                )
 
         # Title blocklist (with tech normalization)
         if rules.title_must_exclude_any:
@@ -252,12 +267,13 @@ class HardFilter:
         if rules.skip_walkin and job.is_walkin:
             return FilterDecision(False, SkipReason.WALKIN, "walk-in drive")
 
-        # Description blocklist
-        if rules.description_must_exclude_any and job.description:
-            hit = _contains_any(job.description.lower(), rules.description_must_exclude_any)
+        # Description & Tags blocklist (checks title, description, and card tags/badges)
+        if rules.description_must_exclude_any:
+            full_text = f"{job.title} {job.description or ''} {' '.join(job.tags or [])}".lower()
+            hit = _contains_any(full_text, rules.description_must_exclude_any)
             if hit:
                 return FilterDecision(
-                    False, SkipReason.FILTER_DESCRIPTION, f"description contains blocked term '{hit}'"
+                    False, SkipReason.FILTER_DESCRIPTION, f"job contains blocked term '{hit}'"
                 )
 
         # Numeric experience bounds
@@ -399,7 +415,7 @@ class RankingEngine:
         resume_matcher: BaseResumeMatcher | None = None,
     ) -> None:
         self.candidate = candidate
-        self.hard_filter = HardFilter(rules) if rules else None
+        self.hard_filter = HardFilter(rules, candidate=candidate) if rules else None
         self.weights = weights or RankingWeights()
         self.resume_matcher = resume_matcher or RuleBasedResumeMatcher(candidate)
 

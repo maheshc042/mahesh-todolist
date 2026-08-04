@@ -152,7 +152,7 @@ class ApplicationPlanner:
         self.rules = rules
         self.weights = weights or RankingWeights()
         self.daily_limit = daily_limit
-        self.hard_filter = HardFilter(rules) if rules else None
+        self.hard_filter = HardFilter(rules, candidate=candidate) if rules else None
         self.ranking_engine = RankingEngine(candidate, rules=rules, weights=self.weights)
 
     def create_plan(self, jobs: list[Job], custom_daily_limit: int | None = None) -> ApplicationPlan:

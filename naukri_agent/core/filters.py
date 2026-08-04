@@ -71,8 +71,6 @@ class FilterEngine:
         rules = self.rules
         title = job.title.lower()
         company = job.company.lower()
-        location = job.location.lower()
-
         if rules.title_must_include_any:
             if _contains_any(title, rules.title_must_include_any) is None:
                 return FilterDecision(
