@@ -1,8 +1,8 @@
 name: Naukri Auto-Apply Agent
 
 on:
+  # 04:17 UTC = 09:47 AM IST (Every day) - Off-peak minute to avoid GitHub runner queue delays
   schedule:
-    # 04:17 UTC = 09:47 AM IST (Every day) - Off-peak minute to avoid GitHub runner queue delays
     - cron: '17 4 * * *'
   workflow_dispatch:
 
