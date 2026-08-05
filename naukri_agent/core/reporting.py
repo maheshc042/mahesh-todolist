@@ -63,17 +63,34 @@ class ReportExporter:
         self.run_id = run_id
         self.output_dir.mkdir(parents=True, exist_ok=True)
 
-    def export_plan_reports(self, plan: ApplicationPlan, profile_name: str = "") -> None:
-        """Export all Application Plan CSV files (ranked, selected, rejected)."""
+    def export_plan_reports(self, plan: ApplicationPlan, collected_jobs: list[Job], profile_name: str = "") -> None:
+        """Export all Application Plan CSV files (collected, ranked, selected, rejected)."""
         try:
-            self._write_ranked_jobs_csv(self.output_dir / "ranked_jobs.csv", plan.ranked_jobs)
+            # 1. Collected Jobs
+            with (self.output_dir / "collected_jobs.csv").open("w", encoding="utf-8", newline="") as f:
+                w = csv.writer(f)
+                w.writerow(["job_id", "tab", "position", "total_jobs_in_tab", "company", "title", "url", "scraped_at"])
+                for j in collected_jobs:
+                    w.writerow([j.job_id, j.recommendation_tab, j.recommendation_position or "", j.total_jobs_in_tab or "", j.company, j.title, j.url, j.scraped_at.isoformat()])
+
+            # 2. Ranked & Selected Jobs
+            self._write_ranked_jobs_csv(self.output_dir / "ranked_jobs.csv", plan.eligible_jobs)
             self._write_ranked_jobs_csv(self.output_dir / "selected_jobs.csv", plan.selected_jobs)
-            self._write_ranked_jobs_csv(self.output_dir / "rejected_jobs.csv", plan.rejected_jobs)
+
+            # 3. Rejected Jobs
+            with (self.output_dir / "rejected_jobs.csv").open("w", encoding="utf-8", newline="") as f:
+                w = csv.writer(f)
+                w.writerow(["job_id", "reason", "detail", "company", "title", "url"])
+                for rinfo in plan.rejected_jobs:
+                    reason_str = rinfo.reason.value if rinfo.reason else "other"
+                    w.writerow([rinfo.job.job_id, reason_str, rinfo.detail, rinfo.job.company, rinfo.job.title, rinfo.job.url])
+
             log.info(
                 "reporting.plan_reports_exported",
                 output_dir=str(self.output_dir),
                 run_id=self.run_id,
                 profile=profile_name,
+                collected=len(collected_jobs),
                 selected=len(plan.selected_jobs),
                 rejected=len(plan.rejected_jobs),
             )
@@ -120,7 +137,7 @@ class ReportExporter:
         dry_run: bool,
         duration_seconds: float = 0.0,
     ) -> None:
-        """Export enriched summary.json report incorporating run metadata (P1-4)."""
+        """Export enriched summary.json report incorporating run metadata."""
         try:
             summary_data: dict[str, Any] = {
                 "profile": profile_name,
@@ -129,14 +146,14 @@ class ReportExporter:
                 "duration_seconds": round(duration_seconds, 2),
                 "generated_at": _now_utc().isoformat(),
                 "plan_stats": {
-                    "collected": plan.total_collected,
+                    "collected": plan.stats.collected_count,
                     "rejected": len(plan.rejected_jobs),
                     "eligible": len(plan.eligible_jobs),
                     "selected": len(plan.selected_jobs),
                     "overflow": len(plan.overflow_jobs),
-                    "rejection_reasons": plan.rejection_reasons,
-                    "top_score": plan.selected_jobs[0].total_score if plan.selected_jobs else 0.0,
-                    "cutoff_score": plan.selected_jobs[-1].total_score if plan.selected_jobs else 0.0,
+                    "rejection_reasons": plan.stats.rejection_reasons,
+                    "top_score": plan.selected_jobs[0].score if plan.selected_jobs else 0.0,
+                    "cutoff_score": plan.selected_jobs[-1].score if plan.selected_jobs else 0.0,
                 },
                 "applied_count": applied_count,
                 "failed_count": failed_count,
@@ -158,7 +175,7 @@ class ReportExporter:
             )
 
     def _write_ranked_jobs_csv(self, path: Path, ranked_jobs: list[RankedJob]) -> None:
-        """Unified writer for RankedJob collections (DRY P1-2)."""
+        """Unified writer for RankedJob collections."""
         with path.open("w", encoding="utf-8", newline="") as f:
             writer = csv.writer(f)
             writer.writerow(RANKED_JOBS_CSV_HEADER)
@@ -181,7 +198,7 @@ class ReportExporter:
     def _write_outcomes_csv(
         self, path: Path, items: list[tuple[Job, ApplyOutcome]]
     ) -> None:
-        """Unified writer for Job + ApplyOutcome collections (DRY P1-2)."""
+        """Unified writer for Job + ApplyOutcome collections."""
         with path.open("w", encoding="utf-8", newline="") as f:
             writer = csv.writer(f)
             writer.writerow(OUTCOME_JOBS_CSV_HEADER)

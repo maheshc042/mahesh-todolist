@@ -272,17 +272,13 @@ APPLY_SUCCESS = [
 ]
 
 APPLY_ERROR_TOAST = [
-    "div:has-text('not accepted')",
-    "div:has-text('incomplete information')",
-    "div:has-text('mandatory questions')",
-    "div:has-text('Please answer all')",
-    "p:has-text('not accepted')",
-    "span:has-text('not accepted')",
     "div.apply-message-error",
+    "div.toast-error",
     "div[class*='error-toast']",
     "div[class*='errorMsg']",
     "p[class*='errorMsg']",
-    "div:has-text('Something went wrong')",
+    "div[class*='apply-message'][class*='error']",
+    "div.server-error",
 ]
 
 # ------------------------------------------------------- chatbot (questions)
@@ -295,6 +291,7 @@ CHATBOT_DRAWER = [
 CHATBOT_QUESTION = [
     "div.botMsg span",
     "div.botItem span",
+    "li.chatbot_ListItem span",
     "span.botMsg",
     "div._msg",
 ]
@@ -321,14 +318,28 @@ CHATBOT_CHECKBOX_OPTIONS = [
     "div.msrc__checkbox-container label",
     "label.mcrc__label",
 ]
-CHATBOT_CHIPS = ["div.chatbot_MessageContainer div.chip", "div.chipsContainer div.chip"]
+CHATBOT_CHIPS = [
+    "div.chatbot_Chip",
+    "div.chipItem",
+    "div.chatbot_Chips div",
+    "div.chipsContainer div.chipItem",
+    "div.chatbot_MessageContainer div.chip",
+    "div.chipsContainer div.chip",
+]
 CHATBOT_DROPDOWN = ["select.dropdownWrapper", "select[class*='dropdown']"]
 CHATBOT_SAVE = [
     "div.botItem button:has-text('Save')",
     "button:has-text('Save')",
     "div.sendMsg:has-text('Save')",
+    "div.sendMsg",
 ]
-CHATBOT_CLOSE = ["div.chatbot_Header span.crossIcon", "span.crossIcon", ".crossIcon"]
+CHATBOT_CLOSE = [
+    "div.chatBot-ic-cross",
+    "div.crossIcon",
+    "div.chatbot_Header span.crossIcon",
+    "span.crossIcon",
+    ".crossIcon",
+]
 CHATBOT_COMPLETE = [
     "div:has-text('Your application has been')",
     "div:has-text('successfully applied')",

@@ -134,7 +134,7 @@ class ApplyEngine:
         """
         Classify the loaded detail page into one actionable state.
         """
-        if await first_visible(self.page, S.JD_ALREADY_APPLIED, timeout_ms=2_500):
+        if await first_visible(self.page, S.JD_ALREADY_APPLIED, timeout_ms=4_500):
             return "already_applied"
 
         # Stable IDs Naukri has shipped for years: exactly one is rendered.
@@ -390,15 +390,14 @@ class ApplyEngine:
                     attempts=attempts,
                 )
 
-            # Check for error toast or rejection text
-            toast = await safe_text(await first_visible(self.page, S.APPLY_ERROR_TOAST, timeout_ms=2_000))
-            is_rejected_text = await self.page.locator("text=/not accepted|incomplete information/i").first.count() > 0 if not toast else True
-            if toast or is_rejected_text:
+            # Check for explicit error toast
+            toast = await safe_text(await first_visible(self.page, S.APPLY_ERROR_TOAST, timeout_ms=1_500))
+            if toast:
                 shot = await self.artifacts.capture_failure(self.page, "apply-rejected", profile, job.job_id)
                 log.warning("apply.rejected_by_naukri", job_id=job.job_id, profile=profile, attempt=attempts, detail=toast[:160])
                 return ApplyOutcome(
                     status=ApplicationStatus.FAILED,
-                    detail=f"Naukri rejected application: {toast[:160] or 'incomplete information / mandatory questions'}",
+                    detail=f"Naukri rejected application: {toast[:160]}",
                     screenshot_path=shot,
                     questions_answered=result.answered,
                     attempts=attempts,
@@ -417,14 +416,13 @@ class ApplyEngine:
                 attempts=attempts,
             )
 
-        # Check for error toast
-        toast = await safe_text(await first_visible(self.page, S.APPLY_ERROR_TOAST, timeout_ms=2_000))
-        is_rejected_text = await self.page.locator("text=/not accepted|incomplete information/i").first.count() > 0 if not toast else True
-        if toast or is_rejected_text:
+        # Check for explicit error toast
+        toast = await safe_text(await first_visible(self.page, S.APPLY_ERROR_TOAST, timeout_ms=1_500))
+        if toast:
             shot = await self.artifacts.capture_failure(self.page, "apply-error-toast", profile, job.job_id)
             return ApplyOutcome(
                 status=ApplicationStatus.FAILED,
-                detail=f"Naukri toast error: {toast[:160] or 'incomplete information'}",
+                detail=f"Naukri toast error: {toast[:160]}",
                 screenshot_path=shot,
                 attempts=attempts,
             )

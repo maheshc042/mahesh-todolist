@@ -1,10 +1,23 @@
 name: Naukri Auto-Apply Agent
 
 on:
-  # 04:17 UTC = 09:47 AM IST (Every day) - Off-peak minute to avoid GitHub runner queue delays
+  # Morning (03:03 UTC = 08:33 AM IST) and Afternoon (08:03 UTC = 01:33 PM IST)
+  # 5 hours apart to prevent IP throttling and rate limiting on Naukri
   schedule:
-    - cron: '17 4 * * *'
+    - cron: '03 3 * * *'
+    - cron: '03 8 * * *'
   workflow_dispatch:
+    # Allow manual runs to choose which account to run (defaults to primary)
+    inputs:
+      account:
+        description: 'Account to run (primary, secondary, or all-accounts)'
+        required: true
+        default: 'primary'
+        type: choice
+        options:
+          - primary
+          - secondary
+          - all-accounts
 
 concurrency:
   group: naukri-auto-apply-agent
@@ -66,9 +79,34 @@ jobs:
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           HEADLESS: "true"
         run: |
-          python -m naukri_agent run --all-accounts
+          # If triggered manually, use the input provided by the user
+          if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
+            if [ "${{ github.event.inputs.account }}" == "all-accounts" ]; then
+              python -m naukri_agent run --all-accounts
+            else
+              python -m naukri_agent run -a ${{ github.event.inputs.account }}
+            fi
+          else
+            # If triggered by Cron schedule, check the UTC hour
+            CURRENT_HOUR=$(date -u +"%H")
+            
+            # 03:xx UTC is the Morning run -> Primary Account
+            if [ "$CURRENT_HOUR" == "03" ]; then
+              echo "Morning Run Detected: Running Primary Account"
+              python -m naukri_agent run -a primary
+              
+            # 08:xx UTC is the Afternoon run -> Secondary Account
+            elif [ "$CURRENT_HOUR" == "08" ]; then
+              echo "Afternoon Run Detected: Running Secondary Account"
+              python -m naukri_agent run -a secondary
+              
+            else
+              echo "Unknown schedule hour ($CURRENT_HOUR), running primary as fallback."
+              python -m naukri_agent run -a primary
+            fi
+          fi
 
-      - name: Upload diagnostics
+      - name: Upload diagnostics & CSV Reports
         if: ${{ always() }}
         uses: actions/upload-artifact@v4
         with:
@@ -76,5 +114,6 @@ jobs:
           path: |
             logs/
             artifacts/
+            analysis/
           if-no-files-found: ignore
-          retention-days: 14
+          retention-days: 7

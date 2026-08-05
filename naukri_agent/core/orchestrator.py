@@ -76,83 +76,6 @@ class _CapReached(Exception):
     """Internal signal: this profile hit its per-run cap; move to the next one."""
 
 
-def _export_plan_reports(analysis_dir: Path, collected_jobs: list[Job], plan: ApplicationPlan) -> None:
-    """Export collected, ranked, selected, and rejected job reports to analysis/ directory."""
-    try:
-        analysis_dir.mkdir(parents=True, exist_ok=True)
-
-        # 1. collected_jobs.csv
-        with (analysis_dir / "collected_jobs.csv").open("w", encoding="utf-8", newline="") as f:
-            w = csv.writer(f)
-            w.writerow(["job_id", "tab", "position", "total_jobs_in_tab", "company", "title", "url", "scraped_at"])
-            for j in collected_jobs:
-                w.writerow([j.job_id, j.recommendation_tab, j.recommendation_position or "", j.total_jobs_in_tab or "", j.company, j.title, j.url, j.scraped_at.isoformat()])
-
-        # 2. ranked_jobs.csv
-        with (analysis_dir / "ranked_jobs.csv").open("w", encoding="utf-8", newline="") as f:
-            w = csv.writer(f)
-            w.writerow(["rank", "score", "job_id", "tab", "position", "company", "title", "url", "reasons"])
-            for rj in plan.eligible_jobs:
-                w.writerow([rj.rank, rj.score, rj.job.job_id, rj.job.recommendation_tab, rj.job.recommendation_position or "", rj.job.company, rj.job.title, rj.job.url, " | ".join(rj.reasons)])
-
-        # 3. selected_jobs.csv
-        with (analysis_dir / "selected_jobs.csv").open("w", encoding="utf-8", newline="") as f:
-            w = csv.writer(f)
-            w.writerow(["rank", "score", "job_id", "tab", "position", "company", "title", "url", "reasons"])
-            for rj in plan.selected_jobs:
-                w.writerow([rj.rank, rj.score, rj.job.job_id, rj.job.recommendation_tab, rj.job.recommendation_position or "", rj.job.company, rj.job.title, rj.job.url, " | ".join(rj.reasons)])
-
-        # 4. rejected_jobs.csv
-        with (analysis_dir / "rejected_jobs.csv").open("w", encoding="utf-8", newline="") as f:
-            w = csv.writer(f)
-            w.writerow(["job_id", "reason", "detail", "company", "title", "url"])
-            for rinfo in plan.rejected_jobs:
-                reason_str = rinfo.reason.value if rinfo.reason else "other"
-                w.writerow([rinfo.job.job_id, reason_str, rinfo.detail, rinfo.job.company, rinfo.job.title, rinfo.job.url])
-
-        log.info("reports.plan_exported", directory=str(analysis_dir))
-    except Exception as exc:
-        log.warning("reports.plan_export_failed", error=str(exc))
-
-
-def _export_outcome_reports(
-    analysis_dir: Path,
-    applied_outcomes: list[tuple[Job, ApplyOutcome]],
-    failed_outcomes: list[tuple[Job, ApplyOutcome]],
-    stats_dict: dict,
-) -> None:
-    """Export applied_jobs.csv, failed_jobs.csv, and summary.json to analysis/ directory."""
-    try:
-        analysis_dir.mkdir(parents=True, exist_ok=True)
-
-        # 5. applied_jobs.csv
-        with (analysis_dir / "applied_jobs.csv").open("w", encoding="utf-8", newline="") as f:
-            w = csv.writer(f)
-            w.writerow(["job_id", "status", "company", "title", "url", "attempts", "detail"])
-            for j, outcome in applied_outcomes:
-                w.writerow([j.job_id, outcome.status.value, j.company, j.title, j.url, outcome.attempts, outcome.detail])
-
-        # 6. failed_jobs.csv
-        with (analysis_dir / "failed_jobs.csv").open("w", encoding="utf-8", newline="") as f:
-            w = csv.writer(f)
-            w.writerow(["job_id", "status", "reason", "detail", "company", "title", "url"])
-            for j, outcome in failed_outcomes:
-                reason_str = outcome.reason.value if outcome.reason else "error"
-                w.writerow([j.job_id, outcome.status.value, reason_str, outcome.detail, j.company, j.title, j.url])
-
-        # 7. summary.json
-        summary_payload = {
-            "plan_stats": stats_dict,
-            "applied_count": len(applied_outcomes),
-            "failed_count": len(failed_outcomes),
-            "generated_at": datetime.now(timezone.utc).isoformat(),
-        }
-        with (analysis_dir / "summary.json").open("w", encoding="utf-8") as f:
-            json.dump(summary_payload, f, indent=2, default=str)
-
-        log.info("reports.outcomes_exported", directory=str(analysis_dir))
-    except Exception as exc:
-        log.warning("reports.outcomes_export_failed", error=str(exc))
 
 
 class Orchestrator:
@@ -513,7 +436,7 @@ class Orchestrator:
         t_exp_0 = time.perf_counter()
         analysis_dir = PROJECT_ROOT / "analysis"
         exporter = ReportExporter(analysis_dir, run_id=self.run_id)
-        exporter.export_plan_reports(plan, profile_name=profile.name)
+        exporter.export_plan_reports(plan, collected_jobs, profile_name=profile.name)
         self.metrics.reporting_s += time.perf_counter() - t_exp_0
 
         # Step 4: Print Concise Summary & Full Application Plan Report
@@ -549,8 +472,9 @@ class Orchestrator:
         filters = FilterEngine(profile.filters_for("recommended"))
 
         t_apply_loop_0 = time.perf_counter()
+        candidate_queue = plan.selected_jobs + plan.overflow_jobs
         try:
-            for rjob in plan.selected_jobs:
+            for rjob in candidate_queue:
                 self._check_global_limits()
                 if remaining() <= 0:
                     log.info("profile.cap_reached", profile=profile.name, cap=profile.max_applications_per_run)
