@@ -52,7 +52,7 @@ recommended:
   tabs: ["default", "all"]
   max_scroll_rounds: 20
   stall_rounds_before_stop: 2
-  max_jobs: 200
+  max_jobs: 300
   follow_show_more: true
 
 schedule:
@@ -63,8 +63,8 @@ schedule:
   # window is the pattern most likely to trigger Naukri's "unusual activity"
   # challenge. Morning for Full-Stack, afternoon for AI/Python.
   cron_by_account:
-    primary: "0 10 * * *"    # 10:00 AM IST (Peak morning recruiter search window)
-    secondary: "30 10 * * *" # 10:30 AM IST (Peak morning recruiter search window)
+    primary: "0 9 * * *"     # 09:00 AM IST (Morning recruiter search window)
+    secondary: "0 13 * * *"  # 01:00 PM IST (Afternoon recruiter search window — 4h gap prevents IP throttling)
   timezone: Asia/Kolkata
   jitter_seconds: 600
   run_on_start: false
@@ -213,6 +213,12 @@ answers:
   "regular/full-time mode": "yes"
   "ai backend developer": "Yes"
   "re:^yes\\s*/\\s*no\\??$": "Yes"
+  # High-leverage regex patterns for recruiter question variants
+  "re:shift|rotational|night shift": "No"
+  "re:laptop|wifi|internet connection|broadband": "Yes"
+  "re:fresher|recent graduate": "No"
+  "re:database schemas|designed database": "Yes"
+  "re:diversity|inclusive teams|career break": "No"
 
 # ---------------------------------------------------------------------------
 # Skill -> years map. This answers the open-ended "how many years of X?" family
@@ -368,13 +374,9 @@ profiles:
 
     filters:
       title_must_include_any: [full stack, fullstack, mern, react, node, javascript, typescript, frontend, backend, web, software, developer, engineer, ai, artificial intelligence, machine learning, ml, python, llm, genai, generative ai, chatbot, prompt, qa, testing, tester]
-      title_must_exclude_any: [intern, internship, sales, bpo, php, wordpress, .net, dotnet, dot net, c++, spring boot, java developer, java, mainframe, sap, salesforce, drupal, magento, lead, manager, director, vp, head, architect, sr. manager]
+      title_must_exclude_any: [intern, internship, sales, bpo, php, wordpress, .net, dotnet, dot net, c++, spring boot, java developer, java, mainframe, sap, salesforce, drupal, magento, engineering manager, project manager, product manager, general manager, solution architect, enterprise architect, tech architect, technical architect, sr. manager]
       description_must_exclude_any: [
-        "bpo", "commission only", "unpaid",
-        "intern", "internship", "sales", "registration fee", "security deposit",
-        ".net", "asp.net", "c#", "spring boot", "ruby on rails", "php", "wordpress",
-        "java developer", "c++", "cpp", "mainframe", "sap", "salesforce", "drupal", "magento",
-        "lead", "manager", "director", "vp", "head", "architect", "sr. manager",
+        "bpo", "commission only", "unpaid", "registration fee", "security deposit",
         "prefers women", "women diversity", "women-only", "women only", "female only", "female diversity", "diversity drive"
       ]
       allowed_locations: []
@@ -414,8 +416,8 @@ profiles:
     resume_file: null
 
     # Primary skills required: AT LEAST ONE of core_skills MUST match in every job
-    core_skills: ["python", "fastapi", "flask", "llm", "langchain", "crewai", "generative ai", "ai", "artificial intelligence", "machine learning", "rag", "nlp", "chatbot", "conversational ai", "language models", "ai engineer", "vertex ai", "vertex", "react", "react.js", "node", "node.js", "nodejs"]
-    secondary_skills: ["microservices", "microservice", "messaging queue", "message queue", "rabbitmq", "kafka", "analytics", "monitoring", "api integration", "apis", "rest", "workflows", "automation", "application development", "agile", "use cases", "emerging technologies", "cloud services", "cloud platforms", "business processes", "customer engagement", "sql", "postgresql", "postgres", "docker", "kubernetes", "k8s", "cloud run", "gcp", "azure", "microsoft azure", "aws", "cloud", "enterprise systems", "redis", "rest api", "pandas", "numpy", "crm", "erp", "billing", "information technology", "ai coding", "ai tools"]
+    core_skills: ["python", "fastapi", "flask", "django", "llm", "langchain", "crewai", "generative ai", "genai", "ai", "artificial intelligence", "machine learning", "ml", "rag", "nlp", "chatbot", "conversational ai", "language models", "ai engineer", "ml engineer", "vertex ai", "vertex"]
+    secondary_skills: ["react", "react.js", "node", "node.js", "nodejs", "microservices", "microservice", "messaging queue", "message queue", "rabbitmq", "kafka", "analytics", "monitoring", "api integration", "apis", "rest", "workflows", "automation", "application development", "agile", "use cases", "emerging technologies", "cloud services", "cloud platforms", "business processes", "customer engagement", "sql", "postgresql", "postgres", "docker", "kubernetes", "k8s", "cloud run", "gcp", "azure", "microsoft azure", "aws", "cloud", "enterprise systems", "redis", "rest api", "pandas", "numpy", "crm", "erp", "billing", "information technology", "ai coding", "ai tools"]
     bonus_skills: ["typescript"]
 
     searches: []
@@ -423,13 +425,9 @@ profiles:
 
     filters:
       title_must_include_any: [ai, artificial intelligence, machine learning, ml, python, llm, genai, generative ai, nlp, chatbot, prompt, agent, data science, data engineer, python developer, ai engineer, ml engineer, qa, testing, tester, backend, developer, engineer]
-      title_must_exclude_any: [intern, internship, sales, bpo, php, wordpress, .net, dotnet, dot net, asp.net, c#, c++, java developer, java, devops, network, hardware, lead, manager, director, vp, head, principal, architect, staff engineer]
+      title_must_exclude_any: [intern, internship, sales, bpo, php, wordpress, .net, dotnet, dot net, asp.net, c#, c++, java developer, java, devops, network, hardware, engineering manager, project manager, product manager, general manager, solution architect, enterprise architect, tech architect, technical architect, sr. manager]
       description_must_exclude_any: [
-        "bpo", "night shift", "us shift", "commission only", "unpaid", "phd required",
-        "intern", "internship", "sales", "registration fee", "security deposit",
-        ".net", "asp.net", "c#", "spring boot", "ruby on rails", "php", "wordpress",
-        "java developer", "c++", "cpp", "devops", "network", "hardware",
-        "lead", "manager", "director", "vp", "head", "principal", "architect", "staff engineer",
+        "bpo", "night shift", "us shift", "commission only", "unpaid", "phd required", "registration fee", "security deposit",
         "prefers women", "women diversity", "women-only", "women only", "female only", "female diversity", "diversity drive"
       ]
       allowed_locations: []
