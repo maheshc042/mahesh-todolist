@@ -25,26 +25,23 @@ browser:
   viewport_height: 900
   locale: en-IN
   timezone: Asia/Kolkata
-  default_timeout_ms: 30000
-  navigation_timeout_ms: 60000
-  min_action_delay_ms: 350
-  max_action_delay_ms: 1400
+  default_timeout_ms: 10000        # Fail-fast UI checks (10s)
+  navigation_timeout_ms: 20000     # Fail-fast page loads (20s max)
+  min_action_delay_ms: 250
+  max_action_delay_ms: 800
   block_resources: [font, media]
 
 run:
-  # PER ACCOUNT, per calendar day. With two accounts this is a 70/day ceiling in
-  # total; Naukri starts throttling well before that, so treat it as a safety
-  # valve rather than a target.
   daily_application_cap: 35
   dedupe_window_days: 90
   max_consecutive_failures: 5
-  min_delay_between_applies_s: 8
-  max_delay_between_applies_s: 25
-  max_retries_per_job: 2
+  min_delay_between_applies_s: 4   # Safe human pacing (4-10s)
+  max_delay_between_applies_s: 10  # Safe human pacing (4-10s)
+  max_retries_per_job: 1           # No more double-retries on dead pages
   strict_answers: true
   screenshot_on_failure: true
   screenshot_on_success: false
-  run_timeout_minutes: 120
+  run_timeout_minutes: 45          # Strict 45-minute cloud limit per account
 
 # Naukri's recommended feed — the primary (and by default only) job source.
 recommended:
@@ -81,6 +78,20 @@ notifications:
 # these, so account-specific numbers live on the profile.
 # ---------------------------------------------------------------------------
 answers:
+  "hi mahesh, companies value diversity and want to build inclusive teams. share your career status to proceed with this job application. are you on a career break?": "No"
+  "have you designed database schemas?": "Yes"
+  "would you be willing to attend two rounds of technical interviews, including a face-to-face round?": "Yes"
+  "are you ready to work for c2h role?": "Yes"
+  "have you completed your education through regular/full-time mode?": "yes"
+  "how many years of experience do you have as agentic ai ?": "<3 years"
+  "to proceed with the further steps, please fill out the form.(mandatory):https://forms.gle/5eezfamwmpj2epz29": "Yes -Filled the form"
+  "how many years of ai backend developer?": "Yes"
+  "are you comfortable attending interviews in person on weekdays?": "Yes"
+  "how many years of experience do you have in .net core?": "0"
+  "how many years of experience do you have in html, css, javascript?": "2.6"
+  "how many years of experience do you have in .net?": "0"
+  "experience in angular or react ?": "2.6"
+  "how many years of experience do you have in spring boot?": "0"
   # Notice Period & Availability
   serving notice: "Yes"
   immediate joiner: "Yes"
@@ -219,6 +230,28 @@ answers:
   "re:fresher|recent graduate": "No"
   "re:database schemas|designed database": "Yes"
   "re:diversity|inclusive teams|career break": "No"
+
+  # Technical MCQs
+  "re:concurrency model.*strictly i/o-bound": "Asynchronous programming utilizing the Asyncio library."
+  "re:mitigates system overload.*high-volume api": "Rate limiting and message queuing."
+  "re:distributed systems.*ensure high reliability": "Node redundancy and fault tolerance."
+  "re:unpredictable spikes in data volume": "Horizontal elastic network scaling."
+  "re:advantage of utilizing websockets": "Full-duplex real-time communication."
+  "re:data engineers ensure data quality": "Implementing rigorous validation and cleansing pipelines."
+  "re:generative ai integrate.*automation testing": "Creating synthetic training and test datasets."
+
+  # Azure, Auth, Low Level Design & HR Screening
+  "re:worked with microsoft azure|azure services": "Yes"
+  "re:awareness of ai product features|llm integrations": "Yes"
+  "re:mern stack development": "Yes"
+  "re:built and consumed restful apis|restful apis": "Yes"
+  "re:jwt or oauth|oauth-based authentication": "Yes"
+  "re:data privacy policy|privacy policy consent|privacy policy": "Yes"
+  "experience in sql development": "2.6"
+  "re:low level design": "2.6"
+  "re:best coding practice|code quality": "Writing modular code, following DRY and SOLID principles, strict typing, linting, unit testing, and structured logging."
+  "re:comfortable with english": "I can speak and write"
+  "re:what is your strength|your strength": "Backend Technologies"
 
 # ---------------------------------------------------------------------------
 # Skill -> years map. This answers the open-ended "how many years of X?" family
