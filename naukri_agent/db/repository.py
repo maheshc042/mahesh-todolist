@@ -156,20 +156,16 @@ class Repository:
         Two statuses are deliberately treated as NOT decided, so they come back:
 
         - `failed`: transient (timeout, markup hiccup) and worth one more try.
-        - `needs_review` whose questions have all been answered by a human. This
-          is what makes `naukri-agent resolve <id> "<answer>"` mean anything: the
-          old query treated needs_review as final, so a resolved answer was
-          promoted into the knowledge base and then never used, because the job
-          it unblocked was permanently excluded from every future run. Jobs whose
-          questions are still unresolved stay excluded, so we do not re-open the
-          same dead end every morning.
+        - `needs_review` whose questions have all been answered by a human.
         """
         rows = await self.pool.fetch(
             """
             SELECT a.job_id
               FROM applications a
              WHERE a.status <> 'failed'
-               AND a.created_at > now() - ($1 || ' days')::interval
+               AND a.profile = $1
+               AND a.account = $2
+               AND a.created_at > now() - ($3 || ' days')::interval
                AND NOT (
                      a.status = 'needs_review'
                  AND NOT EXISTS (
@@ -181,6 +177,8 @@ class Repository:
                       )
                   )
             """,
+            profile,
+            account,
             str(window_days),
         )
         return {row["job_id"] for row in rows}
@@ -188,9 +186,6 @@ class Repository:
     async def applied_today(self, account: str = "primary") -> int:
         """
         Applications submitted TODAY by THIS account (Asia/Kolkata calendar day).
-
-        Account scoping is essential: the daily cap is a per-account budget, and
-        an unscoped count let one account exhaust the other's quota.
         """
         row = await self.pool.fetchrow(
             """
@@ -229,8 +224,7 @@ class Repository:
                    account = EXCLUDED.account,
                    attempts = applications.attempts + EXCLUDED.attempts,
                    questions_answered = EXCLUDED.questions_answered,
-                   screenshot_path = COALESCE(EXCLUDED.screenshot_path, applications.screenshot_path),
-                   created_at = now()
+                   screenshot_path = COALESCE(EXCLUDED.screenshot_path, applications.screenshot_path)
             """,
             job.job_id,
             run_id,

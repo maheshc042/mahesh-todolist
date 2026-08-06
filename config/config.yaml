@@ -225,7 +225,7 @@ answers:
   "ai backend developer": "Yes"
   "re:^yes\\s*/\\s*no\\??$": "Yes"
   # High-leverage regex patterns for recruiter question variants
-  "re:shift|rotational|night shift": "No"
+  "re:shift|rotational|night shift": "Yes"
   "re:laptop|wifi|internet connection|broadband": "Yes"
   "re:fresher|recent graduate": "No"
   "re:database schemas|designed database": "Yes"

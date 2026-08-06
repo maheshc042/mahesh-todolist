@@ -43,7 +43,7 @@ def _contains_any(haystack: str, needles: list[str]) -> str | None:
             continue
         norm_needle = _normalise_str(needle)
         pattern = r"\b" + re.escape(norm_needle) + r"\b"
-        if re.search(pattern, norm_haystack) or (len(needle) > 3 and needle in haystack):
+        if re.search(pattern, norm_haystack):
             return needle
     return None
 
@@ -71,6 +71,7 @@ class FilterEngine:
         rules = self.rules
         title = job.title.lower()
         company = job.company.lower()
+        location = (job.location or "").lower()
         if rules.title_must_include_any:
             if _contains_any(title, rules.title_must_include_any) is None:
                 return FilterDecision(
