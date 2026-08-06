@@ -63,6 +63,7 @@ class SkipReason(str, Enum):
     FILTER_FRESHNESS = "filter_freshness"
     FILTER_RATING = "filter_rating"
     WALKIN = "walkin"
+    BANGALORE_WALKIN_ALERT = "bangalore_walkin_alert"
     EXTERNAL_APPLY = "external_apply"
     ALREADY_APPLIED = "already_applied"
     SEEN_RECENTLY = "seen_recently"
@@ -106,6 +107,7 @@ class Job:
     recommendation_position: int | None = None
     total_jobs_in_tab: int | None = None
     scraped_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+    form_links: list[str] = field(default_factory=list)
 
     # --- Derived numeric fields, parsed lazily by the parser module ---------
     min_experience: float | None = None
@@ -191,6 +193,8 @@ class RunStats:
     needs_review: int = 0
     per_profile: dict[str, dict[str, int]] = field(default_factory=dict)
     applied_jobs: list[dict[str, str]] = field(default_factory=list)
+    external_jobs: list[dict[str, str]] = field(default_factory=list)
+    walkin_alerts: list[dict[str, str]] = field(default_factory=list)
     errors: list[str] = field(default_factory=list)
 
     def bump(self, profile: str, key: str, amount: int = 1) -> None:
@@ -210,5 +214,7 @@ class RunStats:
             "needs_review": self.needs_review,
             "per_profile": self.per_profile,
             "applied_jobs": self.applied_jobs,
+            "external_jobs": self.external_jobs,
+            "walkin_alerts": self.walkin_alerts,
             "errors": self.errors[:20],
         }

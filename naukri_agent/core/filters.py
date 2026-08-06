@@ -109,6 +109,8 @@ class FilterEngine:
                 )
 
         if rules.skip_walkin and job.is_walkin:
+            if "bengaluru" in location or "bangalore" in location:
+                return FilterDecision(False, SkipReason.BANGALORE_WALKIN_ALERT, f"Bangalore walk-in drive at {job.company}")
             return FilterDecision(False, SkipReason.WALKIN, "walk-in drive")
 
         # --- numeric rules: only applied when data is disclosed -------

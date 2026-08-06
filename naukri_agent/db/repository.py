@@ -151,34 +151,29 @@ class Repository:
         self, profile: str, window_days: int, account: str = "primary"
     ) -> set[str]:
         """
-        Jobs already decided for this profile/account inside the dedupe window.
-
-        Two statuses are deliberately treated as NOT decided, so they come back:
-
-        - `failed`: transient (timeout, markup hiccup) and worth one more try.
-        - `needs_review` whose questions have all been answered by a human.
+        Jobs already decided inside the dedupe window.
+        
+        PRODUCT UPGRADE: Global Shared Memory. 
+        This query no longer filters by `account` or `profile`. If Account A 
+        applies to or skips a job, Account B instantly learns about it and 
+        will never apply to the same job, preventing duplicate recruiter spam.
         """
         rows = await self.pool.fetch(
             """
             SELECT a.job_id
               FROM applications a
              WHERE a.status <> 'failed'
-               AND a.profile = $1
-               AND a.account = $2
-               AND a.created_at > now() - ($3 || ' days')::interval
+               AND a.created_at > now() - ($1 || ' days')::interval
                AND NOT (
                      a.status = 'needs_review'
                  AND NOT EXISTS (
                           SELECT 1
                             FROM question_review q
-                           WHERE q.profile = a.profile
-                             AND q.job_id = a.job_id
+                           WHERE q.job_id = a.job_id
                              AND q.resolved = FALSE
                       )
                   )
             """,
-            profile,
-            account,
             str(window_days),
         )
         return {row["job_id"] for row in rows}

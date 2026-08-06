@@ -538,12 +538,24 @@ class Orchestrator:
                 detail=decision.detail,
             )
             self.stats.bump(profile.name, "filtered_out")
-            log.info(
-                "job.filtered",
-                title=job.title[:70],
-                reason=decision.reason.value if decision.reason else "?",
-                detail=decision.detail,
-            )
+            if decision.reason == SkipReason.BANGALORE_WALKIN_ALERT:
+                self.stats.walkin_alerts.append(
+                    {
+                        "title": job.title,
+                        "company": job.company,
+                        "location": job.location,
+                        "url": job.url,
+                        "profile": profile.name,
+                    }
+                )
+                log.info("job.bangalore_walkin_alert", title=job.title[:70], company=job.company)
+            else:
+                log.info(
+                    "job.filtered",
+                    title=job.title[:70],
+                    reason=decision.reason.value if decision.reason else "?",
+                    detail=decision.detail,
+                )
             await self.repo.record_outcome(
                 job, profile.name, self.run_id, outcome, account=self.account_key
             )
@@ -594,6 +606,7 @@ class Orchestrator:
                     "profile": profile.name,
                     "account": self.account_key,
                     "at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+                    "form_links": getattr(job, "form_links", []),
                 }
             )
             self.consecutive_failures = 0
@@ -601,9 +614,18 @@ class Orchestrator:
             self.stats.bump(profile.name, "failed")
             self.consecutive_failures += 1
             self.stats.errors.append(f"{job.title[:40]}: {outcome.detail[:120]}")
-        elif outcome.status == ApplicationStatus.EXTERNAL:
+        elif outcome.status == ApplicationStatus.EXTERNAL or outcome.reason == SkipReason.EXTERNAL_APPLY:
             self.stats.bump(profile.name, "external")
             self.consecutive_failures = 0
+            self.stats.external_jobs.append(
+                {
+                    "title": job.title,
+                    "company": job.company,
+                    "url": job.url,
+                    "profile": profile.name,
+                    "form_links": getattr(job, "form_links", []),
+                }
+            )
         elif outcome.status == ApplicationStatus.ALREADY_APPLIED:
             self.stats.bump(profile.name, "already_applied")
             self.consecutive_failures = 0

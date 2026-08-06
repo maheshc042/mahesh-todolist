@@ -6,6 +6,7 @@ Production-Optimized: High-throughput, fail-fast execution.
 from __future__ import annotations
 
 import asyncio
+import re
 import time
 from typing import Awaitable, Callable
 
@@ -97,6 +98,13 @@ class ApplyEngine:
         description = await safe_text(await first_visible(self.page, S.JD_DESCRIPTION, timeout_ms=3_000))
         if description:
             job.description = description[:12_000]
+            form_links = re.findall(
+                r"(https?://(?:forms\.gle|docs\.google\.com/forms|forms\.office\.com|typeform\.com)[^\s\"'>]+)",
+                description,
+            )
+            if form_links:
+                job.form_links = list(dict.fromkeys(form_links))
+                log.info("job.form_links_found", job_id=job.job_id, links=job.form_links)
 
     async def apply(self, job: Job, profile: str, pre_submit_check: Callable[[Job], FilterDecision] | None = None) -> ApplyOutcome:
         t_job_start = time.perf_counter()

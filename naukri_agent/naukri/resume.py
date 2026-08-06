@@ -72,39 +72,12 @@ class ResumeManager:
 
     async def ensure_resume(self, resume_file: str | None, profile: str, force_upload: bool = True) -> bool:
         """Disabled as requested — manual resume management on Naukri."""
+        if not resume_file:
+            return True
+
+        path = self._resolve(resume_file)
+        if not path:
+            log.warning("resume.file_missing", file=resume_file, profile=profile)
+            return True
+
         return True
-
-        current = await self.current_resume_name()
-        if not force_upload and current and path.stem.lower() in current.lower():
-            log.info("resume.already_current", profile=profile, resume=current)
-            return True
-
-        log.info("resume.uploading", profile=profile, file=path.name, previous=current)
-        try:
-            await self.page.goto(S.PROFILE_URL, wait_until="domcontentloaded", timeout=45_000)
-            await dismiss_overlays(self.page)
-
-            file_input = None
-            for selector in S.RESUME_UPLOAD_INPUT:
-                locator = self.page.locator(selector).first
-                if await locator.count():
-                    file_input = locator
-                    break
-            if file_input is None:
-                log.warning("resume.input_not_found", profile=profile)
-                return False
-
-            # The real <input type=file> is visually hidden behind a styled label,
-            # so set the files directly instead of clicking.
-            await file_input.set_input_files(str(path))
-            success = await first_visible(self.page, S.RESUME_SUCCESS, timeout_ms=25_000)
-            if success is None:
-                log.warning("resume.upload_unconfirmed", profile=profile, file=path.name)
-                return False
-
-            self._current = path.name
-            log.info("resume.upload_success", profile=profile, file=path.name)
-            return True
-        except Exception as exc:
-            log.warning("resume.upload_failed", profile=profile, error=str(exc)[:250])
-            return False

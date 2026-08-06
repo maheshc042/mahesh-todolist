@@ -139,12 +139,41 @@ def format_run_summary(
 
     if include_job_list and stats.applied_jobs:
         lines.append("")
-        lines.append(f"applied jobs ({len(stats.applied_jobs)}):")
+        lines.append(f"✅ Applied Jobs ({len(stats.applied_jobs)}):")
         for job in stats.applied_jobs[:max_jobs]:
             lines.append(f"  - {job.get('title', '?')} @ {job.get('company', '?')}")
+            form_links = job.get("form_links", [])
+            if form_links:
+                lines.append(f"    ⚠️ Form Required: {', '.join(form_links)}")
         remaining = len(stats.applied_jobs) - max_jobs
         if remaining > 0:
             lines.append(f"  … and {remaining} more")
+
+    if stats.external_jobs:
+        lines.append("")
+        lines.append(f"🔗 Action Required / External Jobs ({len(stats.external_jobs)}):")
+        for job in stats.external_jobs[:10]:
+            title = job.get("title", "?")
+            company = job.get("company", "?")
+            url = job.get("url", "")
+            form_links = job.get("form_links", [])
+            lines.append(f"  - {title} @ {company}")
+            if form_links:
+                lines.append(f"    Forms: {', '.join(form_links)}")
+            if url:
+                lines.append(f"    URL: {url}")
+
+    if stats.walkin_alerts:
+        lines.append("")
+        lines.append(f"📍 Bangalore Walk-in Radar ({len(stats.walkin_alerts)}):")
+        for job in stats.walkin_alerts[:10]:
+            title = job.get("title", "?")
+            company = job.get("company", "?")
+            location = job.get("location", "")
+            url = job.get("url", "")
+            lines.append(f"  - {title} @ {company} ({location})")
+            if url:
+                lines.append(f"    URL: {url}")
 
     if stats.errors:
         lines.append("")
@@ -157,3 +186,4 @@ def format_run_summary(
         lines.append(f"fatal: {error[:300]}")
 
     return "\n".join(lines)
+
