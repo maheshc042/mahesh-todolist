@@ -29,8 +29,7 @@ Design decisions:
 from __future__ import annotations
 
 import asyncio
-import csv
-import json
+import os
 import random
 import time
 from datetime import datetime, timezone
@@ -42,6 +41,7 @@ from ..browser.resilience import FatalAgentError, first_visible
 from ..config import AgentConfig, FilterRules, JobProfile, NaukriAccount, Settings, PROJECT_ROOT
 from ..core.answers import AnswerEngine
 from ..core.application_planner import ApplicationPlan, ApplicationPlanner
+from ..core.cold_email import ColdEmailer
 from ..core.reporting import ReportExporter
 from ..core.filters import FilterEngine
 from ..core.models import (
@@ -260,7 +260,7 @@ class Orchestrator:
             if self.repo is not None and self.run_id is not None:
                 await self.repo.finish_run(self.run_id, status, self.stats, fatal_error)
             await self._notify(status, fatal_error)
-            
+
             # Print & Log structured Runtime Summary report
             summary_report = self.metrics.generate_report()
             print(summary_report)
@@ -417,6 +417,34 @@ class Orchestrator:
         if not collected_jobs:
             log.info("search.recommended_empty", profile=profile.name)
             return
+
+        # =========================================================
+        # STEP 1.5: Inject API Match Scores (Fast Pre-filter)
+        # =========================================================
+        if self.api_client and collected_jobs:
+            log.info("match_score.fetching_batch", count=len(collected_jobs))
+            job_ids = [j.job_id.replace("reco-", "") for j in collected_jobs]
+            scores = await self.api_client.batch_match_scores(job_ids)
+
+            api_filtered_jobs = []
+            for job in collected_jobs:
+                raw_id = job.job_id.replace("reco-", "")
+                score_result = scores.get(raw_id)
+
+                # Fail-open: If API fails or score is good, keep it.
+                # Only drop if the API explicitly says keyskills_score == 0.
+                if score_result is None or score_result.is_worth_applying:
+                    api_filtered_jobs.append(job)
+                else:
+                    self.stats.bump(profile.name, "filtered_out")
+                    log.debug("match_score.dropped", job_id=job.job_id)
+
+            log.info("match_score.batch_complete", before=len(collected_jobs), after=len(api_filtered_jobs))
+            collected_jobs = api_filtered_jobs
+
+            if not collected_jobs:
+                return
+        # =========================================================
 
         # Step 2: Generate ApplicationPlan via ApplicationPlanner
         t_plan_0 = time.perf_counter()
@@ -607,6 +635,7 @@ class Orchestrator:
                     "account": self.account_key,
                     "at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
                     "form_links": getattr(job, "form_links", []),
+                    "recruiter_emails": getattr(job, "recruiter_emails", []),
                 }
             )
             self.consecutive_failures = 0
@@ -624,6 +653,7 @@ class Orchestrator:
                     "url": job.url,
                     "profile": profile.name,
                     "form_links": getattr(job, "form_links", []),
+                    "recruiter_emails": getattr(job, "recruiter_emails", []),
                 }
             )
         elif outcome.status == ApplicationStatus.ALREADY_APPLIED:
@@ -647,6 +677,7 @@ class Orchestrator:
         await self.repo.record_outcome(
             job, profile.name, self.run_id, outcome, account=self.account_key
         )
+        await self._dispatch_recruiter_emails(job, profile, outcome)
         await self.repo.log_event(
             self.run_id,
             f"apply.{outcome.status.value}",
@@ -662,6 +693,55 @@ class Orchestrator:
                 "questions_answered": outcome.questions_answered,
             },
         )
+
+    async def _dispatch_recruiter_emails(self, job: Job, profile: JobProfile, outcome: ApplyOutcome) -> None:
+        """Dispatches Gemini-tailored cold emails to HR emails extracted from job descriptions."""
+        # PREVENT SPAM LOOPHOLE: Do not email if we skipped/rejected the job!
+        if outcome.status == ApplicationStatus.SKIPPED:
+            return
+
+        recruiter_emails = getattr(job, "recruiter_emails", [])
+        if not recruiter_emails:
+            return
+
+        gmail_user = os.getenv("GMAIL_USER", "").strip()
+        gmail_pass = os.getenv("GMAIL_APP_PASSWORD", os.getenv("GMAIL_APP_PASS", "")).strip()
+        gemini_key = os.getenv("GEMINI_API_KEY", "").strip()
+
+        if not gmail_user or not gmail_pass:
+            return
+
+        mailer = ColdEmailer(sender_email=gmail_user, app_password=gmail_pass, gemini_api_key=gemini_key)
+
+        # Dynamically route the correct PDF based on the active profile track
+        if "Full Stack" in profile.name:
+            resume_name = "Mahesh_Chitakoti_FullStack_Engineer.pdf"
+        else:
+            resume_name = "Mahesh_Chitakoti_AI_Engineer.pdf"
+
+        resume_path = PROJECT_ROOT / "resumes" / resume_name
+
+        if not resume_path.exists():
+            log.error("cold_email.resume_missing", path=str(resume_path))
+            return
+
+        role_name = job.title or profile.name
+
+        for target_email in recruiter_emails:
+            clean_email = target_email.strip().lower()
+            if await self.repo.has_emailed(clean_email):
+                continue
+
+            success = await mailer.send_application_async(
+                target_email=clean_email,
+                role_name=role_name,
+                resume_path=resume_path,
+                job_description=job.description or "",
+                company_name=job.company or "",
+            )
+            if success:
+                await self.repo.record_contacted_recruiter(clean_email, role_name, job.description or "", job.url or "")
+                log.info("naukri.cold_email_sent", to=clean_email, job_id=job.job_id, role=role_name)
 
     # ---------------------------------------------------------------- notify
     async def _notify(self, status: RunStatus, error: str | None) -> None:

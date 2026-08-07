@@ -60,23 +60,37 @@ EXTRA_HTTP_HEADERS = {
     "Upgrade-Insecure-Requests": "1",
 }
 
-# Executed in every page before any site script runs.
+# Executed in every page before any site script runs to evade Cloudflare/DataDome.
 STEALTH_SCRIPT = """
-Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
-try {
-  delete Object.getPrototypeOf(navigator).webdriver;
-} catch(e) {}
-Object.defineProperty(navigator, 'languages', { get: () => ['en-IN', 'en-US', 'en'] });
-Object.defineProperty(navigator, 'plugins', { get: () => [1, 2, 3, 4, 5] });
-Object.defineProperty(navigator, 'hardwareConcurrency', { get: () => 8 });
-Object.defineProperty(navigator, 'deviceMemory', { get: () => 8 });
-window.chrome = window.chrome || { runtime: {}, loadTimes: () => {}, csi: () => {} };
+// 1. Hide navigator.webdriver
+Object.defineProperty(navigator, 'webdriver', { get: () => false });
+
+// 2. Mock window.chrome (Headless browsers usually lack this)
+window.chrome = {
+    runtime: {},
+    loadTimes: function() {},
+    csi: function() {},
+    app: {}
+};
+
+// 3. Fake permissions API so it doesn't instantly reject notifications
 const originalQuery = window.navigator.permissions.query;
 window.navigator.permissions.query = (parameters) => (
   parameters.name === 'notifications'
     ? Promise.resolve({ state: Notification.permission })
     : originalQuery(parameters)
 );
+
+// 4. Hide Playwright/Puppeteer specific leak variables
+for (const key of Object.keys(window)) {
+    if (key.startsWith('cdc_') || key.startsWith('__playwright')) {
+        delete window[key];
+    }
+}
+
+// 5. Spoof plugins and languages to look like a real user
+Object.defineProperty(navigator, 'plugins', { get: () => [1, 2, 3, 4, 5] });
+Object.defineProperty(navigator, 'languages', { get: () => ['en-IN', 'en-US', 'en'] });
 """
 
 LAUNCH_ARGS = [

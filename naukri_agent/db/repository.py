@@ -850,3 +850,42 @@ class Repository:
             profile, limit,
         )
         return [dict(row) for row in rows]
+
+    # ------------------------------------------------------------ cold emails
+    async def has_emailed(self, email: str, within_days: int = 60) -> bool:
+        """Check if we have pitched this recruiter within the last N days (default: 60 days)."""
+        clean_email = (email or "").strip().lower()
+        if not clean_email:
+            return False
+        val = await self.pool.fetchval(
+            """
+            SELECT 1 FROM contacted_recruiters
+             WHERE email = $1
+               AND contacted_at >= now() - ($2 || ' days')::interval
+            """,
+            clean_email,
+            within_days,
+        )
+        return val is not None
+
+    async def record_contacted_recruiter(
+        self, email: str, role_pitched: str, snippet: str = "", post_url: str = ""
+    ) -> None:
+        """Log a successful cold email."""
+        clean_email = (email or "").strip().lower()
+        if not clean_email:
+            return
+        await self.pool.execute(
+            """
+            INSERT INTO contacted_recruiters (email, role_pitched, post_snippet, post_url)
+            VALUES ($1, $2, $3, $4)
+            ON CONFLICT (email) DO UPDATE
+               SET role_pitched = EXCLUDED.role_pitched,
+                   post_snippet = COALESCE(EXCLUDED.post_snippet, contacted_recruiters.post_snippet),
+                   post_url = COALESCE(EXCLUDED.post_url, contacted_recruiters.post_url)
+            """,
+            clean_email,
+            role_pitched,
+            snippet[:500],
+            post_url[:1000],
+        )

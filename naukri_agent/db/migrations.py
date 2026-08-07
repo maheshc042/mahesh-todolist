@@ -266,6 +266,25 @@ MIGRATIONS: list[tuple[str, str]] = [
         );
         """,
     ),
+    (
+        "0009_cold_email_tracking",
+        """
+        -- Tracks recruiters we have cold-emailed to prevent duplicate spam.
+        CREATE TABLE IF NOT EXISTS contacted_recruiters (
+            email TEXT PRIMARY KEY,
+            role_pitched TEXT NOT NULL,
+            post_snippet TEXT,
+            contacted_at TIMESTAMPTZ NOT NULL DEFAULT now()
+        );
+        """,
+    ),
+    (
+        "0010_linkedin_post_url",
+        """
+        -- Adds post_url column to contacted_recruiters table.
+        ALTER TABLE contacted_recruiters ADD COLUMN IF NOT EXISTS post_url TEXT;
+        """,
+    ),
 ]
 
 

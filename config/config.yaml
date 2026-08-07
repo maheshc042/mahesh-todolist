@@ -35,8 +35,8 @@ run:
   daily_application_cap: 35
   dedupe_window_days: 90
   max_consecutive_failures: 5
-  min_delay_between_applies_s: 4   # Safe human pacing (4-10s)
-  max_delay_between_applies_s: 10  # Safe human pacing (4-10s)
+  min_delay_between_applies_s: 8   # Human pacing with room for coffee (8-22s)
+  max_delay_between_applies_s: 22  # Human pacing with room for coffee (8-22s)
   max_retries_per_job: 1           # No more double-retries on dead pages
   strict_answers: true
   screenshot_on_failure: true

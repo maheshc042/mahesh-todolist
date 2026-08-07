@@ -226,15 +226,15 @@ NO_RESULTS = [
 # -------------------------------------------------------------- job detail
 JD_APPLY_BUTTON = [
     "button#apply-button",
-    "button:has-text('Apply')",
+    "button:text-is('Apply')",
     "button.apply-button",
     "#apply-button",
 ]
 
 JD_COMPANY_SITE_BUTTON = [
     "button#company-site-button",
-    "button:has-text('Apply on company site')",
-    "a:has-text('Apply on company site')",
+    "button:text-is('Apply on company site')",
+    "a:text-is('Apply on company site')",
     "#company-site-button",
 ]
 

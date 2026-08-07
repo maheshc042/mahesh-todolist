@@ -438,21 +438,9 @@ class JobSearcher:
                         low = label.lower()
                         if (
                             label
-                            and len(label) <= 40
+                            and len(label) <= 50
                             and low not in found
                             and low not in HEADER_NAV_BLACKLIST
-                            and any(
-                                k in low
-                                for k in (
-                                    "profile",
-                                    "candidate",
-                                    "applies",
-                                    "preference",
-                                    "might like",
-                                    "recommended",
-                                    "all",
-                                )
-                            )
                         ):
                             found[low] = item
                 except Exception:

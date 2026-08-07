@@ -106,6 +106,20 @@ class ApplyEngine:
                 job.form_links = list(dict.fromkeys(form_links))
                 log.info("job.form_links_found", job_id=job.job_id, links=job.form_links)
 
+            # Extract Recruiter Emails
+            raw_emails = re.findall(r"([a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+)", description)
+            if raw_emails:
+                ignored_prefixes = ("info@", "support@", "sales@", "contact@", "help@", "admin@", "query@", "feedback@")
+                valid_emails = [
+                    e.lower().strip(".")
+                    for e in raw_emails
+                    if not e.lower().startswith(ignored_prefixes)
+                    and not e.lower().endswith(("naukri.com", "naukrigulf.com", "example.com", "yopmail.com"))
+                ]
+                if valid_emails:
+                    job.recruiter_emails = list(dict.fromkeys(valid_emails))
+                    log.info("job.recruiter_emails_found", job_id=job.job_id, emails=job.recruiter_emails)
+
     async def apply(self, job: Job, profile: str, pre_submit_check: Callable[[Job], FilterDecision] | None = None) -> ApplyOutcome:
         t_job_start = time.perf_counter()
         jt = JobTiming(job_id=job.job_id, title=job.title)

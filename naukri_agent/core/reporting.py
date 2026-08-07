@@ -87,8 +87,8 @@ class ReportExporter:
             writer = csv.writer(f)
             writer.writerow(RANKED_JOBS_CSV_HEADER)
             for rj in ranked_jobs:
-                reasons_str = " | ".join(rj.reasons)  # <-- BUG FIXED HERE
-                writer.writerow([rj.rank or "", f"{rj.total_score:.2f}", rj.job.job_id, rj.job.recommendation_tab or "", rj.job.recommendation_position or "", rj.job.company, rj.job.title, rj.job.url, reasons_str])
+                reasons_str = " | ".join(rj.reasons)
+                writer.writerow([rj.rank or "", f"{rj.score:.2f}", rj.job.job_id, rj.job.recommendation_tab or "", rj.job.recommendation_position or "", rj.job.company, rj.job.title, rj.job.url, reasons_str])
 
     def _write_outcomes_csv(self, path: Path, items: list[tuple[Job, ApplyOutcome]]) -> None:
         with path.open("w", encoding="utf-8", newline="") as f:

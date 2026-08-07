@@ -143,8 +143,11 @@ def format_run_summary(
         for job in stats.applied_jobs[:max_jobs]:
             lines.append(f"  - {job.get('title', '?')} @ {job.get('company', '?')}")
             form_links = job.get("form_links", [])
+            recruiter_emails = job.get("recruiter_emails", [])
             if form_links:
                 lines.append(f"    ⚠️ Form Required: {', '.join(form_links)}")
+            if recruiter_emails:
+                lines.append(f"    📧 Recruiter Email: {', '.join(recruiter_emails)}")
         remaining = len(stats.applied_jobs) - max_jobs
         if remaining > 0:
             lines.append(f"  … and {remaining} more")
@@ -157,9 +160,12 @@ def format_run_summary(
             company = job.get("company", "?")
             url = job.get("url", "")
             form_links = job.get("form_links", [])
+            recruiter_emails = job.get("recruiter_emails", [])
             lines.append(f"  - {title} @ {company}")
             if form_links:
                 lines.append(f"    Forms: {', '.join(form_links)}")
+            if recruiter_emails:
+                lines.append(f"    📧 Recruiter Email: {', '.join(recruiter_emails)}")
             if url:
                 lines.append(f"    URL: {url}")
 

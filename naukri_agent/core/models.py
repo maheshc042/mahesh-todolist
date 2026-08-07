@@ -108,6 +108,7 @@ class Job:
     total_jobs_in_tab: int | None = None
     scraped_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     form_links: list[str] = field(default_factory=list)
+    recruiter_emails: list[str] = field(default_factory=list)
 
     # --- Derived numeric fields, parsed lazily by the parser module ---------
     min_experience: float | None = None
