@@ -294,6 +294,9 @@ class ProfileRefresher:
                 pass
             return None
 
+        # Ensure no last-second promotional modals block the click
+        await dismiss_overlays(self.page)
+
         await trigger.click(timeout=8_000)
         await human_pause(600, 1_300)
 

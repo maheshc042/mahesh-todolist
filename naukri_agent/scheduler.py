@@ -145,6 +145,19 @@ class AgentScheduler:
 
         self._install_signal_handlers()
         self.scheduler.start()
+
+        # Start background Telegram HITL Listener if credentials are configured
+        listener_task: asyncio.Task[None] | None = None
+        if settings.telegram_bot_token and settings.telegram_chat_id:
+            try:
+                from .db.repository import Repository
+                from .notify.telegram_listener import TelegramListener
+                repo = await Repository.create()
+                listener = TelegramListener(settings.telegram_bot_token, settings.telegram_chat_id)
+                listener_task = asyncio.create_task(listener.start_listening_loop(repo))
+            except Exception as exc:
+                log.warning("schedule.telegram_listener_failed", error=str(exc)[:150])
+
         for job in self.scheduler.get_jobs():
             log.info("schedule.next_fire", job=job.id, at=str(job.next_run_time))
 
@@ -156,6 +169,8 @@ class AgentScheduler:
         try:
             await self._stopping.wait()
         finally:
+            if listener_task and not listener_task.done():
+                listener_task.cancel()
             await self.shutdown()
 
     def _install_signal_handlers(self) -> None:

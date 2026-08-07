@@ -516,6 +516,31 @@ def resolve(
     _run(_main())
 
 
+@app.command(name="listen-telegram")
+def listen_telegram(
+    config_path: Optional[Path] = typer.Option(None, "--config", help="Path to config.yaml"),
+) -> None:
+    """Start interactive Telegram bot listener to train your AI directly from your phone."""
+
+    async def _main() -> None:
+        settings, config = _bootstrap(config_path)
+        if not settings.telegram_bot_token or not settings.telegram_chat_id:
+            raise ConfigError("TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID must be configured in .env")
+
+        from .notify.telegram_listener import TelegramListener
+        repo = await Repository.create()
+        listener = TelegramListener(
+            bot_token=settings.telegram_bot_token,
+            chat_id=settings.telegram_chat_id,
+        )
+        try:
+            await listener.start_listening_loop(repo)
+        finally:
+            await close_pool()
+
+    _run(_main())
+
+
 @app.command()
 def doctor(
     config_path: Optional[Path] = typer.Option(None, "--config", help="Path to config.yaml"),

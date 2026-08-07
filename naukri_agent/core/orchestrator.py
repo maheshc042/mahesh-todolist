@@ -34,6 +34,7 @@ import random
 import time
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Any
 
 from ..browser.artifacts import ArtifactStore
 from ..browser.manager import BrowserManager
@@ -108,6 +109,7 @@ class Orchestrator:
         self.api_client: NaukriApiClient | None = None
         self.consecutive_failures = 0
         self.applied_today = 0
+        self._background_tasks: set[asyncio.Task[Any]] = set()
         self.started_at = time.monotonic()
         self.notifier = build_notifier(
             telegram_enabled=config.notifications.telegram_enabled,
@@ -248,6 +250,8 @@ class Orchestrator:
             status = RunStatus.FAILED
             log.exception("run.crashed")
         finally:
+            if self._background_tasks:
+                await asyncio.gather(*self._background_tasks, return_exceptions=True)
             # Detach the popup listener before the page dies.
             if self.applier is not None:
                 self.applier.close()
@@ -677,7 +681,9 @@ class Orchestrator:
         await self.repo.record_outcome(
             job, profile.name, self.run_id, outcome, account=self.account_key
         )
-        await self._dispatch_recruiter_emails(job, profile, outcome)
+        task = asyncio.create_task(self._dispatch_recruiter_emails(job, profile, outcome))
+        self._background_tasks.add(task)
+        task.add_done_callback(self._background_tasks.discard)
         await self.repo.log_event(
             self.run_id,
             f"apply.{outcome.status.value}",

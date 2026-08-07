@@ -426,7 +426,7 @@ class Repository:
             return  # Do NOT create a pending review row
 
         # --- Normal path: insert as unresolved pending review ----------------
-        await self.pool.execute(
+        row = await self.pool.fetchrow(
             """
             INSERT INTO question_review
                 (job_id, profile, question, question_kind, options, screenshot_path)
@@ -437,6 +437,7 @@ class Repository:
                    options = EXCLUDED.options,
                    screenshot_path = COALESCE(EXCLUDED.screenshot_path,
                                               question_review.screenshot_path)
+            RETURNING id
             """,
             job_id,
             profile,
@@ -445,6 +446,32 @@ class Repository:
             json.dumps(options),
             screenshot_path,
         )
+        review_id = row["id"] if row else None
+
+        # Send Interactive Telegram Alert with [#review_id]
+        if review_id:
+            try:
+                from ..config import AgentConfig, get_settings
+                from ..notify.notifier import build_notifier
+                settings = get_settings()
+                config = AgentConfig.load()
+                notifier = build_notifier(
+                    telegram_enabled=config.notifications.telegram_enabled,
+                    bot_token=settings.telegram_bot_token,
+                    chat_id=settings.telegram_chat_id,
+                )
+                opts_str = " | ".join(str(o) for o in options) if options else "Text Input"
+                alert_body = (
+                    f"❓ <b>Unanswered Question [#`{review_id}`]</b>\n"
+                    f"<b>Profile:</b> {profile}\n"
+                    f"<b>Question:</b> \"{q_norm}\"\n"
+                    f"<b>Type:</b> {kind}\n"
+                    f"<b>Options:</b> {opts_str}\n\n"
+                    f"👉 <i>Reply directly to this message with your answer to train your AI!</i>"
+                )
+                await notifier.send(f"❓ Question Review Required [#{review_id}]", alert_body, is_error=False)
+            except Exception as exc:
+                log.warning("telegram_review_alert_failed", error=str(exc)[:150])
 
         try:
             from ..config import PROJECT_ROOT
@@ -460,6 +487,7 @@ class Repository:
                 existing["times_seen"] = existing.get("times_seen", 1) + 1
             else:
                 data.append({
+                    "id": review_id,
                     "question": question.strip(),
                     "kind": kind,
                     "options": options,
