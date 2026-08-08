@@ -189,17 +189,28 @@ class ApplyEngine:
             self.metrics.job_timings.append(jt)
         return outcome
 
+    async def _fast_check(self, selectors: list[str]) -> bool:
+        """Fast, non-blocking check to see if any selector is visible right now in 0ms."""
+        for selector in selectors:
+            try:
+                loc = self.page.locator(selector).first
+                if await loc.is_visible():
+                    return True
+            except Exception:
+                continue
+        return False
+
     async def _wait_for_post_apply_event(self) -> str:
         for _ in range(30):  # 4.5s strict SLA poll
             if self._popup_opened:
                 return "popup"
-            if await first_visible(self.page, S.APPLY_SUCCESS, timeout_ms=50):
+            if await self._fast_check(S.APPLY_SUCCESS):
                 return "success"
-            if await first_visible(self.page, S.CHATBOT_DRAWER, timeout_ms=50):
+            if await self._fast_check(S.CHATBOT_DRAWER):
                 return "chatbot"
-            if await first_visible(self.page, S.APPLY_ERROR_TOAST, timeout_ms=50):
+            if await self._fast_check(S.APPLY_ERROR_TOAST):
                 return "toast"
-            if await first_visible(self.page, S.JD_ALREADY_APPLIED, timeout_ms=50):
+            if await self._fast_check(S.JD_ALREADY_APPLIED):
                 return "already_applied"
             await asyncio.sleep(0.15)
         return "timeout"
@@ -230,12 +241,12 @@ class ApplyEngine:
         if event_type == "popup" or self._popup_opened:
             return ApplyOutcome(status=ApplicationStatus.EXTERNAL, reason=SkipReason.EXTERNAL_APPLY, detail="Third-party tab opened", attempts=attempts)
 
-        # Wait up to 6s for the success banner
-        if event_type in ("success", "already_applied") or await first_visible(self.page, S.APPLY_SUCCESS, timeout_ms=6_000):
+        # Instant check for success banner or already applied status
+        if event_type in ("success", "already_applied") or await self._fast_check(S.APPLY_SUCCESS):
             return ApplyOutcome(status=ApplicationStatus.APPLIED, attempts=attempts)
 
         chatbot = ChatbotHandler(self.page, self.answers, max_questions=self.max_questions)
-        if event_type == "chatbot" or await chatbot.is_open(timeout_ms=2_000):
+        if event_type == "chatbot" or await self._fast_check(S.CHATBOT_DRAWER):
             t_qans_0 = time.perf_counter()
             result = await chatbot.run()
             jt.q_answer_s += time.perf_counter() - t_qans_0

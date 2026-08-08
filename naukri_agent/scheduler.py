@@ -148,12 +148,12 @@ class AgentScheduler:
 
         # Start background Telegram HITL Listener if credentials are configured
         listener_task: asyncio.Task[None] | None = None
-        if settings.telegram_bot_token and settings.telegram_chat_id:
+        if self.settings.telegram_bot_token and self.settings.telegram_chat_id:
             try:
                 from .db.repository import Repository
                 from .notify.telegram_listener import TelegramListener
                 repo = await Repository.create()
-                listener = TelegramListener(settings.telegram_bot_token, settings.telegram_chat_id)
+                listener = TelegramListener(self.settings.telegram_bot_token, self.settings.telegram_chat_id)
                 listener_task = asyncio.create_task(listener.start_listening_loop(repo))
             except Exception as exc:
                 log.warning("schedule.telegram_listener_failed", error=str(exc)[:150])
