@@ -204,14 +204,22 @@ class Repository:
         account: str = "primary",
     ) -> None:
         await self.upsert_job(job)
+        platform = "naukri"
+        if job.job_id.startswith("instahyre-"):
+            platform = "instahyre"
+        elif job.job_id.startswith("cutshort-"):
+            platform = "cutshort"
+        elif job.job_id.startswith("wellfound-"):
+            platform = "wellfound"
+
         await self.pool.execute(
             """
             INSERT INTO applications (
                 job_id, run_id, profile, status, reason, detail, attempts,
-                questions_answered, screenshot_path, account
+                questions_answered, screenshot_path, account, platform
             )
-            VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
-            ON CONFLICT (job_id, profile) DO UPDATE
+            VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
+            ON CONFLICT (job_id, profile, platform) DO UPDATE
                SET status = EXCLUDED.status,
                    reason = EXCLUDED.reason,
                    detail = EXCLUDED.detail,
@@ -231,7 +239,9 @@ class Repository:
             outcome.questions_answered,
             outcome.screenshot_path,
             account,
+            platform,
         )
+
 
     async def recent_applications(self, limit: int = 50) -> list[dict[str, Any]]:
         rows = await self.pool.fetch(

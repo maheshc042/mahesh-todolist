@@ -170,6 +170,8 @@ class ApplyOutcome:
     questions_answered: int = 0
     unanswered_questions: list[dict[str, Any]] = field(default_factory=list)
     attempts: int = 1
+    external_url: str | None = None
+
 
 
 @dataclass(slots=True)
@@ -219,3 +221,28 @@ class RunStats:
             "walkin_alerts": self.walkin_alerts,
             "errors": self.errors[:20],
         }
+
+
+def extract_description_metadata(description: str) -> tuple[list[str], list[str]]:
+    """Extracts form links (Google Forms, Typeform, etc.) and valid recruiter emails from job description text."""
+    if not description:
+        return [], []
+    form_links = re.findall(
+        r"(https?://(?:forms\.gle|docs\.google\.com/forms|forms\.office\.com|typeform\.com)[^\s\"'>]+)",
+        description,
+    )
+    clean_links = list(dict.fromkeys(form_links))
+
+    raw_emails = re.findall(r"([a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+)", description)
+    ignored_prefixes = ("info@", "support@", "sales@", "contact@", "help@", "admin@", "query@", "feedback@")
+    valid_emails = [
+        e.lower().strip(".")
+        for e in raw_emails
+        if not e.lower().startswith(ignored_prefixes)
+        and not e.lower().endswith(
+            ("naukri.com", "naukrigulf.com", "example.com", "yopmail.com", "instahyre.com", "cutshort.io", "wellfound.com")
+        )
+    ]
+    clean_emails = list(dict.fromkeys(valid_emails))
+    return clean_links, clean_emails
+

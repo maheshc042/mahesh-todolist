@@ -98,7 +98,12 @@ class Settings(BaseSettings):
     naukri_password: str = ""
     naukri_email_2: str = ""
     naukri_password_2: str = ""
+    instahyre_email: str = ""
+    instahyre_password: str = ""
+    cutshort_email: str = ""
+    cutshort_password: str = ""
     default_account: str = "primary"
+
 
     # --- database ---------------------------------------------------------
     database_url: str = ""
@@ -113,6 +118,8 @@ class Settings(BaseSettings):
     # --- notifications ----------------------------------------------------
     telegram_bot_token: str = ""
     telegram_chat_id: str = ""
+    gemini_api_key: str = ""
+
 
     # --- paths ------------------------------------------------------------
     config_path: Path = Path("config/config.yaml")
@@ -660,7 +667,16 @@ class JobProfile(_Model):
         )
 
 
+class PlatformsConfig(_Model):
+    naukri: bool = True
+    instahyre: bool = False
+    cutshort: bool = False
+    wellfound: bool = False
+
+
+
 class AgentConfig(_Model):
+    platforms: PlatformsConfig = Field(default_factory=PlatformsConfig)
     browser: BrowserConfig = Field(default_factory=BrowserConfig)
     run: RunConfig = Field(default_factory=RunConfig)
     recommended: RecommendedConfig = Field(default_factory=RecommendedConfig)

@@ -285,7 +285,24 @@ MIGRATIONS: list[tuple[str, str]] = [
         ALTER TABLE contacted_recruiters ADD COLUMN IF NOT EXISTS post_url TEXT;
         """,
     ),
+    (
+        "0011_multi_platform",
+        """
+        -- Add platform tracking to keep Naukri, Instahyre, and Cutshort separate
+        ALTER TABLE jobs ADD COLUMN IF NOT EXISTS platform TEXT NOT NULL DEFAULT 'naukri';
+        ALTER TABLE applications ADD COLUMN IF NOT EXISTS platform TEXT NOT NULL DEFAULT 'naukri';
+        
+        -- Drop the old unique constraint and create a new one that includes the platform
+        ALTER TABLE applications DROP CONSTRAINT IF EXISTS applications_job_id_profile_key;
+        ALTER TABLE applications ADD CONSTRAINT applications_job_id_profile_platform_key UNIQUE (job_id, profile, platform);
+
+        -- Add indexes for fast querying by platform
+        CREATE INDEX IF NOT EXISTS applications_platform_idx ON applications(platform, created_at DESC);
+        CREATE INDEX IF NOT EXISTS jobs_platform_idx ON jobs(platform, last_seen_at DESC);
+        """
+    ),
 ]
+
 
 
 async def run_migrations() -> list[str]:

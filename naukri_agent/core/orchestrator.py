@@ -65,6 +65,13 @@ from ..naukri.profile import ProfileRefresher
 from ..naukri.resume import ResumeManager
 from ..naukri.search import JobSearcher
 from ..notify.notifier import build_notifier, format_run_summary
+from ..platforms.base import BaseJobPlatform
+from ..platforms.cutshort import CutshortPlatform
+from ..platforms.instahyre import InstahyrePlatform
+from ..platforms.naukri_platform import NaukriPlatform
+from ..platforms.wellfound import WellfoundPlatform
+
+
 
 log = get_logger(__name__)
 
@@ -200,47 +207,72 @@ class Orchestrator:
                 session_key=self.account.session_key,
             ) as browser:
                 self.metrics.browser_startup_s = time.perf_counter() - t_b_0
-                auth = NaukriAuth(
-                    browser,
-                    self.account.email,
-                    self.account.password,
-                    artifacts,
-                )
-                t_login_0 = time.perf_counter()
-                page = await auth.ensure_logged_in()
-                self.metrics.login_s = time.perf_counter() - t_login_0
+                page = await browser.new_page()
 
-                # Extract session token for the match score API pre-filter.
-                # Best-effort: if extraction fails, the API client stays None
-                # and all jobs go through the normal Playwright flow.
-                ms_cfg = self.config.match_score_prefilter
-                if ms_cfg.enabled:
-                    token = await extract_naukri_token(page)
-                    if token:
-                        self.api_client = NaukriApiClient(
-                            token,
-                            timeout_s=ms_cfg.request_timeout_s,
-                            max_concurrent=ms_cfg.max_concurrent,
-                        )
-                        await self.api_client.__aenter__()
-                        log.info("match_score.api_client_ready")
-                    else:
-                        log.info("match_score.no_token_skipping_api")
+                # 1. Initialize Active Platforms
+                active_platforms: list[BaseJobPlatform] = []
 
-                # Ranking first, applying second: the profile touch is quota-free
-                # and worthless if the run later aborts on a cap.
-                t_ref_0 = time.perf_counter()
-                await self._refresh_profile(page)
-                self.metrics.resume_switch_s = time.perf_counter() - t_ref_0
+                if self.config.platforms.naukri:
+                    answers = await self._build_answer_engine(profiles[0])
+                    active_platforms.append(
+                        NaukriPlatform(page, browser, self.account, self.config, artifacts, answers, self.metrics)
+                    )
 
-                for profile in profiles:
-                    try:
-                        await self._run_profile(profile, page, auth, artifacts)
-                    except StopRun as stop:
-                        log.warning("run.stopped_early", reason=str(stop))
-                        self.stats.errors.append(f"stopped early: {stop}")
-                        status = RunStatus.PARTIAL
-                        break
+                if self.config.platforms.instahyre:
+                    active_platforms.append(
+                        InstahyrePlatform(page, self.account, artifacts)
+                    )
+
+                if self.config.platforms.cutshort:
+                    if 'answers' not in locals():
+                        answers = await self._build_answer_engine(profiles[0])
+                    active_platforms.append(
+                        CutshortPlatform(page, self.account, artifacts, answers)
+                    )
+
+                if self.config.platforms.wellfound:
+                    active_platforms.append(
+                        WellfoundPlatform(page, self.account, artifacts)
+                    )
+
+
+
+                # 2. Run the Multi-Platform Loop
+                for platform in active_platforms:
+                    log.info("platform.start", platform=platform.platform_name)
+                    t_login_0 = time.perf_counter()
+                    await platform.ensure_logged_in()
+                    self.metrics.login_s += time.perf_counter() - t_login_0
+
+                    # Run Naukri profile refresh ONLY if it's the Naukri platform
+                    if platform.platform_name == "naukri":
+                        ms_cfg = self.config.match_score_prefilter
+                        if ms_cfg.enabled:
+                            token = await extract_naukri_token(page)
+                            if token:
+                                self.api_client = NaukriApiClient(
+                                    token,
+                                    timeout_s=ms_cfg.request_timeout_s,
+                                    max_concurrent=ms_cfg.max_concurrent,
+                                )
+                                await self.api_client.__aenter__()
+                                log.info("match_score.api_client_ready")
+                            else:
+                                log.info("match_score.no_token_skipping_api")
+
+                        t_ref_0 = time.perf_counter()
+                        await self._refresh_profile(page)
+                        self.metrics.resume_switch_s = time.perf_counter() - t_ref_0
+
+                    for profile in profiles:
+                        try:
+                            await self._run_profile(platform, profile, page, artifacts)
+                        except StopRun as stop:
+                            log.warning("run.stopped_early", reason=str(stop))
+                            self.stats.errors.append(f"stopped early: {stop}")
+                            status = RunStatus.PARTIAL
+                            break
+
         except FatalAgentError as exc:
             fatal_error = str(exc)
             status = RunStatus.FAILED
@@ -252,7 +284,14 @@ class Orchestrator:
         finally:
             if self._background_tasks:
                 await asyncio.gather(*self._background_tasks, return_exceptions=True)
-            # Detach the popup listener before the page dies.
+            # Detach popup listeners before the page dies.
+            if 'active_platforms' in locals():
+                for platform in active_platforms:
+                    if hasattr(platform, "applier") and getattr(platform, "applier") is not None:
+                        try:
+                            platform.applier.close()
+                        except Exception:
+                            pass
             if self.applier is not None:
                 self.applier.close()
                 self.applier = None
@@ -357,9 +396,9 @@ class Orchestrator:
     # --------------------------------------------------------------- profile
     async def _run_profile(
         self,
+        platform: BaseJobPlatform,
         profile: JobProfile,
         page,
-        auth: NaukriAuth,
         artifacts: ArtifactStore,
     ) -> None:
         assert self.repo is not None
@@ -369,34 +408,8 @@ class Orchestrator:
             profile=profile.name,
             account=profile.account,
             recommended=profile.use_recommended,
+            platform=platform.platform_name,
         )
-
-        answers = await self._build_answer_engine(profile)
-        searcher = JobSearcher(
-            page,
-            self.config.browser.min_action_delay_ms,
-            self.config.browser.max_action_delay_ms,
-            metrics=self.metrics,
-        )
-
-        # The apply engine is created ONCE per run and its knowledge base swapped
-        # per profile. Building one per profile registered a fresh `popup`
-        # listener on the same page every time, leaking handlers for the run.
-        applier = None
-        if not self.dry_run:
-            if self.applier is None:
-                self.applier = ApplyEngine(
-                    page,
-                    answers,
-                    artifacts,
-                    dry_run=False,
-                    nav_timeout_ms=self.config.browser.navigation_timeout_ms,
-                    attempts=self.config.run.max_retries_per_job,
-                    metrics=self.metrics,
-                )
-            else:
-                self.applier.set_answers(answers)
-            applier = self.applier
 
         known = await self.repo.known_job_ids(
             profile.name,
@@ -408,19 +421,20 @@ class Orchestrator:
         def remaining() -> int:
             return profile.max_applications_per_run - applied_this_profile
 
-        # Step 1: Collect Recommendation Jobs
+        # Step 1: Collect Jobs from Platform
         collected_jobs: list[Job] = []
         if profile.use_recommended and self.config.recommended.enabled:
-            collected_jobs = await searcher.search_recommended(
-                self.config.recommended,
+            collected_jobs = await platform.fetch_jobs(
+                profile,
                 exclude_job_ids=known,
             )
             if collected_jobs:
                 self.stats.bump(profile.name, "scraped", len(collected_jobs))
 
         if not collected_jobs:
-            log.info("search.recommended_empty", profile=profile.name)
+            log.info("search.jobs_empty", profile=profile.name, platform=platform.platform_name)
             return
+
 
         # =========================================================
         # STEP 1.5: Inject API Match Scores (Fast Pre-filter)
@@ -516,8 +530,9 @@ class Orchestrator:
                 known.add(job.job_id)
 
                 outcome = await self._process_job(
-                    job, profile, filters, applier, page, auth, artifacts
+                    job, profile, filters, platform, page, artifacts
                 )
+
 
                 if outcome.status == ApplicationStatus.APPLIED:
                     applied_this_profile += 1
@@ -530,6 +545,14 @@ class Orchestrator:
             pass
         finally:
             self.metrics.total_apply_phase_s += time.perf_counter() - t_apply_loop_0
+
+        # Step 8: Post-Apply Async Handlers (e.g., Cutshort Questionnaires)
+        if hasattr(platform, "handle_messages"):
+            log.info("profile.waiting_for_async_messages", platform=platform.platform_name)
+            # Wait 3 minutes to give employer systems time to trigger automated questionnaires
+            if not self.dry_run:
+                await asyncio.sleep(180)
+            await platform.handle_messages()
 
         # Step 7: Export Outcome Reports & Enriched Summary JSON
         duration = time.monotonic() - profile_start_time
@@ -552,9 +575,8 @@ class Orchestrator:
         job: Job,
         profile: JobProfile,
         filters: FilterEngine,
-        applier: ApplyEngine,
+        platform: BaseJobPlatform,
         page,
-        auth: NaukriAuth,
         artifacts: ArtifactStore,
     ) -> ApplyOutcome:
         assert self.repo is not None
@@ -594,10 +616,9 @@ class Orchestrator:
             return outcome
 
         try:
-            # Phase 2 runs INSIDE apply(): the engine loads the job page, enriches
-            # the description, then calls this gate before clicking Apply. The old
-            # order filtered after submitting, which only logged a regret.
-            outcome = await applier.apply(
+            # Phase 2 runs INSIDE apply_to_job(): the platform loads the job page,
+            # enriches description, then calls pre_submit_check before clicking Apply.
+            outcome = await platform.apply_to_job(
                 job, profile.name, pre_submit_check=filters.evaluate_detail
             )
 
@@ -606,10 +627,11 @@ class Orchestrator:
                 page, S.LOGGED_OUT_MARKERS, timeout_ms=2_000
             ):
                 log.warning("job.session_lost_retrying", job_id=job.job_id)
-                await auth.reauthenticate(page)
-                outcome = await applier.apply(
+                await platform.ensure_logged_in()
+                outcome = await platform.apply_to_job(
                     job, profile.name, pre_submit_check=filters.evaluate_detail
                 )
+
 
         except FatalAgentError:
             raise

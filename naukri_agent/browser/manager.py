@@ -48,50 +48,85 @@ DEFAULT_UA = (
 )
 
 EXTRA_HTTP_HEADERS = {
-    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8",
     "Accept-Language": "en-US,en;q=0.9,hi;q=0.8",
     "Sec-Ch-Ua": '"Google Chrome";v="131", "Chromium";v="131", "Not_A Brand";v="24"',
     "Sec-Ch-Ua-Mobile": "?0",
     "Sec-Ch-Ua-Platform": '"Windows"',
-    "Sec-Fetch-Dest": "document",
-    "Sec-Fetch-Mode": "navigate",
-    "Sec-Fetch-Site": "same-origin",
-    "Sec-Fetch-User": "?1",
-    "Upgrade-Insecure-Requests": "1",
 }
+
 
 # Executed in every page before any site script runs to evade Cloudflare/DataDome.
 STEALTH_SCRIPT = """
-// 1. Hide navigator.webdriver
+// 1. Hide navigator.webdriver — the most common bot check
 Object.defineProperty(navigator, 'webdriver', { get: () => false });
 
 // 2. Mock window.chrome (Headless browsers usually lack this)
 window.chrome = {
-    runtime: {},
+    runtime: { id: undefined },
     loadTimes: function() {},
     csi: function() {},
-    app: {}
+    app: { isInstalled: false, getDetails: function() {}, getIsInstalled: function() {} }
 };
 
 // 3. Fake permissions API so it doesn't instantly reject notifications
-const originalQuery = window.navigator.permissions.query;
-window.navigator.permissions.query = (parameters) => (
-  parameters.name === 'notifications'
-    ? Promise.resolve({ state: Notification.permission })
-    : originalQuery(parameters)
-);
+if (window.navigator && window.navigator.permissions) {
+    const originalQuery = window.navigator.permissions.query;
+    window.navigator.permissions.query = (parameters) => (
+      parameters.name === 'notifications'
+        ? Promise.resolve({ state: Notification.permission })
+        : originalQuery(parameters)
+    );
+}
 
-// 4. Hide Playwright/Puppeteer specific leak variables
+// 4. Hide Playwright/Puppeteer/CDP specific leak variables
 for (const key of Object.keys(window)) {
-    if (key.startsWith('cdc_') || key.startsWith('__playwright')) {
+    if (key.startsWith('cdc_') || key.startsWith('__playwright') || key.startsWith('__selenium') || key.startsWith('__webdriver')) {
         delete window[key];
     }
 }
 
 // 5. Spoof plugins and languages to look like a real user
-Object.defineProperty(navigator, 'plugins', { get: () => [1, 2, 3, 4, 5] });
+Object.defineProperty(navigator, 'plugins', {
+    get: () => {
+        const arr = [
+            { name: 'Chrome PDF Plugin', filename: 'internal-pdf-viewer' },
+            { name: 'Chrome PDF Viewer', filename: 'mhjfbmdgcfjbbpaeojofohoefgiehjai' },
+            { name: 'Native Client', filename: 'internal-nacl-plugin' }
+        ];
+        arr.item = (i) => arr[i];
+        arr.namedItem = (n) => arr.find(p => p.name === n);
+        arr.refresh = () => {};
+        return arr;
+    }
+});
 Object.defineProperty(navigator, 'languages', { get: () => ['en-IN', 'en-US', 'en'] });
+
+// 6. Spoof hardware concurrency and device memory
+Object.defineProperty(navigator, 'hardwareConcurrency', { get: () => 8 });
+Object.defineProperty(navigator, 'deviceMemory', { get: () => 8 });
+
+// 7. Prevent automation detection via Error stack trace
+const originalError = Error;
+Error = function(...args) {
+    const error = new originalError(...args);
+    const stack = error.stack;
+    if (stack && stack.includes('puppeteer') || stack && stack.includes('playwright')) {
+        error.stack = stack.replace(/puppeteer|playwright/gi, 'chrome');
+    }
+    return error;
+};
+Error.prototype = originalError.prototype;
+
+// 8. Override toString to prevent detection via function source
+const nativeToString = Function.prototype.toString;
+Function.prototype.toString = function() {
+    if (this === navigator.permissions.query) {
+        return 'function query() { [native code] }';
+    }
+    return nativeToString.call(this);
+};
 """
+
 
 LAUNCH_ARGS = [
     "--disable-blink-features=AutomationControlled",
@@ -140,6 +175,7 @@ class BrowserManager:
         self._browser = await self._playwright.chromium.launch(
             headless=self.config.headless,
             slow_mo=self.config.slow_mo_ms,
+            channel="chrome",  # Use real Chrome to bypass Instahyre bot detection
             args=LAUNCH_ARGS,
         )
 

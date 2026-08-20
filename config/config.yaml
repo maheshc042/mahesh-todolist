@@ -300,6 +300,11 @@ experience:
     software testing: 2.0
     qa: 2.0
     devops: 2.0
+    golang: 0
+    go: 0
+    .net: 0
+    dotnet: 0
+    dot net: 0
     # AI / Python is the newer track: 6 months hands-on. Keep these honest —
     # recruiters cross-check them against the resume.
     ai: 0.6
@@ -406,8 +411,8 @@ profiles:
     search_is_fallback_only: true
 
     filters:
-      title_must_include_any: [full stack, fullstack, mern, react, node, javascript, typescript, frontend, backend, web, software, developer, engineer, python, qa, testing, tester, software engineer, software testing, software qa, software developer, software engineer full stack,  software engineer frontend, software engineer backend, backend developer, backend engineer, frontend developer, frontend engineer, full stack developer, full stack engineer, full stack frontend, full stack backend, full stack mern, full stack react, full stack node, full stack javascript, full stack typescript, full stack fastapi, full stack flask, full stack chatbot, full stack prompt, full stack llm, full stack genai, full stack generative ai, full stack ai coding, full stack ai tools, aws, gcp, azure, cloud, kubernetes, k8s, docker, devops]
-      title_must_exclude_any: [intern, internship, sales, bpo, php, wordpress, .net, dotnet, dot net, c++, spring boot, java developer, java, mainframe, sap, salesforce, drupal, magento, engineering manager, project manager, product manager, general manager, solution architect, enterprise architect, tech architect, technical architect, sr. manager]
+      title_must_include_any: [full stack, fullstack, mern, react, node, javascript, typescript, frontend, backend, web, software, developer, engineer, python, qa, testing, tester, software engineer, software testing, software qa, software engineer, software developer, software engineer full stack, software engineer frontend, software engineer backend, backend developer, backend engineer, frontend developer, frontend engineer, full stack developer, full stack engineer, full stack frontend, full stack backend, full stack mern, full stack react, full stack node, full stack javascript, full stack typescript, full stack fastapi, full stack flask, full stack chatbot, full stack prompt, full stack llm, full stack genai, full stack generative ai, full stack ai coding, full stack ai tools, aws, gcp, azure, cloud, kubernetes, k8s, docker, devops]
+      title_must_exclude_any: [intern, internship, sales, bpo, php, wordpress, .net, dotnet, dot net, spring boot, asp.net, c#, c++, golang, go, java developer, java, mainframe, sap, salesforce, drupal, magento, engineering manager, project manager, product manager, general manager, solution architect, enterprise architect, tech architect, technical architect, sr. manager]
       description_must_exclude_any: [
         "bpo", "commission only", "unpaid", "registration fee", "security deposit",
         "prefers women", "women diversity", "women-only", "women only", "female only", "female diversity", "diversity drive"
@@ -457,8 +462,8 @@ profiles:
     search_is_fallback_only: true
 
     filters:
-      title_must_include_any: [ai, artificial intelligence, machine learning, ml, python, llm, genai, generative ai, nlp, chatbot, prompt, agent, data science, data engineer, python developer, ai engineer, ml engineer, qa, testing, tester, backend, developer, engineer, fullstack, mern, rag, vector, vector database, pinecone, chromadb, langchain, crewai, openai]
-      title_must_exclude_any: [intern, internship, sales, bpo, php, wordpress, .net, dotnet, dot net, asp.net, c#, c++, java developer, java, network, hardware, engineering manager, project manager, product manager, general manager, solution architect, enterprise architect, tech architect, technical architect, sr. manager]
+      title_must_include_any: [ai, artificial intelligence, machine learning, ml, python, llm, genai, generative ai, nlp, chatbot, prompt, agent, data science, data engineer, python developer, ai engineer, ml engineer,qa, testing, tester, backend, developer, engineer, fullstack, mern, rag, vector, vector database, pinecone, chromadb, langchain, crewai, openai]
+      title_must_exclude_any: [intern, internship, sales, bpo, php, wordpress, .net, dotnet, dot net, asp.net, c#, c++, golang, go, java developer, java, network, hardware, engineering manager, project manager, product manager, general manager, solution architect, enterprise architect, tech architect, technical architect, sr. manager]
       description_must_exclude_any: [
         "bpo", "commission only", "unpaid", "phd required", "registration fee", "security deposit",
         "prefers women", "women diversity", "women-only", "women only", "female only", "female diversity", "diversity drive"

@@ -96,10 +96,11 @@ async def safe_text(locator: Locator | None, default: str = "") -> str:
     try:
         if await locator.count() == 0:
             return default
-        value = await locator.inner_text(timeout=200)
+        value = await locator.inner_text(timeout=1500)
         return " ".join(value.split())
     except Exception:
         return default
+
 
 
 async def retry_async(
