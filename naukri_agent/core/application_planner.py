@@ -147,11 +147,13 @@ class ApplicationPlanner:
         rules: FilterRules | None = None,
         weights: RankingWeights | None = None,
         daily_limit: int = 35,
+        minimum_score: float = 0.0,
     ) -> None:
         self.candidate = candidate
         self.rules = rules
         self.weights = weights or RankingWeights()
         self.daily_limit = daily_limit
+        self.minimum_score = minimum_score
         self.hard_filter = HardFilter(rules, candidate=candidate) if rules else None
         self.ranking_engine = RankingEngine(candidate, rules=rules, weights=self.weights)
 
@@ -185,6 +187,28 @@ class ApplicationPlanner:
         t_rk_0 = time.perf_counter()
         ranked_eligible = self.ranking_engine.rank_jobs(eligible_raw)
         self.last_ranking_time_s = time.perf_counter() - t_rk_0
+
+        if self.minimum_score > 0:
+            qualified: list[RankedJob] = []
+            for ranked_job in ranked_eligible:
+                if ranked_job.score >= self.minimum_score:
+                    qualified.append(ranked_job)
+                    continue
+                reason = SkipReason.LOW_MATCH_SCORE
+                rejection_reasons_count[reason.value] = (
+                    rejection_reasons_count.get(reason.value, 0) + 1
+                )
+                rejected_list.append(
+                    RejectedJobInfo(
+                        job=ranked_job.job,
+                        reason=reason,
+                        detail=(
+                            f"rank score {ranked_job.score:.1f} below configured "
+                            f"minimum {self.minimum_score:.1f}"
+                        ),
+                    )
+                )
+            ranked_eligible = qualified
 
         # 3. Partition into Selected vs Overflow based on Daily Cap Limit
         selected = ranked_eligible[:cap]

@@ -291,7 +291,7 @@ MIGRATIONS: list[tuple[str, str]] = [
         -- Add platform tracking to keep Naukri, Instahyre, and Cutshort separate
         ALTER TABLE jobs ADD COLUMN IF NOT EXISTS platform TEXT NOT NULL DEFAULT 'naukri';
         ALTER TABLE applications ADD COLUMN IF NOT EXISTS platform TEXT NOT NULL DEFAULT 'naukri';
-        
+
         -- Drop the old unique constraint and create a new one that includes the platform
         ALTER TABLE applications DROP CONSTRAINT IF EXISTS applications_job_id_profile_key;
         ALTER TABLE applications ADD CONSTRAINT applications_job_id_profile_platform_key UNIQUE (job_id, profile, platform);
@@ -300,6 +300,73 @@ MIGRATIONS: list[tuple[str, str]] = [
         CREATE INDEX IF NOT EXISTS applications_platform_idx ON applications(platform, created_at DESC);
         CREATE INDEX IF NOT EXISTS jobs_platform_idx ON jobs(platform, last_seen_at DESC);
         """
+    ),
+    (
+        "0012_encrypted_sessions_and_platform_state",
+        """
+        -- Keep the legacy JSONB column temporarily so existing sessions can be
+        -- encrypted on first read without forcing every account to log in again.
+        ALTER TABLE browser_sessions ALTER COLUMN state DROP NOT NULL;
+        ALTER TABLE browser_sessions ADD COLUMN IF NOT EXISTS encrypted_state BYTEA;
+        ALTER TABLE browser_sessions ADD COLUMN IF NOT EXISTS key_version INTEGER;
+
+        CREATE TABLE IF NOT EXISTS platform_state (
+            account     TEXT NOT NULL,
+            platform    TEXT NOT NULL,
+            paused      BOOLEAN NOT NULL DEFAULT FALSE,
+            reason      TEXT,
+            paused_at   TIMESTAMPTZ,
+            updated_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+            PRIMARY KEY (account, platform)
+        );
+        """,
+    ),
+    (
+        "0013_platform_identity_and_submission_evidence",
+        """
+        -- A provider's job ID is unique only within that provider. Replace the
+        -- original global identity with a platform-aware key before additional
+        -- adapters can be enabled.
+        ALTER TABLE match_scores ADD COLUMN IF NOT EXISTS platform TEXT NOT NULL DEFAULT 'naukri';
+        ALTER TABLE applications ADD COLUMN IF NOT EXISTS confirmation_type TEXT;
+        ALTER TABLE applications ADD COLUMN IF NOT EXISTS confirmation_evidence TEXT;
+        ALTER TABLE applications ADD COLUMN IF NOT EXISTS submitted_at TIMESTAMPTZ;
+
+        UPDATE applications
+           SET submitted_at = created_at
+         WHERE status = 'applied' AND submitted_at IS NULL;
+
+        ALTER TABLE applications DROP CONSTRAINT IF EXISTS applications_job_id_fkey;
+        ALTER TABLE match_scores DROP CONSTRAINT IF EXISTS match_scores_job_id_fkey;
+        ALTER TABLE jobs DROP CONSTRAINT IF EXISTS jobs_pkey;
+        ALTER TABLE jobs ADD CONSTRAINT jobs_pkey PRIMARY KEY (job_id, platform);
+
+        ALTER TABLE match_scores DROP CONSTRAINT IF EXISTS match_scores_pkey;
+        ALTER TABLE match_scores ADD CONSTRAINT match_scores_pkey PRIMARY KEY (job_id, platform);
+        ALTER TABLE applications ADD CONSTRAINT applications_job_platform_fkey
+            FOREIGN KEY (job_id, platform) REFERENCES jobs(job_id, platform) ON DELETE CASCADE;
+        ALTER TABLE match_scores ADD CONSTRAINT match_scores_job_platform_fkey
+            FOREIGN KEY (job_id, platform) REFERENCES jobs(job_id, platform) ON DELETE CASCADE;
+
+        CREATE INDEX IF NOT EXISTS applications_account_submitted_idx
+            ON applications(account, submitted_at DESC) WHERE submitted_at IS NOT NULL;
+        """,
+    ),
+    (
+        "0014_account_scoped_application_identity",
+        """
+        -- Separate application histories for multiple candidate accounts while
+        -- preserving platform-aware job identity.
+        ALTER TABLE applications
+            DROP CONSTRAINT IF EXISTS applications_job_id_profile_platform_key;
+        ALTER TABLE applications
+            DROP CONSTRAINT IF EXISTS applications_job_id_profile_key;
+        ALTER TABLE applications
+            ADD CONSTRAINT applications_job_profile_platform_account_key
+            UNIQUE (job_id, profile, platform, account);
+        CREATE INDEX IF NOT EXISTS applications_dedupe_idx
+            ON applications(account, platform, created_at DESC, job_id);
+        """,
     ),
 ]
 

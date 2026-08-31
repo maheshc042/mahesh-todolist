@@ -21,6 +21,7 @@ __pycache__/
 venv/
 .env
 .ruff_cache/
+*.egg-info/
 
 # Agent runtime output and private data
 artifacts/

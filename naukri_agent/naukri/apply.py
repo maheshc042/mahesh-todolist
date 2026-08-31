@@ -17,6 +17,7 @@ from ..browser.resilience import dismiss_overlays, first_visible, human_pause, r
 from ..core.answers import AnswerEngine
 from ..core.models import ApplicationStatus, ApplyOutcome, FilterDecision, Job, SkipReason
 from ..core.runtime_metrics import JobTiming, RuntimeMetrics
+from ..core.run_policy import RunPolicy
 from ..logging_setup import get_logger
 from . import selectors as S
 from .chatbot import ChatbotHandler
@@ -31,7 +32,7 @@ class ApplyEngine:
         answers: AnswerEngine,
         artifacts: ArtifactStore,
         *,
-        dry_run: bool = False,
+        policy: RunPolicy,
         max_questions: int = 15,
         nav_timeout_ms: int = 20_000,
         attempts: int = 1,
@@ -40,7 +41,7 @@ class ApplyEngine:
         self.page = page
         self.answers = answers
         self.artifacts = artifacts
-        self.dry_run = dry_run
+        self.policy = policy
         self.max_questions = max_questions
         self.nav_timeout_ms = nav_timeout_ms
         self.attempts = attempts
@@ -177,11 +178,16 @@ class ApplyEngine:
                     self.metrics.job_timings.append(jt)
                 return ApplyOutcome(status=ApplicationStatus.SKIPPED, reason=decision.reason or SkipReason.FILTER_DESCRIPTION, detail=decision.detail, attempts=attempt_used)
 
-        if self.dry_run:
+        if not self.policy.may_mutate:
             jt.total_s = time.perf_counter() - t_job_start
             if self.metrics:
                 self.metrics.job_timings.append(jt)
-            return ApplyOutcome(status=ApplicationStatus.SKIPPED, reason=SkipReason.DRY_RUN, detail="dry_run enabled", attempts=attempt_used)
+            return ApplyOutcome(
+                status=ApplicationStatus.SKIPPED,
+                reason=SkipReason.DRY_RUN,
+                detail="submission blocked by run policy",
+                attempts=attempt_used,
+            )
 
         outcome = await self._submit(job, profile, attempt_used, jt)
         jt.total_s = time.perf_counter() - t_job_start
@@ -226,8 +232,32 @@ class ApplyEngine:
 
         t_click_0 = time.perf_counter()
         try:
-            await apply_btn.scroll_into_view_if_needed(timeout=2_000)
-            await apply_btn.click(timeout=5_000)
+            # Defense in depth: enforce immediately before the irreversible click,
+            # even if a future caller bypasses apply() or policy wiring regresses.
+            self.policy.require_mutation("naukri.application.submit")
+            
+            import asyncio
+            await asyncio.sleep(1.5)  # Wait for React hydration / event listeners to attach
+            
+            # Try to click all visible apply buttons in case the first is a dummy/sticky header
+            clicked = False
+            for btn in await self.page.locator("button#apply-button").all():
+                if await btn.is_visible():
+                    try:
+                        await btn.scroll_into_view_if_needed(timeout=2_000)
+                        try:
+                            await btn.click(timeout=3_000, delay=50, force=True)
+                        except Exception:
+                            # Fallback to pure JS click
+                            await btn.evaluate("node => node.click()")
+                        clicked = True
+                    except Exception:
+                        pass
+            
+            if not clicked:
+                await apply_btn.scroll_into_view_if_needed(timeout=2_000)
+                await apply_btn.click(timeout=5_000)
+                
         except Exception as exc:
             shot = await self.artifacts.capture_failure(self.page, "apply-click", profile, job.job_id)
             jt.click_s += time.perf_counter() - t_click_0
@@ -243,9 +273,19 @@ class ApplyEngine:
 
         # Instant check for success banner or already applied status
         if event_type in ("success", "already_applied") or await self._fast_check(S.APPLY_SUCCESS):
-            return ApplyOutcome(status=ApplicationStatus.APPLIED, attempts=attempts)
+            return ApplyOutcome(
+                status=ApplicationStatus.APPLIED,
+                attempts=attempts,
+                confirmation_type=event_type if event_type != "timeout" else "dom_marker",
+                confirmation_evidence="Naukri post-apply marker observed",
+            )
 
-        chatbot = ChatbotHandler(self.page, self.answers, max_questions=self.max_questions)
+        chatbot = ChatbotHandler(
+            self.page,
+            self.answers,
+            self.policy,
+            max_questions=self.max_questions,
+        )
         if event_type == "chatbot" or await self._fast_check(S.CHATBOT_DRAWER):
             t_qans_0 = time.perf_counter()
             result = await chatbot.run()
@@ -264,7 +304,32 @@ class ApplyEngine:
                 shot = await self.artifacts.capture_failure(self.page, "apply-rejected", profile, job.job_id)
                 return ApplyOutcome(status=ApplicationStatus.FAILED, detail=f"Naukri rejection: {toast[:100]}", screenshot_path=shot, questions_answered=result.answered, attempts=attempts)
 
-            return ApplyOutcome(status=ApplicationStatus.APPLIED, questions_answered=result.answered, attempts=attempts)
+            confirmed = result.completed or await self._fast_check(
+                S.APPLY_SUCCESS + S.JD_ALREADY_APPLIED
+            )
+            if confirmed:
+                return ApplyOutcome(
+                    status=ApplicationStatus.APPLIED,
+                    detail="Naukri submission confirmation observed",
+                    questions_answered=result.answered,
+                    attempts=attempts,
+                    confirmation_type="chatbot_completed" if result.completed else "dom_marker",
+                    confirmation_evidence="Screening flow completed or Naukri success marker observed",
+                )
+
+            shot = await self.artifacts.capture_failure(
+                self.page,
+                "chatbot-no-confirmation",
+                profile,
+                job.job_id,
+            )
+            return ApplyOutcome(
+                status=ApplicationStatus.FAILED,
+                detail="Screening answers sent but no submission confirmation observed",
+                screenshot_path=shot,
+                questions_answered=result.answered,
+                attempts=attempts,
+            )
 
         toast = await safe_text(await first_visible(self.page, S.APPLY_ERROR_TOAST, timeout_ms=1_000))
         if toast:
@@ -278,7 +343,12 @@ class ApplyEngine:
         jt.verify_s += time.perf_counter() - t_ver_0
 
         if is_success:
-            return ApplyOutcome(status=ApplicationStatus.APPLIED, attempts=attempts)
+            return ApplyOutcome(
+                status=ApplicationStatus.APPLIED,
+                attempts=attempts,
+                confirmation_type="dom_marker",
+                confirmation_evidence="Naukri success or already-applied marker observed after submission",
+            )
 
         shot = await self.artifacts.capture_failure(self.page, "no-confirmation", profile, job.job_id)
         return ApplyOutcome(status=ApplicationStatus.FAILED, detail="No success confirmation within SLA", screenshot_path=shot, attempts=attempts)

@@ -102,6 +102,9 @@ class Settings(BaseSettings):
     instahyre_password: str = ""
     cutshort_email: str = ""
     cutshort_password: str = ""
+    linkedin_email: str = ""
+    linkedin_password: str = ""
+    linkedin_li_at: str = ""
     default_account: str = "primary"
 
 
@@ -119,6 +122,7 @@ class Settings(BaseSettings):
     telegram_bot_token: str = ""
     telegram_chat_id: str = ""
     gemini_api_key: str = ""
+    browser_session_secret: str = ""
 
 
     # --- paths ------------------------------------------------------------
@@ -133,6 +137,12 @@ class Settings(BaseSettings):
     log_level: str = "INFO"
     log_json: bool = False
     dry_run: bool = False
+    # Emergency kill switch. False blocks external mutations even when a caller
+    # forgets to request dry-run; enforced again at each submission boundary.
+    side_effects_enabled: bool = True
+    # Outreach remains off until match scoring, suppression, and conversion
+    # tracking pass the Naukri production gates.
+    matched_outreach_enabled: bool = False
 
     @field_validator("config_path", "artifacts_dir", "log_dir", "resume_dir")
     @classmethod
@@ -231,6 +241,11 @@ class Settings(BaseSettings):
         """
         if not self.database_url:
             raise ConfigError("DATABASE_URL is required. Copy .env.example to .env and fill it in.")
+        if len(self.browser_session_secret) < 32:
+            raise ConfigError(
+                "BROWSER_SESSION_SECRET must be set to at least 32 characters "
+                "so stored login sessions can be encrypted"
+            )
         account = self.account(key)
         if not account.email or not account.password:
             env = "NAUKRI_EMAIL/NAUKRI_PASSWORD" if account.key == "primary" else "NAUKRI_EMAIL_2/NAUKRI_PASSWORD_2"
@@ -547,7 +562,9 @@ class JobProfile(_Model):
     account: str = "primary"
     experience_years: float = Field(default=0, ge=0, le=50)
     use_recommended: bool = True
-    max_applications_per_run: int = Field(default=15, ge=1, le=200)
+    max_applications_per_run: int = Field(default=15, ge=1, le=500)
+    platform_limits: dict[str, int] = Field(default_factory=dict)
+    min_rank_score: float = Field(default=0.0, ge=0.0, le=100.0)
     resume_label: str | None = None
     resume_file: str | None = None
     searches: list[SearchSpec] = Field(default_factory=list)
@@ -668,10 +685,11 @@ class JobProfile(_Model):
 
 
 class PlatformsConfig(_Model):
-    naukri: bool = True
+    naukri: bool = False
     instahyre: bool = False
-    cutshort: bool = False
+    cutshort: bool = True
     wellfound: bool = False
+    linkedin: bool = False
 
 
 
@@ -687,6 +705,10 @@ class AgentConfig(_Model):
     answers: dict[str, str] = Field(default_factory=dict)
     experience: ExperienceConfig = Field(default_factory=ExperienceConfig)
     profiles: list[JobProfile] = Field(default_factory=list)
+    
+    # User Identity
+    applicant_name: str = "Applicant"
+    applicant_location: str = "India"
 
     @field_validator("answers", mode="before")
     @classmethod
@@ -731,7 +753,27 @@ class AgentConfig(_Model):
         """Global skill map, overridden (and merged) by the profile's own."""
         base = self.experience.to_answers()
         override = profile.experience.to_answers() if profile.experience else None
-        return base.merged_with(override)
+        merged = base.merged_with(override)
+        
+        # Determine the fallback experience value (prefer configured default, then profile exp, else 2.0)
+        fallback_years = merged.default_years
+        if fallback_years is None:
+            fallback_years = profile.experience_years if profile.experience_years else 2.0
+            
+        # Ensure default_years is set so that ANY generic experience question gets answered
+        merged.default_years = fallback_years
+        
+        # Inject all profile skills into the skills map if not explicitly defined
+        if merged.skills is None:
+            merged.skills = {}
+            
+        for skill_list in (profile.core_skills, profile.secondary_skills, profile.bonus_skills):
+            for skill in skill_list:
+                s = str(skill).strip().lower()
+                if s and s not in merged.skills:
+                    merged.skills[s] = fallback_years
+                    
+        return merged
 
     def resume_for(self, account: str) -> str | None:
         """First configured resume file for an account (used by the refresher)."""

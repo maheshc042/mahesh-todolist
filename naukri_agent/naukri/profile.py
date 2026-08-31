@@ -56,6 +56,7 @@ from ..browser.resilience import (
     human_pause,
     safe_text,
 )
+from ..core.run_policy import RunPolicy
 from ..logging_setup import get_logger
 from . import selectors as S
 
@@ -104,6 +105,7 @@ class ProfileRefresher:
         self,
         page: Page,
         account: str,
+        policy: RunPolicy,
         *,
         strategies: list[str] | None = None,
         headline_variants: list[str] | None = None,
@@ -113,6 +115,7 @@ class ProfileRefresher:
     ) -> None:
         self.page = page
         self.account = account
+        self.policy = policy
         self.strategies = strategies or ["headline"]
         self.headline_variants = headline_variants or []
         self.resume_dir = Path(resume_dir) if resume_dir else None
@@ -322,6 +325,7 @@ class ProfileRefresher:
             await self._close_modal()
             return False, "headline save button not found", current, updated
 
+        self.policy.require_mutation("naukri.profile.headline.save")
         await save.click(timeout=8_000)
         await human_pause(1_200, 2_200)
 
@@ -371,6 +375,7 @@ class ProfileRefresher:
             await self._close_modal()
             return False, "key-skills save button not found", "", ""
 
+        self.policy.require_mutation("naukri.profile.skills.save")
         await save.click(timeout=8_000)
         await human_pause(1_000, 2_000)
 

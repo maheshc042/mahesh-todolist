@@ -22,6 +22,7 @@ from ..browser.resilience import (
 from ..config import JobProfile, NaukriAccount, get_settings
 from ..core.gemini_writer import GeminiWriter
 from ..core.models import ApplicationStatus, ApplyOutcome, FilterDecision, Job, SkipReason, extract_description_metadata
+from ..core.run_policy import RunPolicy
 from ..logging_setup import get_logger
 from .base import BaseJobPlatform
 
@@ -29,8 +30,8 @@ log = get_logger(__name__)
 
 
 class WellfoundPlatform(BaseJobPlatform):
-    def __init__(self, page: Page, account: NaukriAccount, artifacts: ArtifactStore):
-        super().__init__(page, account.key)
+    def __init__(self, page: Page, account: NaukriAccount, artifacts: ArtifactStore, policy: RunPolicy):
+        super().__init__(page, account.key, policy)
         self.account = account
         self.artifacts = artifacts
 
@@ -123,6 +124,7 @@ class WellfoundPlatform(BaseJobPlatform):
         profile_name: str,
         pre_submit_check: Callable[[Job], FilterDecision] | None = None,
     ) -> ApplyOutcome:
+        self.require_mutation("application.apply_flow")
         log.info("wellfound.apply.start", job_id=job.job_id)
 
         async def navigate():
@@ -161,6 +163,13 @@ class WellfoundPlatform(BaseJobPlatform):
         await apply_btn.click()
         await human_pause(1000, 2000)
 
+        if self.page.url.startswith("http") and "wellfound.com" not in self.page.url.lower():
+            return ApplyOutcome(
+                ApplicationStatus.EXTERNAL,
+                external_url=self.page.url,
+                detail="External company-site application is not automated",
+            )
+
         # Handle Pitch Textarea ("What interests you about working for this company?")
         textarea = await first_visible(
             self.page,
@@ -183,7 +192,10 @@ class WellfoundPlatform(BaseJobPlatform):
             )
 
             if not pitch:
-                pitch = f"Hi team! I am highly interested in the {job.title} role at {job.company}. My technical stack aligns perfectly with your requirements, and I would love to discuss how I can contribute to the team."
+                return ApplyOutcome(
+                    ApplicationStatus.NEEDS_REVIEW,
+                    detail="Could not generate a verified pitch; application not submitted",
+                )
 
             await human_type(textarea, pitch)
             await human_pause(500, 1000)
@@ -207,7 +219,11 @@ class WellfoundPlatform(BaseJobPlatform):
             if await first_visible(
                 self.page, ["text=Application sent", "text=You applied", "button:has-text('Applied')", "text=Applied"]
             ):
-                return ApplyOutcome(ApplicationStatus.APPLIED)
+                return ApplyOutcome(
+                    ApplicationStatus.APPLIED,
+                    confirmation_type="dom_marker",
+                    confirmation_evidence="Wellfound application success marker observed",
+                )
 
         return ApplyOutcome(ApplicationStatus.FAILED, detail="No success confirmation received")
 

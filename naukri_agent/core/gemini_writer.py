@@ -14,12 +14,14 @@ import urllib.parse
 import urllib.request
 from typing import Any
 
+from ..config import AgentConfig
 from ..logging_setup import get_logger
 
 log = get_logger(__name__)
 
-GEMINI_MODEL = "gemini-2.5-flash"
+GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-1.5-flash")
 GEMINI_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/models"
+
 
 
 class GeminiWriter:
@@ -40,8 +42,12 @@ class GeminiWriter:
             log.debug("gemini.disabled", reason="GEMINI_API_KEY is not set.")
             return None
 
+        config = AgentConfig.load()
+        name = config.applicant_name or "a Software Engineer"
+        location = config.applicant_location or "India"
+
         prompt = f"""
-You are Mahesh Chitakoti, a Software Engineer based in Bengaluru, India with 2.6 years of hands-on experience. 
+You are {name}, a Software Engineer based in {location}.
 Your core stack includes Python, FastAPI, React, Node.js, and AI/LLM integrations.
 
 Write a high-converting cold email to a recruiter for the "{role_name}" role at "{company_name or 'the company'}".
@@ -60,8 +66,6 @@ STRICT INSTRUCTIONS FOR THE EMAIL:
 5. Output ONLY the raw email body. No subject lines, no markdown, no placeholders like [Recruiter Name]. Start directly with "Hi there,".
 """
 
-        endpoint = f"{GEMINI_BASE_URL}/{GEMINI_MODEL}:generateContent?key={urllib.parse.quote(self.api_key)}"
-
         payload = {
             "contents": [
                 {
@@ -77,30 +81,51 @@ STRICT INSTRUCTIONS FOR THE EMAIL:
         }
 
         data = json.dumps(payload).encode("utf-8")
-        req = urllib.request.Request(
-            endpoint,
-            data=data,
-            headers={
-                "Content-Type": "application/json",
-            },
-            method="POST",
-        )
 
-        try:
-            with urllib.request.urlopen(req, timeout=12) as response:
-                if response.status == 200:
-                    resp_json: dict[str, Any] = json.loads(response.read().decode("utf-8"))
-                    candidates = resp_json.get("candidates", [])
-                    if candidates:
-                        parts = candidates[0].get("content", {}).get("parts", [])
-                        if parts:
-                            text = parts[0].get("text", "").strip()
-                            if text:
-                                log.info("gemini.email_generated", role=role_name, length=len(text))
-                                return text
-        except urllib.error.HTTPError as exc:
-            log.warning("gemini.api_http_error", status=exc.code, reason=str(exc))
-        except Exception as exc:
-            log.warning("gemini.api_error", error=str(exc)[:150])
+        models_to_try = [
+            GEMINI_MODEL,
+            "gemini-2.0-flash",
+            "gemini-1.5-flash",
+            "gemini-1.5-pro",
+        ]
+        # Deduplicate while preserving order
+        seen_models = set()
+        unique_models = []
+        for m in models_to_try:
+            if m and m not in seen_models:
+                seen_models.add(m)
+                unique_models.append(m)
+
+        for model in unique_models:
+            endpoint = f"{GEMINI_BASE_URL}/{model}:generateContent?key={urllib.parse.quote(self.api_key)}"
+            req = urllib.request.Request(
+                endpoint,
+                data=data,
+                headers={
+                    "Content-Type": "application/json",
+                },
+                method="POST",
+            )
+
+
+            try:
+                with urllib.request.urlopen(req, timeout=12) as response:
+                    if response.status == 200:
+                        resp_json: dict[str, Any] = json.loads(response.read().decode("utf-8"))
+                        candidates = resp_json.get("candidates", [])
+                        if candidates:
+                            parts = candidates[0].get("content", {}).get("parts", [])
+                            if parts:
+                                text = parts[0].get("text", "").strip()
+                                if text:
+                                    log.info("gemini.email_generated", role=role_name, model=model, length=len(text))
+                                    return text
+            except urllib.error.HTTPError as exc:
+                log.debug("gemini.api_http_error", model=model, status=exc.code, reason=str(exc))
+                continue
+            except Exception as exc:
+                log.debug("gemini.api_error", model=model, error=str(exc)[:150])
+                continue
 
         return None
+

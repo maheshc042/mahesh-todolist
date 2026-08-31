@@ -68,7 +68,11 @@ class NaukriAuth:
         if marker is not None:
             return True
         logged_out = await first_visible(page, S.LOGGED_OUT_MARKERS, timeout_ms=2_000)
-        return logged_out is None and "nlogin" not in page.url and ("homepage" in page.url or "mnjuser" in page.url)
+        if logged_out is not None:
+            log.info("auth.logged_out_marker_observed")
+        else:
+            log.warning("auth.no_positive_marker", url=page.url)
+        return False
 
     async def _detect_challenge(self, page: Page) -> None:
         if await first_visible(page, S.CAPTCHA_MARKERS, timeout_ms=1_500):

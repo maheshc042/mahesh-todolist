@@ -4,23 +4,21 @@ Instahyre Platform Implementation (Pagination & Modal-Swiper Engine).
 from __future__ import annotations
 
 import re
-import time
 from typing import Callable
 
 from playwright.async_api import Page
 
 from ..browser.artifacts import ArtifactStore
 from ..browser.resilience import (
-    click_if_present,
     first_visible,
     human_pause,
     human_type,
-    retry_async,
     safe_text,
 )
 from ..config import JobProfile, NaukriAccount, get_settings
 
-from ..core.models import ApplicationStatus, ApplyOutcome, FilterDecision, Job, SkipReason, extract_description_metadata
+from ..core.models import ApplicationStatus, ApplyOutcome, FilterDecision, Job, SkipReason
+from ..core.run_policy import RunPolicy
 from ..logging_setup import get_logger
 from .base import BaseJobPlatform
 
@@ -28,8 +26,8 @@ log = get_logger(__name__)
 
 
 class InstahyrePlatform(BaseJobPlatform):
-    def __init__(self, page: Page, account: NaukriAccount, artifacts: ArtifactStore):
-        super().__init__(page, account.key)
+    def __init__(self, page: Page, account: NaukriAccount, artifacts: ArtifactStore, policy: RunPolicy):
+        super().__init__(page, account.key, policy)
         self.account = account
         self.artifacts = artifacts
 
@@ -50,9 +48,22 @@ class InstahyrePlatform(BaseJobPlatform):
             self.page, ["input[type='password']", "input[name='password']"], timeout_ms=3000
         )
 
-        if not email_input or not pass_input:
+        authenticated = await first_visible(
+            self.page,
+            [
+                "a[href*='/candidate/profile']",
+                "a[href*='/candidate/opportunities']",
+                "div.employer-row",
+                "button:has-text('Logout')",
+            ],
+            timeout_ms=3000,
+        )
+        if authenticated:
             log.info("instahyre.auth.session_reused")
             return True
+        if not email_input or not pass_input:
+            log.error("instahyre.auth.uncertain_state", url=self.page.url)
+            return False
 
         log.info("instahyre.auth.login_start")
 
@@ -68,9 +79,18 @@ class InstahyrePlatform(BaseJobPlatform):
         if submit:
             await submit.click()
             await human_pause(2000, 4000)
-            
-            # Verify login form is gone or job feed is present
-            if not await first_visible(self.page, ["input[type='password']", "input[name='password']"], timeout_ms=3000):
+
+            authenticated = await first_visible(
+                self.page,
+                [
+                    "a[href*='/candidate/profile']",
+                    "a[href*='/candidate/opportunities']",
+                    "div.employer-row",
+                    "button:has-text('Logout')",
+                ],
+                timeout_ms=5000,
+            )
+            if authenticated:
                 log.info("instahyre.auth.login_success")
                 return True
 
@@ -116,7 +136,23 @@ class InstahyrePlatform(BaseJobPlatform):
             timeout_ms=2500,
         )
 
-        target_skills = ["Node.js"]
+        target_skills = []
+        if profile.core_skills:
+            skill_map = {
+                "node": "Node.js", "node.js": "Node.js", "nodejs": "Node.js",
+                "react": "React", "react.js": "React", "reactjs": "React",
+                "aws": "AWS", "gcp": "GCP", "azure": "Azure",
+                "python": "Python", "java": "Java", "ruby": "Ruby", "php": "PHP",
+                "c++": "C++", "c#": "C#"
+            }
+            for skill in profile.core_skills:
+                mapped = skill_map.get(skill.lower(), skill.title())
+                if mapped not in target_skills:
+                    target_skills.append(mapped)
+                if len(target_skills) >= 2:
+                    break
+        if not target_skills:
+            target_skills = ["Python", "Node.js"]
 
         if skills_input:
             for skill in target_skills:
@@ -211,13 +247,14 @@ class InstahyrePlatform(BaseJobPlatform):
         """Dismiss popup modals (e.g. 'Are you looking for a job actively?')."""
         try:
             # 1. "Are you looking for a job actively?" Modal
+            # (scoped to the modal — a bare button:has-text('Save') could hit
+            # unrelated Save controls anywhere on the page)
             active_modal_btn = await first_visible(
                 self.page,
                 [
                     "div.candidate-active-check-modal button.btn-success",
                     "div.candidate-active-check-modal button:has-text('Save')",
                     "div.candidate-active-check-modal button:has-text('Cancel')",
-                    "button:has-text('Save')",
                 ],
                 timeout_ms=1500,
             )
@@ -226,7 +263,23 @@ class InstahyrePlatform(BaseJobPlatform):
                 await active_modal_btn.click()
                 await human_pause(1000, 1500)
 
-            # 2. Premium / Share / WhatsApp Modals
+            # 2. Post-apply bulk-apply modal ("Want to apply to other similar
+            #    jobs?") — its backdrop intercepts clicks on the next card if
+            #    left open (verified class names in feed DOM).
+            bulk_cancel = await first_visible(
+                self.page,
+                [
+                    "div.candidate-apply-all-modal button.back-button-modal-close",
+                    "div.candidate-apply-all-modal button:has-text('Cancel')",
+                ],
+                timeout_ms=800,
+            )
+            if bulk_cancel:
+                log.info("instahyre.modal.dismissing_bulk_apply")
+                await bulk_cancel.click()
+                await human_pause(600, 1000)
+
+            # 3. Premium / Share / WhatsApp Modals
             premium_close = await first_visible(
                 self.page,
                 [
@@ -276,12 +329,13 @@ class InstahyrePlatform(BaseJobPlatform):
 
 
 
-            # Check if actual job links/titles exist on the initial page
-            initial_jobs = await self.page.locator(
-                "a[href*='/job-'], a[href*='/opportunity'], .position-title, .job-title"
-            ).all()
-
-            if not initial_jobs:
+            # Feed already showing opportunities? (Instahyre remembers filter
+            # state in the URL/session.) The old check looked for hrefs and
+            # .position-title classes that don't exist in this AngularJS DOM —
+            # cards carry no hrefs at all (they use ng-click), so it matched
+            # nothing and forced a re-filter on every single run.
+            existing_cards = await self.page.locator("div.employer-row").count()
+            if existing_cards == 0:
                 log.info("instahyre.fetch.no_initial_jobs_filtering")
                 await self._apply_ui_filters(profile)
 
@@ -339,6 +393,28 @@ class InstahyrePlatform(BaseJobPlatform):
                         if not title:
                             continue
 
+                        # Enrich card metadata for HardFilter/RankingEngine —
+                        # a blank location fails allowed_locations checks
+                        # (filters.py) and empty tags/description gut the skill
+                        # ranking signal (ranking.py scores on all three).
+                        tags: list[str] = []
+                        seen_tags: set[str] = set()
+                        for t in await card.locator("ul.tags li").all():
+                            txt = (await safe_text(t)).strip()
+                            if txt and not txt.startswith("+") and txt.lower() not in seen_tags:
+                                seen_tags.add(txt.lower())
+                                tags.append(txt)
+
+                        location = ""
+                        loc_node = card.locator("div.employer-locations span").first
+                        if await loc_node.count() > 0:
+                            location = (await safe_text(loc_node)).strip()
+
+                        note_text = ""
+                        note_loc = card.locator("div.employer-notes").first
+                        if await note_loc.count() > 0:
+                            note_text = (await safe_text(note_loc)).strip()
+
                         # Instahyre links have no href — they use ng-click="openApplyModal(opp)"
                         url = "https://www.instahyre.com/candidate/opportunities/"
 
@@ -354,7 +430,10 @@ class InstahyrePlatform(BaseJobPlatform):
                                 job_id=job_id,
                                 title=title,
                                 company=company,
+                                location=location,
                                 url=url,
+                                description=note_text,
+                                tags=tags,
                                 recommendation_tab="default",
                                 recommendation_position=index,
                             )
@@ -365,23 +444,33 @@ class InstahyrePlatform(BaseJobPlatform):
                         continue
 
 
-                # Pagination loop: click Next until end of list
-                next_btn = await first_visible(
-                    self.page,
-                    [
-                        "ul.pagination li.next a",
-                        "li.next a",
-                        "a.page-link:has-text('Next')",
-                        "li.next:not(.disabled) a",
-                    ],
-                    timeout_ms=1500,
-                )
-                if next_btn:
-                    await next_btn.click()
+                # Pagination (verified from saved DOM): div.pagination holds
+                # « Previous / numbered lis / 'Next »'. Next is an <li> with
+                # ng-click="nextPage()" that gains class 'hidden' on the last
+                # page — there is no <a> or .next link.
+                has_next = False
+                if page_num < 2:  # Safety cap for testing
+                    next_li = self.page.locator("div.pagination li:has-text('Next'):not(.hidden)").first
+                    try:
+                        has_next = await next_li.count() > 0 and await next_li.is_visible()
+                    except Exception:
+                        pass
 
+                    if not has_next:
+                        # Fallback: click the next page number directly
+                        next_num = self.page.locator(f"div.pagination li:text-is('{page_num + 1}')").first
+                        try:
+                            has_next = await next_num.count() > 0 and await next_num.is_visible()
+                        except Exception:
+                            pass
+                        next_li = next_num
+
+                if has_next:
+                    await next_li.click()
                     await human_pause(1500, 3000)
                     page_num += 1
                 else:
+                    log.info("instahyre.fetch.last_page_reached", pages=page_num)
                     break
 
         except Exception as exc:
@@ -420,12 +509,29 @@ class InstahyrePlatform(BaseJobPlatform):
         profile_name: str,
         pre_submit_check: Callable[[Job], FilterDecision] | None = None,
     ) -> ApplyOutcome:
+        self.require_mutation("application.apply_flow")
         log.info("instahyre.apply.start", job_id=job.job_id)
 
         # 1. Check if Modal is ALREADY open (carousel swiper mode)
         modal = await first_visible(
             self.page, ["div.modal-content", "div#employer-profile-modal", "div[class*='modal']"], timeout_ms=2000
         )
+
+        if modal:
+            # Stale-modal guard: a leftover carousel from the PREVIOUS job must
+            # not receive this job's Apply/decline clicks.
+            modal_text = (await safe_text(modal)).lower()
+            matches_job = (
+                bool(job.title) and job.title.lower()[:40] in modal_text
+            ) or (bool(job.company) and job.company.lower() in modal_text)
+            if not matches_job:
+                log.warning(
+                    "instahyre.apply.stale_modal_closed",
+                    job_id=job.job_id,
+                    expected=f"{job.title[:40]} / {job.company}".lower(),
+                )
+                await self._ensure_modal_closed()
+                modal = None
 
         if not modal:
             # Open modal from card — find by title text or position index
@@ -474,9 +580,13 @@ class InstahyrePlatform(BaseJobPlatform):
                     # Fallback: click the card link directly
                     link = card.locator("a#employer-profile-opportunity, a.text-link").first
                     if await link.count() > 0:
-                        await link.click(force=True)
+                        await link.scroll_into_view_if_needed()
+                        await human_pause(200, 400)
+                        await link.evaluate("node => node.click()")
                     else:
-                        await card.click()
+                        await card.scroll_into_view_if_needed()
+                        await human_pause(200, 400)
+                        await card.evaluate("node => node.click()")
                 await human_pause(1500, 2500)
             except Exception as exc:
                 return ApplyOutcome(ApplicationStatus.FAILED, detail=f"Failed to click job card: {str(exc)}")
@@ -519,6 +629,17 @@ class InstahyrePlatform(BaseJobPlatform):
             log.info("instahyre.modal_html_saved", path=str(dump_path))
         except Exception as exc:
             log.debug("instahyre.modal_dump_failed", error=str(exc))
+
+        # 1.5 Scrape Full Description from Modal for AI Analysis
+        try:
+            jd_loc = self.page.locator("div.opportunity-description, div.job-description, .description").first
+            if await jd_loc.count() > 0:
+                full_desc = (await safe_text(jd_loc)).strip()
+                if full_desc:
+                    job.description = full_desc
+                    log.info("instahyre.apply.description_scraped", job_id=job.job_id)
+        except Exception as exc:
+            log.debug("instahyre.apply.description_scrape_failed", error=str(exc))
 
 
         # 2. Evaluate Pre-Submit Check inside Modal
@@ -623,6 +744,7 @@ class InstahyrePlatform(BaseJobPlatform):
         try:
             await apply_btn.scroll_into_view_if_needed()
             await human_pause(200, 400)
+            raise RuntimeError("STOP_BEFORE_APPLY_CLICK")
             await apply_btn.click(force=True)
             await human_pause(800, 1500)
         except Exception as exc:
@@ -646,4 +768,31 @@ class InstahyrePlatform(BaseJobPlatform):
             except Exception:
                 pass
 
-        return ApplyOutcome(ApplicationStatus.APPLIED)
+        confirmation = await first_visible(
+            self.page,
+            [
+                "text=Application sent",
+                "text=Successfully applied",
+                "text=You have applied",
+                "button:has-text('Applied')",
+                "button.btn-disabled:has-text('Applied')",
+            ],
+            timeout_ms=4000,
+        )
+
+        # Post-apply cleanup: Instahyre advances the carousel / pops the bulk
+        # "apply to similar jobs" modal after an application — either can leave
+        # a backdrop that eats the next card's clicks.
+        await self._ensure_modal_closed()
+        await self._dismiss_modals()
+
+        if confirmation:
+            return ApplyOutcome(
+                ApplicationStatus.APPLIED,
+                confirmation_type="dom_marker",
+                confirmation_evidence="Instahyre application success marker observed",
+            )
+        return ApplyOutcome(
+            ApplicationStatus.FAILED,
+            detail="Submission clicked but no Instahyre success confirmation was observed",
+        )

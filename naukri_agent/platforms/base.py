@@ -10,12 +10,18 @@ from playwright.async_api import Page
 
 from ..config import JobProfile
 from ..core.models import ApplyOutcome, FilterDecision, Job
+from ..core.run_policy import RunPolicy
 
 
 class BaseJobPlatform(ABC):
-    def __init__(self, page: Page, account_key: str):
+    def __init__(self, page: Page, account_key: str, policy: RunPolicy):
         self.page = page
         self.account_key = account_key
+        self.policy = policy
+
+    def require_mutation(self, action: str) -> None:
+        """Fail closed before any externally visible platform side effect."""
+        self.policy.require_mutation(f"{self.platform_name}.{action}")
 
     @property
     @abstractmethod

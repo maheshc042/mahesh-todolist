@@ -60,12 +60,12 @@ LOGIN_ERROR = [
 
 # Presence of any of these means we are authenticated.
 LOGGED_IN_MARKERS = [
-    "div.nI-gNb-drawer__bars",
+    "img.nI-gNb-icon-img",
     "div.view-profile-wrapper",
     "a[href*='/mnjuser/profile']",
     "div.nI-gNb-info__sub-title",
     "div.user-name",
-    "img.nI-gNb-icn-img",
+    "div.nI-gNb-drawer__bars",
 ]
 
 # Presence of any of these means the session died mid-run.

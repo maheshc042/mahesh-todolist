@@ -35,6 +35,7 @@ from .browser.artifacts import ArtifactStore
 from .browser.manager import BrowserManager
 from .config import ACCOUNT_KEYS, AgentConfig, ConfigError, Settings, get_settings, load_config
 from .core.orchestrator import Orchestrator
+from .core.run_policy import RunPolicy
 from .db.migrations import run_migrations
 from .db.pool import close_pool, get_pool
 from .db.repository import Repository
@@ -266,6 +267,7 @@ def login(
                 auth = NaukriAuth(browser, target.email, target.password, artifacts)
                 page = await auth.ensure_logged_in()
                 await browser.persist_session()
+                await repo.resume_platform(target.key, "naukri")
                 console.print(
                     f"[green]logged in as {target.masked_email}[/green] "
                     f"(session key {target.session_key})"
@@ -275,6 +277,71 @@ def login(
             await close_pool()
 
     _run(_main())
+
+
+# ---------------------------------------------------------------------------
+# linkedin login & campaign
+# ---------------------------------------------------------------------------
+@app.command(name="login-linkedin")
+def login_linkedin(
+    timeout: int = typer.Option(180, "--timeout", "-t", help="Seconds to wait for manual login"),
+) -> None:
+    """
+    Log in to LinkedIn manually (headed browser) and save the session to the
+    persistent profile used by the cold-email campaign.
+    """
+
+    async def _main() -> None:
+        settings = _settings_only()
+        from .linkedin.scraper import LinkedInHunter
+
+        console.print("[cyan]Opening LinkedIn in a browser — please log in manually.[/cyan]")
+        hunter = LinkedInHunter(li_at_cookie=settings.linkedin_li_at, headless=False)
+        ok = await hunter.login_interactive(timeout_s=timeout)
+        if ok:
+            console.print(
+                "[green]✓ LinkedIn session saved to the persistent browser profile![/green] "
+                "The headless campaign will reuse this session."
+            )
+        else:
+            console.print("[red]✗ LinkedIn login timed out or failed[/red]")
+            raise typer.Exit(EXIT_RUN_FAILED)
+
+    _run(_main())
+
+
+@app.command(name="campaign-linkedin")
+def campaign_linkedin_cmd(
+    limit: int = typer.Option(15, "--limit", "-l", help="Daily email limit"),
+    headed: bool = typer.Option(False, "--headed/--headless", help="Show browser window"),
+    dry_run: bool = typer.Option(False, "--dry-run", help="Dry run: hunt and preview matches without sending emails"),
+    config_path: Optional[Path] = typer.Option(None, "--config", help="Path to config.yaml"),
+) -> None:
+    """
+    Run the LinkedIn Cold Email Outreach Campaign.
+    """
+
+    async def _main() -> None:
+        settings = _settings_only()
+        if not settings.matched_outreach_enabled:
+            raise ConfigError(
+                "LinkedIn outreach is disabled; use matched Naukri outreach after validation"
+            )
+        await run_migrations()
+        from .linkedin.campaign import run_campaign
+        effective_dry_run = dry_run or not settings.side_effects_enabled
+        sent = await run_campaign(
+            daily_email_limit=limit,
+            headed=headed,
+            dry_run=effective_dry_run,
+        )
+        action_word = "previewed" if effective_dry_run else "sent"
+        console.print(f"[green]✓ LinkedIn campaign completed: {sent} emails {action_word}[/green]")
+        await close_pool()
+
+    _run(_main())
+
+
 
 
 # ---------------------------------------------------------------------------
@@ -322,6 +389,10 @@ def refresh_profile(
                 refresher = ProfileRefresher(
                     page,
                     target.key,
+                    RunPolicy(
+                        dry_run=settings.dry_run,
+                        side_effects_enabled=settings.side_effects_enabled,
+                    ),
                     strategies=refresh_config.strategies,
                     headline_variants=refresh_config.headline_variants,
                     resume_dir=settings.resume_dir,
@@ -554,6 +625,8 @@ def doctor(
         table.add_column("result", overflow="fold")
 
         table.add_row("config file", str(settings.config_path))
+        enabled_platforms = [k for k, v in config.platforms.model_dump().items() if v]
+        table.add_row("platforms enabled", ", ".join(enabled_platforms) or "[yellow]none[/yellow]")
         table.add_row(
             "profiles",
             ", ".join(f"{p.name} [{p.account}]" for p in config.active_profiles()) or "none enabled",
@@ -564,6 +637,7 @@ def doctor(
         table.add_row("artifacts dir", str(settings.artifacts_dir))
         table.add_row("dry run", str(settings.dry_run))
         table.add_row("headless", str(config.browser.headless))
+
 
         if settings.database_url:
             try:

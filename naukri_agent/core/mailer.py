@@ -17,6 +17,7 @@ import ssl
 from email.message import EmailMessage
 from pathlib import Path
 
+from ..config import AgentConfig
 from ..logging_setup import get_logger
 
 from .gemini_writer import GeminiWriter
@@ -63,11 +64,15 @@ class ColdEmailer:
             tech_stack = "React.js, Node.js, TypeScript, and AWS"
             highlights = "architecting high-performance web applications, developing RESTful APIs, and delivering seamless user experiences"
 
+        config = AgentConfig.load()
+        name = config.applicant_name or "Applicant"
+        location = config.applicant_location or "India"
+
         return f"""Hi there,
 
 I came across your recent post regarding the open role for a {role_name} and I would love to be considered for the position.
 
-I am an experienced Software Engineer with 2.6 years of hands-on experience specializing in {tech_stack}. In my recent work, I have focused on {highlights}, consistently delivering robust and scalable solutions.
+I am an experienced Software Engineer with hands-on experience specializing in {tech_stack}. In my recent work, I have focused on {highlights}, consistently delivering robust and scalable solutions.
 
 I have attached my resume for your review. I would welcome the opportunity to discuss how my technical expertise aligns with your team's goals.
 
@@ -75,8 +80,8 @@ Thank you for your time and consideration.
 
 Best regards,
 
-Mahesh Chitakoti
-Bengaluru, India
+{name}
+{location}
 """
 
     def send_application(
@@ -104,8 +109,11 @@ Bengaluru, India
 
         try:
             # 1. Construct the email container
+            config = AgentConfig.load()
+            name = config.applicant_name or "Applicant"
+            
             msg = EmailMessage()
-            msg["Subject"] = f"Application: {role_name} - Mahesh Chitakoti"
+            msg["Subject"] = f"Application: {role_name} - {name}"
             msg["From"] = self.sender_email
             msg["To"] = target_email
 

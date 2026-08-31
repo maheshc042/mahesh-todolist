@@ -4,10 +4,10 @@
 # Design decision: build on Microsoft's official Playwright Python image. It
 # already ships Chromium plus the ~90 shared libraries Chromium needs on Debian,
 # so we avoid a 200-line apt-get incantation that drifts with every release.
-# The image tag MUST track the playwright version pinned in requirements.txt —
-# a mismatch makes Playwright re-download browsers at runtime.
+# The image tag MUST track the playwright version pinned in pyproject.toml —
+# a mismatch leaves the package looking for browser binaries absent from the image.
 # ---------------------------------------------------------------------------
-FROM mcr.microsoft.com/playwright/python:v1.49.1-noble
+FROM mcr.microsoft.com/playwright/python:v1.62.0-noble
 
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
@@ -18,19 +18,21 @@ ENV PYTHONUNBUFFERED=1 \
     CONFIG_PATH=/app/config/config.yaml \
     ARTIFACTS_DIR=/app/artifacts \
     LOG_DIR=/app/logs \
-    RESUME_DIR=/app/resumes
+    RESUME_DIR=/app/resumes \
+    PATH=/app/.venv/bin:$PATH
 
 WORKDIR /app
 
-# Dependencies first so code edits do not invalidate the pip layer.
-COPY requirements.txt ./
-RUN pip install --no-cache-dir -r requirements.txt
-
-COPY pyproject.toml ./
+# pyproject.toml is the single dependency and packaging source of truth.
+COPY pyproject.toml uv.lock ./
 COPY naukri_agent ./naukri_agent
-COPY config/config.example.yaml ./config/config.example.yaml
+RUN pip install --no-cache-dir uv && uv sync --frozen --no-dev
 
-RUN mkdir -p /app/artifacts /app/logs /app/resumes /app/config
+# Ship a valid default configuration. Compose may replace this directory with
+# the operator's read-only configuration mount.
+COPY config ./config
+
+RUN mkdir -p /app/artifacts /app/logs /app/resumes
 
 # The base image ships a non-root `pwuser`; run as it so a compromised page
 # cannot touch the host mount as root.

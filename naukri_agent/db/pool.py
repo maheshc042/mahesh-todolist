@@ -33,8 +33,10 @@ def _ssl_context(settings: Settings) -> Any:
     if not settings.requires_ssl:
         return None
     ctx = ssl_module.create_default_context()
-    ctx.check_hostname = False
-    ctx.verify_mode = ssl_module.CERT_NONE
+    if settings.db_ssl_insecure:
+        ctx.check_hostname = False
+        ctx.verify_mode = ssl_module.CERT_NONE
+        log.warning("db.tls_verification_disabled")
     return ctx
 
 

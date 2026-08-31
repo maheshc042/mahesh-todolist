@@ -22,6 +22,7 @@ from ..core.models import (
     RunStats,
     RunStatus,
 )
+from ..core.session_crypto import SessionCipher, SessionDecryptionError
 from ..logging_setup import get_logger
 from .pool import get_pool
 
@@ -29,12 +30,23 @@ log = get_logger(__name__)
 
 
 class Repository:
-    def __init__(self, pool: asyncpg.Pool) -> None:
+    def __init__(
+        self,
+        pool: asyncpg.Pool,
+        session_cipher: SessionCipher | None = None,
+    ) -> None:
         self.pool = pool
+        self.session_cipher = session_cipher
 
     @classmethod
     async def create(cls) -> "Repository":
-        return cls(await get_pool())
+        from ..config import get_settings
+
+        settings = get_settings()
+        return cls(
+            await get_pool(),
+            session_cipher=SessionCipher(settings.browser_session_secret),
+        )
 
     # ------------------------------------------------------------------ runs
     async def start_run(
@@ -112,22 +124,23 @@ class Repository:
             log.warning("db.event_log_failed", error=str(exc), event=event)
 
     # ------------------------------------------------------------------ jobs
-    async def upsert_job(self, job: Job) -> None:
+    async def upsert_job(self, job: Job, platform: str = "naukri") -> None:
         row = job.to_row()
         await self.pool.execute(
             """
             INSERT INTO jobs (
                 job_id, title, company, url, location, experience_text, salary_text,
                 posted_text, rating, tags, min_experience, max_experience,
-                min_salary_lpa, posted_days_ago, is_walkin, source_keyword
+                min_salary_lpa, posted_days_ago, is_walkin, source_keyword, platform
             )
-            VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)
-            ON CONFLICT (job_id) DO UPDATE
+            VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)
+            ON CONFLICT (job_id, platform) DO UPDATE
                SET last_seen_at = now(),
                    salary_text = EXCLUDED.salary_text,
                    posted_text = EXCLUDED.posted_text,
                    posted_days_ago = EXCLUDED.posted_days_ago,
-                   rating = COALESCE(EXCLUDED.rating, jobs.rating)
+                   rating = COALESCE(EXCLUDED.rating, jobs.rating),
+                   platform = EXCLUDED.platform
             """,
             row["job_id"],
             row["title"],
@@ -145,24 +158,24 @@ class Repository:
             row["posted_days_ago"],
             row["is_walkin"],
             row["source_keyword"],
+            platform,
         )
 
     async def known_job_ids(
-        self, profile: str, window_days: int, account: str = "primary"
+        self,
+        profile: str,
+        window_days: int,
+        account: str = "primary",
+        platform: str = "naukri",
     ) -> set[str]:
-        """
-        Jobs already decided inside the dedupe window.
-        
-        PRODUCT UPGRADE: Global Shared Memory. 
-        This query no longer filters by `account` or `profile`. If Account A 
-        applies to or skips a job, Account B instantly learns about it and 
-        will never apply to the same job, preventing duplicate recruiter spam.
-        """
+        """Jobs already decided for this account and platform inside the window."""
         rows = await self.pool.fetch(
             """
             SELECT a.job_id
               FROM applications a
              WHERE a.status <> 'failed'
+               AND a.platform = $2
+               AND a.account = $3
                AND a.created_at > now() - ($1 || ' days')::interval
                AND NOT (
                      a.status = 'needs_review'
@@ -175,8 +188,58 @@ class Repository:
                   )
             """,
             str(window_days),
+            platform,
+            account,
         )
         return {row["job_id"] for row in rows}
+
+    async def filter_cross_platform_duplicates(
+        self,
+        jobs: list[Job],
+        window_days: int,
+        account: str = "primary",
+    ) -> list[Job]:
+        """Filters out jobs that fuzzy-match recently applied jobs across any platform."""
+        if not jobs:
+            return []
+
+        rows = await self.pool.fetch(
+            """
+            SELECT j.job_id, j.company, j.title, a.platform
+              FROM applications a
+              JOIN jobs j ON j.job_id = a.job_id AND j.platform = a.platform
+             WHERE a.status IN ('applied', 'needs_review', 'external', 'already_applied')
+               AND a.account = $2
+               AND a.created_at > now() - ($1 || ' days')::interval
+            """,
+            str(window_days),
+            account,
+        )
+
+        recent = []
+        for row in rows:
+            company = str(row["company"] or "").strip().lower()
+            title = str(row["title"] or "").strip().lower()
+            if company and title:
+                recent.append((company, title, row["platform"]))
+
+        def is_duplicate(job: Job) -> bool:
+            j_company = str(job.company or "").strip().lower()
+            j_title = str(job.title or "").strip().lower()
+            if not j_company or not j_title:
+                return False
+
+            for c_company, c_title, platform in recent:
+                if platform == getattr(job, "platform", "naukri"):
+                    continue # intra-platform handled by known_job_ids exactly
+                # Fuzzy match: same company (high similarity) and similar title
+                comp_ratio = SequenceMatcher(None, j_company, c_company).ratio()
+                title_ratio = SequenceMatcher(None, j_title, c_title).ratio()
+                if comp_ratio > 0.85 and title_ratio > 0.8:
+                    return True
+            return False
+
+        return [j for j in jobs if not is_duplicate(j)]
 
     async def applied_today(self, account: str = "primary") -> int:
         """
@@ -186,9 +249,9 @@ class Repository:
             """
             SELECT count(*) AS n
               FROM applications
-             WHERE status = 'applied'
+             WHERE submitted_at IS NOT NULL
                AND account = $1
-               AND (created_at AT TIME ZONE 'Asia/Kolkata')::date
+               AND (submitted_at AT TIME ZONE 'Asia/Kolkata')::date
                    = (now() AT TIME ZONE 'Asia/Kolkata')::date
             """,
             account,
@@ -202,24 +265,20 @@ class Repository:
         run_id: int | None,
         outcome: ApplyOutcome,
         account: str = "primary",
+        platform: str = "naukri",
     ) -> None:
-        await self.upsert_job(job)
-        platform = "naukri"
-        if job.job_id.startswith("instahyre-"):
-            platform = "instahyre"
-        elif job.job_id.startswith("cutshort-"):
-            platform = "cutshort"
-        elif job.job_id.startswith("wellfound-"):
-            platform = "wellfound"
+        await self.upsert_job(job, platform=platform)
 
         await self.pool.execute(
             """
             INSERT INTO applications (
                 job_id, run_id, profile, status, reason, detail, attempts,
-                questions_answered, screenshot_path, account, platform
+                questions_answered, screenshot_path, account, platform,
+                confirmation_type, confirmation_evidence, submitted_at
             )
-            VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
-            ON CONFLICT (job_id, profile, platform) DO UPDATE
+            VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,
+                    CASE WHEN $4 = 'applied' THEN now() ELSE NULL END)
+            ON CONFLICT (job_id, profile, platform, account) DO UPDATE
                SET status = EXCLUDED.status,
                    reason = EXCLUDED.reason,
                    detail = EXCLUDED.detail,
@@ -227,7 +286,10 @@ class Repository:
                    account = EXCLUDED.account,
                    attempts = applications.attempts + EXCLUDED.attempts,
                    questions_answered = EXCLUDED.questions_answered,
-                   screenshot_path = COALESCE(EXCLUDED.screenshot_path, applications.screenshot_path)
+                   screenshot_path = COALESCE(EXCLUDED.screenshot_path, applications.screenshot_path),
+                   confirmation_type = COALESCE(EXCLUDED.confirmation_type, applications.confirmation_type),
+                   confirmation_evidence = COALESCE(EXCLUDED.confirmation_evidence, applications.confirmation_evidence),
+                   submitted_at = COALESCE(applications.submitted_at, EXCLUDED.submitted_at)
             """,
             job.job_id,
             run_id,
@@ -240,6 +302,8 @@ class Repository:
             outcome.screenshot_path,
             account,
             platform,
+            outcome.confirmation_type,
+            outcome.confirmation_evidence[:500] if outcome.confirmation_evidence else None,
         )
 
 
@@ -249,7 +313,8 @@ class Repository:
             SELECT a.status, a.reason, a.profile, a.account, a.created_at,
                    j.title, j.company, j.url
               FROM applications a
-              JOIN jobs j USING (job_id)
+              JOIN jobs j
+                ON j.job_id = a.job_id AND j.platform = a.platform
              ORDER BY a.created_at DESC
              LIMIT $1
             """,
@@ -683,36 +748,106 @@ class Repository:
         return [dict(row) for row in rows]
 
     # --------------------------------------------------------------- session
+    def _require_session_cipher(self) -> SessionCipher:
+        if self.session_cipher is None:
+            raise RuntimeError("session encryption is not configured")
+        return self.session_cipher
+
     async def save_session(self, key: str, state: dict[str, Any], ttl_hours: int = 240) -> None:
+        cipher = self._require_session_cipher()
         await self.pool.execute(
             """
-            INSERT INTO browser_sessions (key, state, valid_until, updated_at)
-            VALUES ($1, $2::jsonb, now() + ($3 || ' hours')::interval, now())
+            INSERT INTO browser_sessions
+                (key, state, encrypted_state, key_version, valid_until, updated_at)
+            VALUES ($1, NULL, $2, $3, now() + ($4 || ' hours')::interval, now())
             ON CONFLICT (key) DO UPDATE
-               SET state = EXCLUDED.state,
-                   valid_until = EXCLUDED.valid_until,
-                   updated_at = now()
+            SET state = NULL,
+                encrypted_state = EXCLUDED.encrypted_state,
+                key_version = EXCLUDED.key_version,
+                valid_until = EXCLUDED.valid_until,
+                updated_at = now()
             """,
             key,
-            json.dumps(state),
+            cipher.encrypt(state),
+            cipher.key_version,
             str(ttl_hours),
         )
 
     async def load_session(self, key: str) -> dict[str, Any] | None:
         row = await self.pool.fetchrow(
             """
-            SELECT state FROM browser_sessions
-             WHERE key = $1 AND (valid_until IS NULL OR valid_until > now())
+            SELECT state, encrypted_state FROM browser_sessions
+            WHERE key = $1 AND (valid_until IS NULL OR valid_until > now())
             """,
             key,
         )
         if not row:
             return None
-        state = row["state"]
-        return json.loads(state) if isinstance(state, str) else dict(state)
+
+        cipher = self._require_session_cipher()
+        encrypted = row["encrypted_state"]
+        if encrypted is not None:
+            try:
+                return cipher.decrypt(bytes(encrypted))
+            except SessionDecryptionError:
+                log.error("db.session_decryption_failed", session_key=key)
+                await self.clear_session(key)
+                return None
+
+        # One-time forward migration for legacy plaintext rows. The next write
+        # removes the JSONB value, so credentials are not left duplicated.
+        legacy = row["state"]
+        if legacy is None:
+            return None
+        state = json.loads(legacy) if isinstance(legacy, str) else dict(legacy)
+        await self.save_session(key, state)
+        log.info("db.session_encrypted", session_key=key)
+        return state
+
 
     async def clear_session(self, key: str) -> None:
         await self.pool.execute("DELETE FROM browser_sessions WHERE key = $1", key)
+
+    # ---------------------------------------------------------- platform state
+    async def platform_pause_reason(self, account: str, platform: str) -> str | None:
+        row = await self.pool.fetchrow(
+            """
+            SELECT reason FROM platform_state
+            WHERE account = $1 AND platform = $2 AND paused = TRUE
+            """,
+            account,
+            platform,
+        )
+        return str(row["reason"] or "operator intervention required") if row else None
+
+    async def pause_platform(self, account: str, platform: str, reason: str) -> None:
+        await self.pool.execute(
+            """
+            INSERT INTO platform_state
+                (account, platform, paused, reason, paused_at, updated_at)
+            VALUES ($1, $2, TRUE, $3, now(), now())
+            ON CONFLICT (account, platform) DO UPDATE
+            SET paused = TRUE,
+                reason = EXCLUDED.reason,
+                paused_at = now(),
+                updated_at = now()
+            """,
+            account,
+            platform,
+            reason[:500],
+        )
+
+    async def resume_platform(self, account: str, platform: str) -> None:
+        await self.pool.execute(
+            """
+            INSERT INTO platform_state (account, platform, paused, updated_at)
+            VALUES ($1, $2, FALSE, now())
+            ON CONFLICT (account, platform) DO UPDATE
+            SET paused = FALSE, reason = NULL, paused_at = NULL, updated_at = now()
+            """,
+            account,
+            platform,
+        )
 
     # ----------------------------------------------------------------- stats
     async def summary(self) -> dict[str, Any]:
@@ -744,16 +879,20 @@ class Repository:
         return {"events": deleted_events, "sessions": deleted_sessions}
 
     # ----------------------------------------------------------- match scores
-    async def cached_match_score(self, job_id: str) -> dict[str, Any] | None:
+    async def cached_match_score(
+        self, job_id: str, platform: str = "naukri"
+    ) -> dict[str, Any] | None:
         """Return a cached match score if fetched within the last 24 hours."""
         row = await self.pool.fetchrow(
             """
             SELECT keyskills_score, experience_match, overall_score
               FROM match_scores
              WHERE job_id = $1
+               AND platform = $2
                AND fetched_at > now() - interval '24 hours'
             """,
             job_id,
+            platform,
         )
         return dict(row) if row else None
 
@@ -763,21 +902,22 @@ class Repository:
         keyskills_score: int,
         experience_match: bool,
         overall_score: int,
+        platform: str = "naukri",
     ) -> None:
         """Persist a match score result to the cache table."""
         try:
             await self.pool.execute(
                 """
                 INSERT INTO match_scores
-                    (job_id, keyskills_score, experience_match, overall_score, fetched_at)
-                VALUES ($1, $2, $3, $4, now())
-                ON CONFLICT (job_id) DO UPDATE
+                    (job_id, platform, keyskills_score, experience_match, overall_score, fetched_at)
+                VALUES ($1, $2, $3, $4, $5, now())
+                ON CONFLICT (job_id, platform) DO UPDATE
                    SET keyskills_score = EXCLUDED.keyskills_score,
                        experience_match = EXCLUDED.experience_match,
                        overall_score = EXCLUDED.overall_score,
                        fetched_at = now()
                 """,
-                job_id, keyskills_score, experience_match, overall_score,
+                job_id, platform, keyskills_score, experience_match, overall_score,
             )
         except Exception as exc:  # pragma: no cover - cache must not raise
             log.warning("db.match_score_cache_failed", error=str(exc)[:120])
@@ -906,6 +1046,16 @@ class Repository:
         )
         return val is not None
 
+    async def count_contacted_today(self) -> int:
+        """Count recruiters emailed since local midnight (for the per-day email cap)."""
+        val = await self.pool.fetchval(
+            """
+            SELECT count(*) FROM contacted_recruiters
+             WHERE contacted_at >= date_trunc('day', now())
+            """
+        )
+        return int(val or 0)
+
     async def record_contacted_recruiter(
         self, email: str, role_pitched: str, snippet: str = "", post_url: str = ""
     ) -> None:
@@ -920,7 +1070,8 @@ class Repository:
             ON CONFLICT (email) DO UPDATE
                SET role_pitched = EXCLUDED.role_pitched,
                    post_snippet = COALESCE(EXCLUDED.post_snippet, contacted_recruiters.post_snippet),
-                   post_url = COALESCE(EXCLUDED.post_url, contacted_recruiters.post_url)
+                   post_url = COALESCE(EXCLUDED.post_url, contacted_recruiters.post_url),
+                   contacted_at = now()
             """,
             clean_email,
             role_pitched,

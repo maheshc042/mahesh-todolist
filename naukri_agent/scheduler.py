@@ -34,7 +34,8 @@ from apscheduler.triggers.cron import CronTrigger
 
 from .config import AgentConfig, ConfigError, Settings
 from .core.orchestrator import Orchestrator
-from .db.pool import close_pool
+from .db.locks import account_run_lock
+from .db.pool import close_pool, get_pool
 from .logging_setup import clear_context, get_logger
 
 log = get_logger(__name__)
@@ -79,31 +80,36 @@ class AgentScheduler:
         if self._stopping.is_set():
             return
         async with self._lock:
-            clear_context()
-            log.info("schedule.tick", account=account, mode=mode)
-            try:
-                orchestrator = Orchestrator(
-                    self.config,
-                    self.settings,
-                    mode=mode,
-                    only_profiles=self.only_profiles,
-                    dry_run=self.dry_run,
-                    account=account,
-                )
-                stats = await orchestrator.run()
-                log.info(
-                    "schedule.tick_done",
-                    account=account,
-                    applied=stats.applied,
-                    failed=stats.failed,
-                )
-            except ConfigError as exc:
-                log.error("schedule.tick_misconfigured", account=account, error=str(exc))
-            except Exception:
-                # The orchestrator already notified and recorded the run row.
-                log.exception("schedule.tick_crashed", account=account)
-            finally:
+            pool = await get_pool()
+            async with account_run_lock(pool, account) as acquired:
+                if not acquired:
+                    log.warning("schedule.tick_skipped_locked", account=account, mode=mode)
+                    return
                 clear_context()
+                log.info("schedule.tick", account=account, mode=mode)
+                try:
+                    orchestrator = Orchestrator(
+                        self.config,
+                        self.settings,
+                        mode=mode,
+                        only_profiles=self.only_profiles,
+                        dry_run=self.dry_run,
+                        account=account,
+                    )
+                    stats = await orchestrator.run()
+                    log.info(
+                        "schedule.tick_done",
+                        account=account,
+                        applied=stats.applied,
+                        failed=stats.failed,
+                    )
+                except ConfigError as exc:
+                    log.error("schedule.tick_misconfigured", account=account, error=str(exc))
+                except Exception:
+                    # The orchestrator already notified and recorded the run row.
+                    log.exception("schedule.tick_crashed", account=account)
+                finally:
+                    clear_context()
 
     # ----------------------------------------------------------------- start
     async def start(self) -> None:

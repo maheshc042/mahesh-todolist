@@ -171,6 +171,8 @@ class ApplyOutcome:
     unanswered_questions: list[dict[str, Any]] = field(default_factory=list)
     attempts: int = 1
     external_url: str | None = None
+    confirmation_type: str | None = None
+    confirmation_evidence: str | None = None
 
 
 

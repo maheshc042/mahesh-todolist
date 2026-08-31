@@ -1,21 +1,22 @@
 {
   "profile": "Full Stack / Web Developer",
-  "run_id": 130,
+  "run_id": 177,
   "dry_run": false,
-  "duration_seconds": 724.78,
-  "generated_at": "2026-08-12T17:22:26.213522+00:00",
+  "duration_seconds": 15.11,
+  "generated_at": "2026-08-30T21:13:17.419334+00:00",
   "plan_stats": {
-    "collected": 38,
-    "rejected": 20,
-    "eligible": 18,
-    "selected": 18,
+    "collected": 5,
+    "rejected": 4,
+    "eligible": 1,
+    "selected": 1,
     "overflow": 0,
     "rejection_reasons": {
-      "filter_description": 20
+      "filter_description": 2,
+      "filter_title": 2
     },
-    "top_score": 38.71,
-    "cutoff_score": 38.29
+    "top_score": 39.98,
+    "cutoff_score": 39.98
   },
-  "applied_count": 18,
-  "failed_count": 0
+  "applied_count": 0,
+  "failed_count": 1
 }

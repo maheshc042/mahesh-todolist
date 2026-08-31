@@ -1,12 +1,24 @@
 """
-LinkedIn Cold Email Campaign Entry Point (Disabled / Commented Out for Future Use).
-
-To run LinkedIn campaign in the future:
-Uncomment the code in naukri_agent/linkedin modules and uncomment this entry point file.
+LinkedIn Cold Email Campaign Entry Point.
 """
+import asyncio
+import sys
 
-# import asyncio
-# from naukri_agent.linkedin.campaign import run_campaign
+from naukri_agent.db.pool import close_pool
+from naukri_agent.linkedin.campaign import run_campaign
 
-# if __name__ == "__main__":
-#     asyncio.run(run_campaign())
+if __name__ == "__main__":
+    dry_run = "--dry-run" in sys.argv
+    headed = "--headed" in sys.argv
+    limit = 15
+    for arg in sys.argv:
+        if arg.startswith("--limit="):
+            try:
+                limit = int(arg.split("=")[1])
+            except ValueError:
+                pass
+    try:
+        asyncio.run(run_campaign(daily_email_limit=limit, headed=headed, dry_run=dry_run))
+    finally:
+        asyncio.run(close_pool())
+

@@ -42,7 +42,7 @@ from ..browser.resilience import FatalAgentError, first_visible
 from ..config import AgentConfig, FilterRules, JobProfile, NaukriAccount, Settings, PROJECT_ROOT
 from ..core.answers import AnswerEngine
 from ..core.application_planner import ApplicationPlan, ApplicationPlanner
-from ..core.cold_email import ColdEmailer
+from ..core.mailer import ColdEmailer
 from ..core.reporting import ReportExporter
 from ..core.filters import FilterEngine
 from ..core.models import (
@@ -55,6 +55,7 @@ from ..core.models import (
 )
 from ..core.ranking import CandidateProfile, RankedJob, RankingWeights
 from ..core.runtime_metrics import RuntimeMetrics
+from ..core.run_policy import RunPolicy
 from ..db.repository import Repository
 from ..logging_setup import bind_context, clear_context, get_logger
 from ..naukri import selectors as S
@@ -101,7 +102,11 @@ class Orchestrator:
         self.settings = settings
         self.mode = mode
         self.only_profiles = only_profiles
-        self.dry_run = dry_run or settings.dry_run
+        self.policy = RunPolicy(
+            dry_run=dry_run or settings.dry_run,
+            side_effects_enabled=settings.side_effects_enabled,
+        )
+        self.dry_run = self.policy.dry_run
         # One Orchestrator instance == one Naukri account == one browser session.
         # Accounts are never mixed inside a run: the resume lives on the account,
         # and the daily cap is a per-account budget.
@@ -215,34 +220,56 @@ class Orchestrator:
                 if self.config.platforms.naukri:
                     answers = await self._build_answer_engine(profiles[0])
                     active_platforms.append(
-                        NaukriPlatform(page, browser, self.account, self.config, artifacts, answers, self.metrics)
+                        NaukriPlatform(
+                            page,
+                            browser,
+                            self.account,
+                            self.config,
+                            artifacts,
+                            answers,
+                            self.policy,
+                            self.metrics,
+                        )
                     )
 
-                if self.config.platforms.instahyre:
-                    active_platforms.append(
-                        InstahyrePlatform(page, self.account, artifacts)
-                    )
+                if self.account_key == "primary":
+                    if self.config.platforms.instahyre:
+                        active_platforms.append(
+                            InstahyrePlatform(page, self.account, artifacts, self.policy)
+                        )
 
-                if self.config.platforms.cutshort:
-                    if 'answers' not in locals():
-                        answers = await self._build_answer_engine(profiles[0])
-                    active_platforms.append(
-                        CutshortPlatform(page, self.account, artifacts, answers)
-                    )
+                    if self.config.platforms.cutshort:
+                        if 'answers' not in locals():
+                            answers = await self._build_answer_engine(profiles[0])
+                        active_platforms.append(
+                            CutshortPlatform(page, self.account, artifacts, answers, self.policy)
+                        )
 
-                if self.config.platforms.wellfound:
-                    active_platforms.append(
-                        WellfoundPlatform(page, self.account, artifacts)
-                    )
+                    if self.config.platforms.wellfound:
+                        active_platforms.append(
+                            WellfoundPlatform(page, self.account, artifacts, self.policy)
+                        )
 
 
 
                 # 2. Run the Multi-Platform Loop
                 for platform in active_platforms:
+                    pause_reason = await self.repo.platform_pause_reason(
+                        self.account_key,
+                        platform.platform_name,
+                    )
+                    if pause_reason:
+                        raise FatalAgentError(
+                            f"{platform.platform_name} is paused: {pause_reason}"
+                        )
                     log.info("platform.start", platform=platform.platform_name)
                     t_login_0 = time.perf_counter()
-                    await platform.ensure_logged_in()
+                    authenticated = await platform.ensure_logged_in()
                     self.metrics.login_s += time.perf_counter() - t_login_0
+                    if not authenticated:
+                        raise FatalAgentError(
+                            f"{platform.platform_name} authentication was not confirmed"
+                        )
 
                     # Run Naukri profile refresh ONLY if it's the Naukri platform
                     if platform.platform_name == "naukri":
@@ -264,7 +291,11 @@ class Orchestrator:
                         await self._refresh_profile(page)
                         self.metrics.resume_switch_s = time.perf_counter() - t_ref_0
 
-                    for profile in profiles:
+                    platform_profiles = profiles
+                    if platform.platform_name != "naukri":
+                        platform_profiles = self.config.active_profiles(self.only_profiles, account=None)
+
+                    for profile in platform_profiles:
                         try:
                             await self._run_profile(platform, profile, page, artifacts)
                         except StopRun as stop:
@@ -273,9 +304,65 @@ class Orchestrator:
                             status = RunStatus.PARTIAL
                             break
 
+                # =========================================================
+                # PHASE 2: Questionnaire Sweep (after ALL applications sent)
+                # Recruiters / employer bots reply minutes after a pitch
+                # lands, so racing each apply never works. Instead we apply
+                # to every available job first, then sweep once — covering
+                # this run's questionnaires AND any older threads still
+                # waiting for an answer.
+                # =========================================================
+                message_platforms = [p for p in active_platforms if hasattr(p, "handle_messages")]
+                if message_platforms and self.policy.may_mutate:
+                    log.info(
+                        "run.questionnaire_sweep.start",
+                        platforms=[p.platform_name for p in message_platforms],
+                    )
+                    await asyncio.sleep(60)  # settle time so auto-replies can fire
+                    for m_platform in message_platforms:
+                        try:
+                            await m_platform.handle_messages()
+                        except Exception as exc:
+                            log.warning(
+                                "run.questionnaire_sweep.platform_failed",
+                                platform=m_platform.platform_name,
+                                error=str(exc)[:200],
+                            )
+                            self.stats.errors.append(
+                                f"questionnaire sweep failed ({m_platform.platform_name}): {str(exc)[:120]}"
+                            )
+
+            # =========================================================
+            # PHASE 3: LinkedIn Cold-Email Campaign (optional)
+            # Owns its browser profile and enforces its own per-day
+            # email cap, so calling it from any account's run is safe:
+            # later runs the same day exit before launching a browser.
+            # =========================================================
+            if self.config.platforms.linkedin and self.settings.matched_outreach_enabled:
+                try:
+                    from ..linkedin.campaign import run_campaign
+
+                    campaign_dry_run = not self.policy.may_mutate
+                    sent = await run_campaign(dry_run=campaign_dry_run)
+                    log.info(
+                        "run.linkedin_campaign_done",
+                        emails_sent=sent,
+                        dry_run=campaign_dry_run,
+                    )
+                except Exception as exc:
+                    log.warning("run.linkedin_campaign_failed", error=str(exc)[:200])
+                    self.stats.errors.append(f"linkedin campaign failed: {str(exc)[:120]}")
+
+
         except FatalAgentError as exc:
             fatal_error = str(exc)
             status = RunStatus.FAILED
+            if self.repo is not None and "platform" in locals():
+                await self.repo.pause_platform(
+                    self.account_key,
+                    platform.platform_name,
+                    fatal_error,
+                )
             log.error("run.fatal", error=fatal_error)
         except Exception as exc:  # unexpected: still record and notify
             fatal_error = f"{type(exc).__name__}: {exc}"
@@ -344,13 +431,14 @@ class Orchestrator:
             )
             return
 
-        if self.dry_run:
-            log.info("profile.refresh_skipped_dry_run", account=self.account_key)
+        if not self.policy.may_mutate:
+            log.info("profile.refresh_blocked_by_policy", account=self.account_key)
             return
 
         refresher = ProfileRefresher(
             page,
             self.account_key,
+            self.policy,
             strategies=settings.strategies,
             headline_variants=settings.headline_variants,
             resume_dir=self.settings.resume_dir,
@@ -415,11 +503,14 @@ class Orchestrator:
             profile.name,
             self.config.run.dedupe_window_days,
             account=self.account_key,
+            platform=platform.platform_name,
         )
         applied_this_profile = 0
 
+        platform_limit = profile.platform_limits.get(platform.platform_name, profile.max_applications_per_run)
+
         def remaining() -> int:
-            return profile.max_applications_per_run - applied_this_profile
+            return platform_limit - applied_this_profile
 
         # Step 1: Collect Jobs from Platform
         collected_jobs: list[Job] = []
@@ -435,11 +526,30 @@ class Orchestrator:
             log.info("search.jobs_empty", profile=profile.name, platform=platform.platform_name)
             return
 
+        # =========================================================
+        # STEP 1.1: Cross-platform Job Deduplication (Fuzzy Match)
+        # =========================================================
+        pre_dedupe_count = len(collected_jobs)
+        collected_jobs = await self.repo.filter_cross_platform_duplicates(
+            collected_jobs,
+            window_days=self.config.run.dedupe_window_days,
+            account=self.account_key
+        )
+        if len(collected_jobs) < pre_dedupe_count:
+            deduped = pre_dedupe_count - len(collected_jobs)
+            self.stats.bump(profile.name, "filtered_out", deduped)
+            log.info("search.cross_platform_dedupe", deduplicated=deduped, profile=profile.name)
+
+        if not collected_jobs:
+            log.info("search.jobs_empty_after_dedupe", profile=profile.name, platform=platform.platform_name)
+            return
+
 
         # =========================================================
         # STEP 1.5: Inject API Match Scores (Fast Pre-filter)
         # =========================================================
         if self.api_client and collected_jobs:
+            ms_cfg = self.config.match_score_prefilter
             log.info("match_score.fetching_batch", count=len(collected_jobs))
             job_ids = [j.job_id.replace("reco-", "") for j in collected_jobs]
             scores = await self.api_client.batch_match_scores(job_ids)
@@ -449,13 +559,22 @@ class Orchestrator:
                 raw_id = job.job_id.replace("reco-", "")
                 score_result = scores.get(raw_id)
 
-                # Fail-open: If API fails or score is good, keep it.
-                # Only drop if the API explicitly says keyskills_score == 0.
-                if score_result is None or score_result.is_worth_applying:
+                if score_result is None:
+                    if ms_cfg.fail_open:
+                        api_filtered_jobs.append(job)
+                    else:
+                        self.stats.bump(profile.name, "filtered_out")
+                        log.warning("match_score.missing_fail_closed", job_id=job.job_id)
+                elif score_result.keyskills_score >= ms_cfg.min_keyskills_score:
                     api_filtered_jobs.append(job)
                 else:
                     self.stats.bump(profile.name, "filtered_out")
-                    log.debug("match_score.dropped", job_id=job.job_id)
+                    log.info(
+                        "match_score.dropped",
+                        job_id=job.job_id,
+                        score=score_result.keyskills_score,
+                        minimum=ms_cfg.min_keyskills_score,
+                    )
 
             log.info("match_score.batch_complete", before=len(collected_jobs), after=len(api_filtered_jobs))
             collected_jobs = api_filtered_jobs
@@ -470,7 +589,8 @@ class Orchestrator:
         planner = ApplicationPlanner(
             candidate=candidate,
             rules=profile.filters_for("recommended"),
-            daily_limit=profile.max_applications_per_run,
+            daily_limit=platform_limit,
+            minimum_score=profile.min_rank_score,
         )
         plan = planner.create_plan(collected_jobs)
         t_plan_1 = time.perf_counter()
@@ -518,12 +638,14 @@ class Orchestrator:
         filters = FilterEngine(profile.filters_for("recommended"))
 
         t_apply_loop_0 = time.perf_counter()
-        candidate_queue = plan.selected_jobs + plan.overflow_jobs
+        # Overflow is report-only. Attempting it after selected failures silently
+        # lowers the quality bar and creates unbounded browser activity.
+        candidate_queue = plan.selected_jobs
         try:
             for rjob in candidate_queue:
                 self._check_global_limits()
                 if remaining() <= 0:
-                    log.info("profile.cap_reached", profile=profile.name, cap=profile.max_applications_per_run)
+                    log.info("profile.cap_reached", profile=profile.name, cap=platform_limit)
                     break
 
                 job = rjob.job
@@ -546,14 +668,6 @@ class Orchestrator:
         finally:
             self.metrics.total_apply_phase_s += time.perf_counter() - t_apply_loop_0
 
-        # Step 8: Post-Apply Async Handlers (e.g., Cutshort Questionnaires)
-        if hasattr(platform, "handle_messages"):
-            log.info("profile.waiting_for_async_messages", platform=platform.platform_name)
-            # Wait 3 minutes to give employer systems time to trigger automated questionnaires
-            if not self.dry_run:
-                await asyncio.sleep(180)
-            await platform.handle_messages()
-
         # Step 7: Export Outcome Reports & Enriched Summary JSON
         duration = time.monotonic() - profile_start_time
         t_exp_out_0 = time.perf_counter()
@@ -563,7 +677,7 @@ class Orchestrator:
             applied_count=len(applied_outcomes),
             failed_count=len(failed_outcomes),
             profile_name=profile.name,
-            dry_run=False,
+            dry_run=not self.policy.may_mutate,
             duration_seconds=duration,
         )
         self.metrics.reporting_s += time.perf_counter() - t_exp_out_0
@@ -611,7 +725,12 @@ class Orchestrator:
                     detail=decision.detail,
                 )
             await self.repo.record_outcome(
-                job, profile.name, self.run_id, outcome, account=self.account_key
+                job,
+                profile.name,
+                self.run_id,
+                outcome,
+                account=self.account_key,
+                platform=platform.platform_name,
             )
             return outcome
 
@@ -627,7 +746,10 @@ class Orchestrator:
                 page, S.LOGGED_OUT_MARKERS, timeout_ms=2_000
             ):
                 log.warning("job.session_lost_retrying", job_id=job.job_id)
-                await platform.ensure_logged_in()
+                if not await platform.ensure_logged_in():
+                    raise FatalAgentError(
+                        f"{platform.platform_name} session recovery was not confirmed"
+                    )
                 outcome = await platform.apply_to_job(
                     job, profile.name, pre_submit_check=filters.evaluate_detail
                 )
@@ -644,10 +766,16 @@ class Orchestrator:
                 screenshot_path=shot,
             )
 
-        await self._record(job, profile, outcome)
+        await self._record(job, profile, outcome, platform.platform_name)
         return outcome
 
-    async def _record(self, job: Job, profile: JobProfile, outcome: ApplyOutcome) -> None:
+    async def _record(
+        self,
+        job: Job,
+        profile: JobProfile,
+        outcome: ApplyOutcome,
+        platform: str,
+    ) -> None:
         assert self.repo is not None
 
         if outcome.status == ApplicationStatus.APPLIED:
@@ -701,7 +829,12 @@ class Orchestrator:
             self.stats.bump(profile.name, "filtered_out")
 
         await self.repo.record_outcome(
-            job, profile.name, self.run_id, outcome, account=self.account_key
+            job,
+            profile.name,
+            self.run_id,
+            outcome,
+            account=self.account_key,
+            platform=platform,
         )
         task = asyncio.create_task(self._dispatch_recruiter_emails(job, profile, outcome))
         self._background_tasks.add(task)
@@ -724,8 +857,14 @@ class Orchestrator:
 
     async def _dispatch_recruiter_emails(self, job: Job, profile: JobProfile, outcome: ApplyOutcome) -> None:
         """Dispatches Gemini-tailored cold emails to HR emails extracted from job descriptions."""
-        # PREVENT SPAM LOOPHOLE: Do not email if we skipped/rejected the job!
-        if outcome.status == ApplicationStatus.SKIPPED:
+        # Outreach is intentionally disabled during Naukri stabilization. When
+        # enabled later, it is limited to positively confirmed applications and
+        # still inherits the immutable global side-effect policy.
+        if (
+            not self.settings.matched_outreach_enabled
+            or not self.policy.may_mutate
+            or outcome.status != ApplicationStatus.APPLIED
+        ):
             return
 
         recruiter_emails = getattr(job, "recruiter_emails", [])
@@ -742,10 +881,12 @@ class Orchestrator:
         mailer = ColdEmailer(sender_email=gmail_user, app_password=gmail_pass, gemini_api_key=gemini_key)
 
         # Dynamically route the correct PDF based on the active profile track
-        if "Full Stack" in profile.name:
-            resume_name = "Mahesh_Chitakoti_FullStack_Engineer.pdf"
+        fallback_name = (AgentConfig.load().applicant_name or "Applicant").replace(" ", "_")
+        role = job.title or profile.name
+        if "FullStack" in role or "MERN" in role:
+            resume_name = f"{fallback_name}_FullStack_Engineer.pdf"
         else:
-            resume_name = "Mahesh_Chitakoti_AI_Engineer.pdf"
+            resume_name = f"{fallback_name}_AI_Engineer.pdf"
 
         resume_path = PROJECT_ROOT / "resumes" / resume_name
 
@@ -760,6 +901,7 @@ class Orchestrator:
             if await self.repo.has_emailed(clean_email):
                 continue
 
+            self.policy.require_mutation("matched_outreach.send_email")
             success = await mailer.send_application_async(
                 target_email=clean_email,
                 role_name=role_name,

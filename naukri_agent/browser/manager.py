@@ -175,7 +175,8 @@ class BrowserManager:
         self._browser = await self._playwright.chromium.launch(
             headless=self.config.headless,
             slow_mo=self.config.slow_mo_ms,
-            channel="chrome",  # Use real Chrome to bypass Instahyre bot detection
+            # Use the Chromium bundled with the pinned Playwright image. A
+            # system Chrome channel is not guaranteed to exist in production.
             args=LAUNCH_ARGS,
         )
 
@@ -197,7 +198,7 @@ class BrowserManager:
             timezone_id=self.config.timezone,
             storage_state=storage_state,  # type: ignore[arg-type]
             java_script_enabled=True,
-            ignore_https_errors=True,
+            ignore_https_errors=False,
             permissions=[],
         )
         self._context.set_default_timeout(self.config.default_timeout_ms)

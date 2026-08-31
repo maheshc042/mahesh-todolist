@@ -212,12 +212,11 @@ class AnswerEngine:
                 self._record_hit(entry)
                 return fitted
 
-        # Stage 2: Generic Affirmative Fallback (Runs AFTER user config is checked)
+        # Stage 1.5: Generic Affirmative Fallback
         willingness = self._resolve_willingness(text, question)
         if willingness is not None:
             return willingness
-
-        # Stage 3: Experience Math
+        # Stage 2: Experience Math
         experience = self._resolve_experience(text, question)
         if experience is not None:
             return experience
@@ -233,13 +232,20 @@ class AnswerEngine:
     def _resolve_lwd(self, text: str, question: ScreeningQuestion) -> ResolvedAnswer | None:
         if not _LWD_INTENT.search(text):
             return None
-        target_date = "30/04/2026"
         for entry in self.entries:
             if "last working" in entry.pattern or "lwd" in entry.pattern:
-                target_date = entry.answer
-                break
-        log.info("answers.lwd_intent", question=question.text[:100], answer=target_date)
-        return self._fit_to_options(target_date, question, "intent:lwd", "intent-map")
+                log.info(
+                    "answers.lwd_intent",
+                    question=question.text[:100],
+                    source=entry.source,
+                )
+                return self._fit_to_options(
+                    entry.answer,
+                    question,
+                    entry.pattern,
+                    entry.source,
+                )
+        return None
 
     def _resolve_willingness(self, text: str, question: ScreeningQuestion) -> ResolvedAnswer | None:
         if not _WILLINGNESS_INTENT.search(text) or _NEGATIVE_QUESTIONS.search(text):
@@ -336,7 +342,8 @@ class AnswerEngine:
         if config.total_years is not None:
             return self._fit_to_options(_format_years(config.total_years), question, "experience:total_fallback", "experience-map")
 
-        return self._fit_to_options("2", question, "experience:universal_fallback", "experience-map")
+        # Unknown required facts block the application; never invent experience.
+        return None
 
     def _fit_to_options(self, answer: str, question: ScreeningQuestion, pattern: str, source: str) -> ResolvedAnswer | None:
         if not question.options:

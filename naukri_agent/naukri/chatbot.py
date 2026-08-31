@@ -32,6 +32,7 @@ from playwright.async_api import Page
 from ..browser.resilience import dismiss_overlays, first_visible, human_pause, safe_text
 from ..core.answers import AnswerEngine
 from ..core.models import ScreeningQuestion
+from ..core.run_policy import RunPolicy
 from ..logging_setup import get_logger
 from . import selectors as S
 
@@ -47,9 +48,16 @@ class ChatbotResult:
 
 
 class ChatbotHandler:
-    def __init__(self, page: Page, answers: AnswerEngine, max_questions: int = 15) -> None:
+    def __init__(
+        self,
+        page: Page,
+        answers: AnswerEngine,
+        policy: RunPolicy,
+        max_questions: int = 15,
+    ) -> None:
         self.page = page
         self.answers = answers
+        self.policy = policy
         self.max_questions = max_questions
 
     async def is_open(self, timeout_ms: int = 5_000) -> bool:
@@ -144,6 +152,7 @@ class ChatbotHandler:
         if field is None:
             return False
         try:
+            self.policy.require_mutation("naukri.screening.answer")
             await field.click()
             # contenteditable: clear any prefill, then type so React re-renders.
             await self.page.keyboard.press("Control+A")
@@ -167,6 +176,7 @@ class ChatbotHandler:
                 text = (await safe_text(locator)).strip().lower()
                 if text and text == value.strip().lower():
                     try:
+                        self.policy.require_mutation("naukri.screening.answer")
                         await locator.click(timeout=3_000)
                         await human_pause(200, 500)
                         await self._submit()
@@ -177,6 +187,7 @@ class ChatbotHandler:
         dropdown = await first_visible(self.page, S.CHATBOT_DROPDOWN, timeout_ms=800)
         if dropdown is not None:
             try:
+                self.policy.require_mutation("naukri.screening.answer")
                 await dropdown.select_option(label=value)
                 await self._submit()
                 return True

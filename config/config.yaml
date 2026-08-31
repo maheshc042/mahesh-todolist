@@ -2,8 +2,8 @@
 # Naukri auto-apply agent.
 #
 # TWO ACCOUNTS, TWO RESUMES:
-#   primary   (NAUKRI_EMAIL)   -> Full Stack / MERN + AI resume
-#   secondary (NAUKRI_EMAIL_2) -> AI / Python Engineer resume
+#   primary   (NAUKRI_EMAIL)   -> AI / Python Engineer resume
+#   secondary (NAUKRI_EMAIL_2) -> Full Stack / MERN + AI resume
 #
 # Naukri attaches whatever resume sits on the PROFILE — there is no per-
 # application resume picker — so one account == one resume == one job family.
@@ -17,6 +17,13 @@
 # disabled (`searches: []`) — see the commented block on the Full-Stack profile
 # to re-enable it.
 # ---------------------------------------------------------------------------
+
+platforms:
+  instahyre: false
+  cutshort: false
+  linkedin: false
+  naukri: true
+  wellfound: false
 
 browser:
   headless: true
@@ -60,8 +67,8 @@ schedule:
   # window is the pattern most likely to trigger Naukri's "unusual activity"
   # challenge. Morning for Full-Stack, afternoon for AI/Python.
   cron_by_account:
-    primary: "0 9 * * *"     # 09:00 AM IST (Morning recruiter search window)
-    secondary: "0 13 * * *"  # 01:00 PM IST (Afternoon recruiter search window — 4h gap prevents IP throttling)
+    primary: "0 9 * * *"     # 09:00 AM IST (Morning recruiter search window - AI)
+    secondary: "0 13 * * *"  # 01:00 PM IST (Afternoon recruiter search window - Full Stack)
   timezone: Asia/Kolkata
   jitter_seconds: 600
   run_on_start: false
@@ -379,7 +386,7 @@ profile_refresh:
 # ---------------------------------------------------------------------------
 match_score_prefilter:
   enabled: true
-  min_keyskills_score: 1        # 0 = no keyword match at all, skip; 1+ = some overlap, apply
+  min_keyskills_score: 1        # reject weak keyword overlap before browser navigation
   request_timeout_s: 5.0
   max_concurrent: 3             # parallel score fetches (stay under Naukri rate limit)
   fail_open: true               # on any API error, apply anyway
@@ -389,30 +396,38 @@ match_score_prefilter:
 # ---------------------------------------------------------------------------
 profiles:
   # =========================================================================
-  # ACCOUNT 1 (primary) — Full Stack / MERN, with AI-adjacent roles welcome.
+  # ACCOUNT 2 (secondary) — Full Stack / MERN, with AI-adjacent roles welcome.
   # The Full-Stack + AI resume must be the active CV on this Naukri profile.
   # =========================================================================
   - name: "Full Stack / Web Developer"
     enabled: true
     priority: 1
-    account: primary
+    account: secondary
     experience_years: 2.6
     use_recommended: true
-    max_applications_per_run: 35
+    platform_limits:
+      naukri: 35
+      instahyre: 150
+      linkedin: 50
+      cutshort: 150
     resume_label: "Full Stack Engineer"
     resume_file: null
 
     # Primary skills required: AT LEAST ONE of core_skills MUST match in every job
-    core_skills: ["react", "react.js", "reactjs", "node", "node.js", "nodejs", "javascript", "typescript", "express", "next.js", "nextjs", "python", "fastapi", "flask", "frontend", "front end", "backend", "back end", "ui", "ux", "chatbot", "aws", "gcp", "azure", "cloud", "kubernetes", "k8s", "docker", "devops", "full stack", "mern", "mean", "chatbot", "cloud", "genai", "generative ai"]
-    secondary_skills: ["microservices", "microservice", "messaging queue", "message queue", "rabbitmq", "kafka", "analytics", "monitoring", "api integration", "apis", "rest", "workflows", "automation", "application development", "agile", "use cases", "emerging technologies", "cloud services", "cloud platforms", "business processes", "customer engagement", "sql", "postgresql", "postgres", "mongodb", "docker", "kubernetes", "k8s", "aws", "gcp", "azure", "microsoft azure", "cloud run", "cloud", "git", "rest api", "html", "css", "crm", "erp", "billing", "information technology", "enterprise systems", "ai coding", "ai tools"]
-    bonus_skills: ["testing"]
+    # Explicit title keywords for scoring (so it doesn't divide by 50)
+    title_keywords: ["full stack", "mern", "react", "node", "frontend", "backend", "software engineer", "developer", "web", "qa", "automation", "sdet", "next"]
+
+    # Condensed to Top 14 so math allows a high score
+    core_skills: ["react", "node", "javascript", "typescript", "python", "fastapi", "django", "frontend", "backend", "full stack", "mern", "ui", "aws", "docker", "nextjs"]
+    secondary_skills: ["api", "rest", "graphql", "postgresql", "mongodb", "redis", "database", "ai", "llm", "rag", "langchain", "gcp", "azure", "kubernetes", "ci/cd", "microservices", "html", "css", "tailwind", "qa", "automation", "selenium"]
+    bonus_skills: ["testing", "pytest", "jest", "playwright", "cypress", "git", "github", "jira", "agile", "scrum", "code review", "debugging"]
 
     searches: []
     search_is_fallback_only: true
 
     filters:
-      title_must_include_any: [full stack, fullstack, mern, react, node, javascript, typescript, frontend, backend, web, software, developer, engineer, python, qa, testing, tester, software engineer, software testing, software qa, software engineer, software developer, software engineer full stack, software engineer frontend, software engineer backend, backend developer, backend engineer, frontend developer, frontend engineer, full stack developer, full stack engineer, full stack frontend, full stack backend, full stack mern, full stack react, full stack node, full stack javascript, full stack typescript, full stack fastapi, full stack flask, full stack chatbot, full stack prompt, full stack llm, full stack genai, full stack generative ai, full stack ai coding, full stack ai tools, aws, gcp, azure, cloud, kubernetes, k8s, docker, devops]
-      title_must_exclude_any: [intern, internship, sales, bpo, php, wordpress, .net, dotnet, dot net, spring boot, asp.net, c#, c++, golang, go, java developer, java, mainframe, sap, salesforce, drupal, magento, engineering manager, project manager, product manager, general manager, solution architect, enterprise architect, tech architect, technical architect, sr. manager]
+      title_must_include_any: [full stack, fullstack, mern, react, node, javascript, typescript, frontend, backend, web, software engineer, software developer, backend developer, backend engineer, frontend developer, frontend engineer, qa, automation, sdet, next]
+      title_must_exclude_any: [intern, internship, sales, bpo, php, wordpress, .net, dotnet, dot net, spring boot, asp.net, c#, c++, golang, go, java developer, java engineer, mainframe, sap, salesforce, drupal, magento, engineering manager, project manager, product manager, general manager, solution architect, enterprise architect, tech architect, technical architect, sr. manager]
       description_must_exclude_any: [
         "bpo", "commission only", "unpaid", "registration fee", "security deposit",
         "prefers women", "women diversity", "women-only", "women only", "female only", "female diversity", "diversity drive"
@@ -439,31 +454,38 @@ profiles:
       reason for job change: "Looking for better technical growth and challenging full-stack projects."
 
   # =========================================================================
-  # ACCOUNT 2 (secondary) — AI / Python Engineer.
+  # ACCOUNT 1 (primary) — AI / Python Engineer.
   # The AI/Python resume must be the active CV on this Naukri profile.
   # 2.6 years total engineering experience, 6 months of it in AI/Python.
   # =========================================================================
   - name: "AI / Python Engineer"
     enabled: true
     priority: 2
-    account: secondary
+    account: primary
     experience_years: 2.6
     use_recommended: true
-    max_applications_per_run: 35
+    platform_limits:
+      naukri: 35
+      instahyre: 150
+      linkedin: 50
+      cutshort: 150
     resume_label: "AI / Python Engineer"
     resume_file: null
 
-    # Primary skills required: AT LEAST ONE of core_skills MUST match in every job
-    core_skills: ["python", "fastapi", "flask", "django", "llm", "langchain", "crewai", "generative ai", "genai", "ai", "artificial intelligence", "machine learning", "ml", "rag", "nlp", "chatbot", "conversational ai", "language models", "ai engineer", "ml engineer", "vertex ai", "vertex", "vector", "vector database", "pinecone", "chromadb", "openai", "prompt", "prompt engineering", "vector search"]
-    secondary_skills: ["react", "react.js", "node", "node.js", "nodejs", "microservices", "microservice", "messaging queue", "message queue", "rabbitmq", "kafka", "analytics", "monitoring", "api integration", "apis", "rest", "workflows", "automation", "application development", "agile", "use cases", "emerging technologies", "cloud services", "cloud platforms", "business processes", "customer engagement", "sql", "postgresql", "postgres", "docker", "kubernetes", "k8s", "cloud run", "gcp", "azure", "microsoft azure", "aws", "cloud", "enterprise systems", "redis", "rest api", "pandas", "numpy", "crm", "erp", "billing", "information technology", "ai coding", "ai tools"]
-    bonus_skills: ["typescript"]
+    # Explicit title keywords for scoring (so it doesn't divide by 33)
+    title_keywords: ["ai", "python", "machine learning", "ml", "genai", "llm", "data scientist", "data engineer", "backend", "chatbot", "rag", "nlp", "agent"]
+
+    # Condensed to Top 13 so math allows a high score
+    core_skills: ["python", "fastapi", "django", "ai", "artificial intelligence", "machine learning", "ml", "generative ai", "genai", "llm", "rag", "langchain", "openai", "chatbot", "nlp"]
+    secondary_skills: ["react", "node", "javascript", "typescript", "frontend", "backend", "api", "rest", "postgresql", "mongodb", "aws", "docker", "kubernetes", "vector database", "pinecone", "chromadb", "embeddings", "semantic retrieval", "computer vision", "agent"]
+    bonus_skills: ["testing", "pytest", "jest", "git", "github", "jira", "agile", "scrum", "debugging"]
 
     searches: []
     search_is_fallback_only: true
 
     filters:
-      title_must_include_any: [ai, artificial intelligence, machine learning, ml, python, llm, genai, generative ai, nlp, chatbot, prompt, agent, data science, data engineer, python developer, ai engineer, ml engineer,qa, testing, tester, backend, developer, engineer, fullstack, mern, rag, vector, vector database, pinecone, chromadb, langchain, crewai, openai]
-      title_must_exclude_any: [intern, internship, sales, bpo, php, wordpress, .net, dotnet, dot net, asp.net, c#, c++, golang, go, java developer, java, network, hardware, engineering manager, project manager, product manager, general manager, solution architect, enterprise architect, tech architect, technical architect, sr. manager]
+      title_must_include_any: [ai, artificial intelligence, machine learning, ml, python, llm, genai, generative ai, nlp, chatbot, prompt, agent, data science, data engineer, python developer, ai engineer, ml engineer, backend engineer, backend developer, software engineer, software developer]
+      title_must_exclude_any: [intern, internship, sales, bpo, php, wordpress, .net, dotnet, dot net, asp.net, c#, c++, golang, go, java developer, java engineer, network, hardware, engineering manager, project manager, product manager, general manager, solution architect, enterprise architect, tech architect, technical architect, sr. manager]
       description_must_exclude_any: [
         "bpo", "commission only", "unpaid", "phd required", "registration fee", "security deposit",
         "prefers women", "women diversity", "women-only", "women only", "female only", "female diversity", "diversity drive"

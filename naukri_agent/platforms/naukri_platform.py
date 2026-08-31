@@ -13,6 +13,7 @@ from ..config import AgentConfig, JobProfile, NaukriAccount
 from ..core.answers import AnswerEngine
 from ..core.models import ApplyOutcome, FilterDecision, Job
 from ..core.runtime_metrics import RuntimeMetrics
+from ..core.run_policy import RunPolicy
 from ..naukri.apply import ApplyEngine
 from ..naukri.auth import NaukriAuth
 from ..naukri.search import JobSearcher
@@ -28,9 +29,10 @@ class NaukriPlatform(BaseJobPlatform):
         config: AgentConfig,
         artifacts: ArtifactStore,
         answers: AnswerEngine,
+        policy: RunPolicy,
         metrics: RuntimeMetrics | None = None,
     ):
-        super().__init__(page, account.key)
+        super().__init__(page, account.key, policy)
         self.browser = browser
         self.account = account
         self.config = config
@@ -49,7 +51,7 @@ class NaukriPlatform(BaseJobPlatform):
             page,
             answers,
             artifacts,
-            dry_run=False,
+            policy=policy,
             nav_timeout_ms=config.browser.navigation_timeout_ms,
             attempts=config.run.max_retries_per_job,
             max_questions=15,

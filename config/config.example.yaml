@@ -6,6 +6,13 @@
 # is supported if you really need to reference an env var.
 # ---------------------------------------------------------------------------
 
+platforms:
+  naukri: true
+  instahyre: false
+  cutshort: true
+  wellfound: false
+  linkedin: true
+
 browser:
   headless: true
   slow_mo_ms: 0
