@@ -11,3 +11,6 @@ tenacity==9.0.0
 typer==0.16.1
 rich==13.9.4
 python-dotenv==1.0.1
+
+cryptography==44.0.1
+colorama==0.4.6
