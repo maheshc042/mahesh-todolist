@@ -207,7 +207,7 @@ class ApplyEngine:
         return False
 
     async def _wait_for_post_apply_event(self) -> str:
-        for _ in range(30):  # 4.5s strict SLA poll
+        for _ in range(45):  # ~6.7s resilient SLA poll for remote CI network latency
             if self._popup_opened:
                 return "popup"
             if await self._fast_check(S.APPLY_SUCCESS):

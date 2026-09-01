@@ -267,8 +267,13 @@ APPLY_SUCCESS = [
     "div.apply-message",
     "span:has-text('You have successfully applied')",
     "div:has-text('successfully applied')",
+    "div:has-text('Application sent')",
+    "div:has-text('Applied on')",
     "span#already-applied",
     "div.styles_apply-message__2Sd0v",
+    "button#apply-button:has-text('Applied')",
+    "button[disabled]:has-text('Applied')",
+    "button:has-text('Applied')",
 ]
 
 APPLY_ERROR_TOAST = [
