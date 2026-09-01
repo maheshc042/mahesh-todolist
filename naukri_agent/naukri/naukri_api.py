@@ -128,8 +128,7 @@ class NaukriApiClient:
         Returns None on any error; the caller should proceed with the job as if
         it passed.
         """
-        async with self._semaphore:
-            return await self._fetch_score(job_id)
+        return await self._fetch_score(job_id)
 
     async def batch_match_scores(
         self,

@@ -216,6 +216,7 @@ class Orchestrator:
 
                 # 1. Initialize Active Platforms
                 active_platforms: list[BaseJobPlatform] = []
+                answers: AnswerEngine | None = None
 
                 if self.config.platforms.naukri:
                     answers = await self._build_answer_engine(profiles[0])
@@ -239,7 +240,7 @@ class Orchestrator:
                         )
 
                     if self.config.platforms.cutshort:
-                        if 'answers' not in locals():
+                        if answers is None:
                             answers = await self._build_answer_engine(profiles[0])
                         active_platforms.append(
                             CutshortPlatform(page, self.account, artifacts, answers, self.policy)
@@ -632,15 +633,14 @@ class Orchestrator:
             )
             return
 
-        # Step 6: Pass ONLY Selected Jobs to ApplyEngine (Live Run)
+        # Step 6: Pass Eligible Jobs to ApplyEngine (Live Run)
         applied_outcomes: list[tuple[Job, ApplyOutcome]] = []
         failed_outcomes: list[tuple[Job, ApplyOutcome]] = []
         filters = FilterEngine(profile.filters_for("recommended"))
 
         t_apply_loop_0 = time.perf_counter()
-        # Overflow is report-only. Attempting it after selected failures silently
-        # lowers the quality bar and creates unbounded browser activity.
-        candidate_queue = plan.selected_jobs
+        # Iterate through ranked eligible jobs until the target application cap is satisfied
+        candidate_queue = plan.eligible_jobs
         try:
             for rjob in candidate_queue:
                 self._check_global_limits()
@@ -834,7 +834,7 @@ class Orchestrator:
             self.run_id,
             outcome,
             account=self.account_key,
-            platform=platform,
+            platform=platform.platform_name,
         )
         task = asyncio.create_task(self._dispatch_recruiter_emails(job, profile, outcome))
         self._background_tasks.add(task)

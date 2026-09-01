@@ -124,7 +124,8 @@ class Repository:
             log.warning("db.event_log_failed", error=str(exc), event=event)
 
     # ------------------------------------------------------------------ jobs
-    async def upsert_job(self, job: Job, platform: str = "naukri") -> None:
+    async def upsert_job(self, job: Job, platform: str | Any = "naukri") -> None:
+        platform_str = getattr(platform, "platform_name", str(platform))
         row = job.to_row()
         await self.pool.execute(
             """
@@ -158,7 +159,7 @@ class Repository:
             row["posted_days_ago"],
             row["is_walkin"],
             row["source_keyword"],
-            platform,
+            platform_str,
         )
 
     async def known_job_ids(
@@ -265,9 +266,10 @@ class Repository:
         run_id: int | None,
         outcome: ApplyOutcome,
         account: str = "primary",
-        platform: str = "naukri",
+        platform: str | Any = "naukri",
     ) -> None:
-        await self.upsert_job(job, platform=platform)
+        platform_str = getattr(platform, "platform_name", str(platform))
+        await self.upsert_job(job, platform=platform_str)
 
         await self.pool.execute(
             """
@@ -301,7 +303,7 @@ class Repository:
             outcome.questions_answered,
             outcome.screenshot_path,
             account,
-            platform,
+            platform_str,
             outcome.confirmation_type,
             outcome.confirmation_evidence[:500] if outcome.confirmation_evidence else None,
         )

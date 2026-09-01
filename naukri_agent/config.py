@@ -685,11 +685,11 @@ class JobProfile(_Model):
 
 
 class PlatformsConfig(_Model):
-    naukri: bool = False
-    instahyre: bool = False
+    naukri: bool = True
+    instahyre: bool = True
     cutshort: bool = True
-    wellfound: bool = False
-    linkedin: bool = False
+    wellfound: bool = True
+    linkedin: bool = True
 
 
 
@@ -705,7 +705,7 @@ class AgentConfig(_Model):
     answers: dict[str, str] = Field(default_factory=dict)
     experience: ExperienceConfig = Field(default_factory=ExperienceConfig)
     profiles: list[JobProfile] = Field(default_factory=list)
-    
+
     # User Identity
     applicant_name: str = "Applicant"
     applicant_location: str = "India"
@@ -754,25 +754,25 @@ class AgentConfig(_Model):
         base = self.experience.to_answers()
         override = profile.experience.to_answers() if profile.experience else None
         merged = base.merged_with(override)
-        
+
         # Determine the fallback experience value (prefer configured default, then profile exp, else 2.0)
         fallback_years = merged.default_years
         if fallback_years is None:
             fallback_years = profile.experience_years if profile.experience_years else 2.0
-            
+
         # Ensure default_years is set so that ANY generic experience question gets answered
         merged.default_years = fallback_years
-        
+
         # Inject all profile skills into the skills map if not explicitly defined
         if merged.skills is None:
             merged.skills = {}
-            
+
         for skill_list in (profile.core_skills, profile.secondary_skills, profile.bonus_skills):
             for skill in skill_list:
                 s = str(skill).strip().lower()
                 if s and s not in merged.skills:
                     merged.skills[s] = fallback_years
-                    
+
         return merged
 
     def resume_for(self, account: str) -> str | None:
