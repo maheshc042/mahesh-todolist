@@ -67,6 +67,7 @@ jobs:
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
           DB_SSL_INSECURE: "true"
+          BROWSER_SESSION_SECRET: ${{ secrets.BROWSER_SESSION_SECRET }}
         run: python -m naukri_agent migrate
 
       - name: Run Naukri Agent
@@ -80,6 +81,7 @@ jobs:
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           HEADLESS: "true"
           DB_SSL_INSECURE: "true"
+          BROWSER_SESSION_SECRET: ${{ secrets.BROWSER_SESSION_SECRET }}
         run: |
           # If triggered manually, use the input provided by the user
           if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
