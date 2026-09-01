@@ -368,20 +368,39 @@ class LinkedInPlatform(BaseJobPlatform):
     async def _fill_step_inputs(self, profile_name: str) -> None:
         """Fills radio chips, dropdowns, text inputs, textareas, and resume attachments on current Easy Apply step."""
         try:
-            # 1. Resume selection or upload
-            resume_path = (
-                Path("resumes/CV_Mahesh_Chitakoti_2026.pdf")
+            # 1. Resume selection (existing on LinkedIn) or upload (fallback)
+            resume_stem = (
+                "CV_Mahesh_Chitakoti_2026"
                 if "ai" in profile_name.lower() or "python" in profile_name.lower()
-                else Path("resumes/CV_Mahesh_Chitakoti_2026_1_.pdf")
+                else "CV_Mahesh_Chitakoti_2026_1_"
             )
-            file_input = self.page.locator("input[type='file']").first
-            if await file_input.is_visible() and resume_path.exists():
-                try:
-                    await file_input.set_input_files(str(resume_path.resolve()))
-                    log.info("linkedin.apply.resume_uploaded", path=resume_path.name)
-                    await human_pause(1000, 2000)
-                except Exception as exc:
-                    log.debug("linkedin.resume_upload_error", error=str(exc))
+            resume_path = Path(f"resumes/{resume_stem}.pdf")
+
+            # Check if LinkedIn already displays saved resume cards/radios
+            resume_cards = await self.page.locator(".jobs-document-upload__title, div[data-test-document-item], label:has-text('.pdf')").all()
+            selected_existing = False
+            for card in resume_cards:
+                card_text = (await safe_text(card)).lower()
+                if resume_stem.lower() in card_text:
+                    try:
+                        await card.click()
+                        selected_existing = True
+                        log.info("linkedin.apply.existing_resume_selected", match=resume_stem)
+                        await human_pause(400, 800)
+                        break
+                    except Exception:
+                        pass
+
+            # Fallback upload if no existing resume matched or upload button is explicitly active
+            if not selected_existing:
+                file_input = self.page.locator("input[type='file']").first
+                if await file_input.is_visible() and resume_path.exists():
+                    try:
+                        await file_input.set_input_files(str(resume_path.resolve()))
+                        log.info("linkedin.apply.resume_uploaded", path=resume_path.name)
+                        await human_pause(1000, 2000)
+                    except Exception as exc:
+                        log.debug("linkedin.resume_upload_error", error=str(exc))
 
             # 2. Radio fieldsets (Yes/No, screening questions)
             radios = await self.page.locator("fieldset").all()

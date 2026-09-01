@@ -26,4 +26,3 @@ venv/
 # Agent runtime output and private data
 artifacts/
 logs/
-resumes/
