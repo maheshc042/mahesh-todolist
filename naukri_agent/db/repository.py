@@ -1041,7 +1041,7 @@ class Repository:
             """
             SELECT 1 FROM contacted_recruiters
              WHERE email = $1
-               AND contacted_at >= now() - ($2 || ' days')::interval
+               AND contacted_at >= now() - ($2 * interval '1 day')
             """,
             clean_email,
             within_days,

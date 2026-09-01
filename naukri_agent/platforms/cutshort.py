@@ -49,12 +49,12 @@ class CutshortChatbot:
             return False
         if ct == rv or rv in ct or ct in rv:
             return True
-        if rv in ("yes", "true") and any(w in ct for w in ["yes", "agree", "comfortable", "available", "willing", "open", "ready"]):
+        if rv in ("yes", "true") and any(w in ct for w in ["yes", "agree", "comfortable", "available", "willing", "open", "ready", "works"]):
             return True
         if rv in ("no", "false") and any(w in ct for w in ["no", "never", "not"]):
             return True
-        if "0" in rv or "immediate" in rv:
-            if any(w in ct for w in ["immediate", "< 15", "0-15", "15 days", "serving", "0 days"]):
+        if "0" in rv or "immediate" in rv or "15" in rv:
+            if any(w in ct for w in ["immediate", "served notice", "serving", "< 15", "0-15", "15 days", "0 days"]):
                 return True
         return False
 
@@ -132,7 +132,7 @@ class CutshortChatbot:
         for _ in range(self.max_questions):
             await human_pause(1200, 2000)
 
-            # Check if chat is complete
+            # Check if chat is already complete
             if await first_visible(
                 self.page, [
                     "text=Application sent",
@@ -145,7 +145,57 @@ class CutshortChatbot:
             ):
                 return True, answered, ""
 
-            # Check for Quick-Reply Chips / Buttons on the screen
+            # Phase 1: Cutshort Form-based Fieldset Questionnaires (Verified in DOM)
+            fieldsets = await self.page.locator("fieldset").all()
+            if fieldsets:
+                form_answered = False
+                for fs in fieldsets:
+                    if not await fs.is_visible():
+                        continue
+                    legend_el = fs.locator("legend").first
+                    q_text = (await safe_text(legend_el)).strip() if await legend_el.count() > 0 else (await safe_text(fs)).strip()
+                    if not q_text:
+                        continue
+
+                    options = await fs.locator("div[tabindex='0'], div[role='radio'], label, button").all()
+                    opt_texts = [(await safe_text(opt)).strip() for opt in options if (await safe_text(opt)).strip()]
+
+                    resolved = self.answers.resolve(ScreeningQuestion(text=q_text, kind="radio", options=opt_texts))
+                    target_val = resolved.value if resolved else ""
+
+                    for opt in options:
+                        opt_text = (await safe_text(opt)).strip()
+                        if target_val and (self._match_chip(opt_text, target_val) or opt_text.lower() == target_val.lower()):
+                            try:
+                                await opt.click()
+                                await human_pause(300, 600)
+                                answered += 1
+                                form_answered = True
+                                break
+                            except Exception:
+                                pass
+
+                if form_answered:
+                    submit_btn = await first_visible(
+                        self.page,
+                        [
+                            "form button[type='submit']",
+                            "button:has-text('Submit')",
+                            "button:has-text('Send response')",
+                            "button:has-text('Confirm')",
+                            "button[type='submit']",
+                        ],
+                        timeout_ms=1500,
+                    )
+                    if submit_btn:
+                        try:
+                            await submit_btn.click()
+                            await human_pause(1500, 2500)
+                            return True, answered, ""
+                        except Exception:
+                            pass
+
+            # Phase 2: Check for Quick-Reply Chips / Buttons on the screen
             chips = await self.page.locator(
                 "button.chip, div[class*='quick-reply'], button[class*='option'], "
                 "button[class*='choice'], button[class*='pill'], button[class*='btn-reply'], "
@@ -174,13 +224,13 @@ class CutshortChatbot:
                 recruiter_text = b_text
                 break
 
-            if not recruiter_text and not chips:
+            if not recruiter_text and not chips and not fieldsets:
                 stagnant_rounds += 1
                 if stagnant_rounds > 2:
                     break
                 continue
 
-            if recruiter_text == last_question and not chips:
+            if recruiter_text == last_question and not chips and not fieldsets:
                 stagnant_rounds += 1
                 if stagnant_rounds > 2:
                     return False, answered, "Questionnaire stalled without a completion marker"
@@ -211,7 +261,6 @@ class CutshortChatbot:
                         answered += 1
                         break
 
-                # If a send/submit button is required to confirm the selection, click it
                 if answered_successfully:
                     submit_btn = await first_visible(
                         self.page,
@@ -232,9 +281,7 @@ class CutshortChatbot:
                         except Exception:
                             pass
 
-            # Step 2: Handle single in-chat text inputs for specific questions.
-            # Unresolved radio controls are intentionally left for human review;
-            # choosing an affirmative-looking option would fabricate candidate facts.
+            # Step 2: Handle single in-chat text inputs for specific questions
             if not answered_successfully:
                 chat_inputs = await self.page.locator("div[class*='chat'] input[type='text'], div[class*='message'] input[type='text'], div[class*='questionnaire'] input").all()
                 for inp in chat_inputs:
@@ -260,44 +307,49 @@ class CutshortChatbot:
                         except Exception:
                             pass
 
-            # Step 4: Fallback to chat textarea/input box for recruiter messages
-            if not answered_successfully and recruiter_text:
-                composite_reply = self._extract_composite_answers(recruiter_text)
-                if composite_reply:
-                    text_input = await first_visible(
+            # Step 3: Handle direct chat textarea / input box for recruiter messages
+            text_input = await first_visible(
+                self.page,
+                [
+                    "textarea[name='message']",
+                    "textarea[placeholder*='message' i]",
+                    "textarea[placeholder*='reply' i]",
+                    "textarea",
+                    "input[type='text'][placeholder*='message' i]",
+                    "div[contenteditable='true']",
+                ],
+                timeout_ms=1500
+            )
+
+            if not answered_successfully and (recruiter_text or text_input):
+                composite_reply = self._extract_composite_answers(recruiter_text or "recruiter message")
+                if not composite_reply and recruiter_text:
+                    single_res = self.answers.resolve(ScreeningQuestion(text=recruiter_text, kind="text", options=[]))
+                    if single_res:
+                        composite_reply = single_res.value
+
+                if composite_reply and text_input:
+                    await human_type(text_input, composite_reply)
+                    await human_pause(400, 800)
+                    send_btn = await first_visible(
                         self.page,
                         [
-                            "textarea[placeholder*='message' i]",
-                            "textarea[placeholder*='reply' i]",
-                            "textarea",
-                            "input[type='text'][placeholder*='message' i]",
-                            "div[contenteditable='true']",
-                            "input[type='text']",
+                            "button:has-text('Send')",
+                            "button[aria-label='Send']",
+                            "button[class*='send' i]",
+                            "button[type='submit']",
                         ],
-                        timeout_ms=2000
+                        timeout_ms=1500
                     )
-                    if text_input:
-                        await human_type(text_input, composite_reply)
-                        await human_pause(400, 800)
-                        send_btn = await first_visible(
-                            self.page,
-                            [
-                                "button:has-text('Send')",
-                                "button[aria-label='Send']",
-                                "svg.send-icon",
-                                "button[type='submit']",
-                            ],
-                            timeout_ms=1500
-                        )
-                        if send_btn:
-                            await send_btn.click()
-                        else:
-                            await text_input.press("Enter")
-                        await human_pause(1000, 2000)
-                        answered_successfully = True
-                        answered += 1
+                    if send_btn:
+                        await send_btn.click()
+                    else:
+                        await text_input.press("Enter")
+                    await human_pause(1000, 2000)
+                    answered_successfully = True
+                    answered += 1
 
-            if not answered_successfully:
+            if not answered_successfully and not fieldsets:
                 return False, answered, f"Could not answer recruiter message: {recruiter_text[:80]}"
 
         return False, answered, "Questionnaire ended without an explicit completion marker"
@@ -539,6 +591,40 @@ class CutshortPlatform(BaseJobPlatform):
         modal = await first_visible(self.page, ["div.modal-content", "div[class*='modal']", "div[role='dialog']"], timeout_ms=4000)
         modal_text = (await safe_text(modal)).strip() if modal else ""
 
+        # Check and handle profile-specific resume swapping if configured
+        try:
+            from ..config import PROJECT_ROOT
+            cfg = AgentConfig.load()
+            prof = next((p for p in cfg.profiles if p.name.lower() == profile_name.lower()), None)
+            if prof and prof.resume_file:
+                resume_path = PROJECT_ROOT / prof.resume_file
+                if resume_path.exists():
+                    target_stem = resume_path.stem.lower()
+                    current_resume_text = (await safe_text(modal)).lower() if modal else ""
+                    if target_stem not in current_resume_text:
+                        upload_btn = await first_visible(
+                            self.page,
+                            [
+                                "div:has-text('Upload another resume')",
+                                "button:has-text('Upload another resume')",
+                                "span:has-text('Upload another resume')",
+                                "a:has-text('Upload another resume')",
+                            ],
+                            timeout_ms=1500,
+                        )
+                        if upload_btn:
+                            file_input = await first_visible(self.page, ["input[type='file']"], timeout_ms=1000)
+                            if file_input:
+                                await file_input.set_input_files(str(resume_path))
+                                await human_pause(1000, 2000)
+                                log.info(
+                                    "cutshort.apply.swapped_resume",
+                                    profile=profile_name,
+                                    resume=str(resume_path.name),
+                                )
+        except Exception as exc:
+            log.debug("cutshort.apply.resume_swap_failed", error=str(exc))
+
         recruiter_name = "Hiring Team"
         rec_match = re.search(r"To\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)", modal_text)
         if rec_match:
@@ -558,32 +644,45 @@ class CutshortPlatform(BaseJobPlatform):
         if company_match:
             actual_company = company_match.group(1).strip()
 
-        # Dynamic skill matching based on job title & description context
-        text_for_skills = f"{actual_title} {modal_text}".lower()
-        if any(k in text_for_skills for k in ["ai", "llm", "genai", "gpt", "machine learning", "rag"]):
-            skill_phrase = "building AI-driven applications, LLM workflows, and scalable Python backends"
-        elif any(k in text_for_skills for k in ["qa", "testing", "test automation"]):
-            skill_phrase = "in software QA, API testing, test automation, and quality engineering"
+        # Dynamic tech stack, specialty, and achievement tailored to the role
+        text_for_skills = f"{actual_title} {modal_text} {job.description}".lower()
+        if any(k in text_for_skills for k in ["ai", "llm", "genai", "gpt", "machine learning", "rag", "agent", "prompt"]):
+            key_tech_stack = "Python, FastAPI, GenAI, and LLM orchestration (RAG/LangChain)"
+            core_specialty = "autonomous AI agents, vector search pipelines, and scalable Python backends"
+            specific_achievement = "end-to-end LLM applications with high accuracy and low latency"
+        elif any(k in text_for_skills for k in ["qa", "testing", "test automation", "sdet"]):
+            key_tech_stack = "Python, Playwright, Selenium, and API automation frameworks"
+            core_specialty = "robust automated testing pipelines and CI/CD quality gates"
+            specific_achievement = "comprehensive automated test suites ensuring high defect coverage"
         elif any(k in text_for_skills for k in ["devops", "docker", "kubernetes", "aws", "gcp", "azure"]):
-            skill_phrase = "in DevOps, CI/CD automation, cloud infrastructure, and containerization"
-        elif any(k in text_for_skills for k in ["golang", "go"]):
-            skill_phrase = "building scalable microservices and APIs with Go, Python, and Node.js"
-        elif any(k in text_for_skills for k in ["frontend", "fullstack", "full stack", "react", "next"]):
-            skill_phrase = "developing full-stack applications with React, Node.js, and Python"
-        elif any(k in text_for_skills for k in ["backend", "python", "fastapi", "django", "node"]):
-            skill_phrase = "designing high-performance backends and APIs with Python, FastAPI, and Node.js"
+            key_tech_stack = "Docker, Kubernetes, AWS, and CI/CD pipelines"
+            core_specialty = "scalable cloud infrastructure and containerized deployments"
+            specific_achievement = "automated zero-downtime deployment workflows"
+        elif any(k in text_for_skills for k in ["frontend", "fullstack", "full stack", "react", "next", "node"]):
+            key_tech_stack = "React, Node.js, TypeScript, and Python"
+            core_specialty = "scalable full-stack web applications and robust APIs"
+            specific_achievement = "high-performance, responsive full-stack features"
+        elif any(k in text_for_skills for k in ["backend", "python", "fastapi", "django"]):
+            key_tech_stack = "Python, FastAPI, Django, and PostgreSQL"
+            core_specialty = "high-concurrency backend services and database architectures"
+            specific_achievement = "scalable, low-latency microservices and REST APIs"
         else:
-            skill_phrase = "building scalable backends and software systems"
+            key_tech_stack = "Python, Node.js, React, and modern web architectures"
+            core_specialty = "scalable backend and full-stack software systems"
+            specific_achievement = "reliable, production-grade applications"
+
+        applicant_name = AgentConfig.load().applicant_name or "Mahesh"
 
         textarea = await first_visible(self.page, ["textarea", "input[type='text'][placeholder*='note' i]"], timeout_ms=3000)
         if textarea:
             pitch = (
                 f"Hi {recruiter_name},\n\n"
-                f"I'd like to apply for the {actual_title} role at {actual_company}. "
-                f"I have hands-on experience {skill_phrase}, and I think it lines up well "
-                f"with what your team is building.\n\n"
-                f"Happy to share more if it's a fit.\n\n"
-                f"{AgentConfig.load().applicant_name or 'Applicant'}"
+                f"I'm applying for the {actual_title} role at {actual_company}. "
+                f"With 2.6+ years of hands-on experience in {key_tech_stack}, I specialize in building {core_specialty}—recently delivering {specific_achievement}.\n\n"
+                f"My background matches the tech stack you're looking for, and as an immediate joiner (0-day notice), I can hit the ground running with minimal ramp-up time.\n\n"
+                f"Looking forward to discussing how I can contribute to the team!\n\n"
+                f"Best,\n"
+                f"{applicant_name}"
             )
             await textarea.fill(pitch)
             await human_pause(300, 600)
@@ -614,12 +713,21 @@ class CutshortPlatform(BaseJobPlatform):
 
         confirmation = None
         if submission_attempted:
+            # If an in-modal screening questionnaire/chatbot pops up immediately, answer it
+            if await first_visible(self.page, ["fieldset", "form:has(fieldset)", "div[class*='quick-reply']", "button.chip"], timeout_ms=1500):
+                log.info("cutshort.apply.in_modal_questionnaire_detected", job_id=job.job_id)
+                chatbot = CutshortChatbot(self.page, self.answers)
+                await chatbot.run()
+                await human_pause(1000, 2000)
+
             confirmation = await first_visible(
                 self.page,
                 [
                     "text=Application sent",
                     "text=successfully applied",
                     "text=Employer will review",
+                    "text=Applied successfully",
+                    "text=Your response has been recorded",
                     "button:has-text('Applied')",
                 ],
                 timeout_ms=4000,

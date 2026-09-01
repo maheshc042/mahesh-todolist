@@ -58,28 +58,27 @@ class ColdEmailer:
 
         role_low = role_name.lower()
         if "ai" in role_low or "python" in role_low or "ml" in role_low or "llm" in role_low:
-            tech_stack = "Python, FastAPI, LLMs, GenAI, and RAG architectures"
-            highlights = "building intelligent, scalable AI agents and integrating LLM features into production applications"
+            tech_stack = "Python, FastAPI, GenAI, LLMs, and RAG pipelines"
+            highlights = "building autonomous AI agents, scalable Python backends, and low-latency LLM workflows"
         else:
-            tech_stack = "React.js, Node.js, TypeScript, and AWS"
-            highlights = "architecting high-performance web applications, developing RESTful APIs, and delivering seamless user experiences"
+            tech_stack = "React, Node.js, TypeScript, and modern web architectures"
+            highlights = "architecting high-performance full-stack web applications and robust REST/GraphQL APIs"
 
         config = AgentConfig.load()
-        name = config.applicant_name or "Applicant"
-        location = config.applicant_location or "India"
+        name = config.applicant_name or "Mahesh"
+        location = config.applicant_location or "Bengaluru, India"
 
         return f"""Hi there,
 
-I came across your recent post regarding the open role for a {role_name} and I would love to be considered for the position.
+I came across your recent hiring post for the {role_name} role and would love to be considered.
 
-I am an experienced Software Engineer with hands-on experience specializing in {tech_stack}. In my recent work, I have focused on {highlights}, consistently delivering robust and scalable solutions.
+I have 2.6+ years of hands-on experience specializing in {tech_stack}. In my recent work, I have focused on {highlights}, consistently delivering robust and scalable solutions.
 
-I have attached my resume for your review. I would welcome the opportunity to discuss how my technical expertise aligns with your team's goals.
+As an immediate joiner (0-day notice period), I can hit the ground running with minimal ramp-up time. I have attached my resume for your review and would welcome the opportunity to discuss how my technical expertise aligns with your team's goals.
 
-Thank you for your time and consideration.
+Thank you for your time and consideration!
 
 Best regards,
-
 {name}
 {location}
 """
@@ -94,8 +93,10 @@ Best regards,
     ) -> bool:
         """
         Constructs and dispatches the email with the PDF attachment synchronously.
-        Returns True if successful, False if it failed.
+        Includes automatic retry for transient SMTP connection drops.
         """
+        import time
+
         target_email = target_email.strip()
         resume_file = Path(resume_path)
 
@@ -110,7 +111,7 @@ Best regards,
         try:
             # 1. Construct the email container
             config = AgentConfig.load()
-            name = config.applicant_name or "Applicant"
+            name = config.applicant_name or "Mahesh"
             
             msg = EmailMessage()
             msg["Subject"] = f"Application: {role_name} - {name}"
@@ -136,14 +137,24 @@ Best regards,
                 filename=resume_file.name,
             )
 
-            # 4. Dispatch via Secure SMTP
+            # 4. Dispatch via Secure SMTP with 30s timeout and 3-attempt retry
             context = ssl.create_default_context()
-            with smtplib.SMTP_SSL(self.smtp_server, self.smtp_port, context=context, timeout=15.0) as server:
-                server.login(self.sender_email, self.app_password)
-                server.send_message(msg)
+            last_err = None
+            for attempt in range(1, 4):
+                try:
+                    with smtplib.SMTP_SSL(self.smtp_server, self.smtp_port, context=context, timeout=30.0) as server:
+                        server.login(self.sender_email, self.app_password)
+                        server.send_message(msg)
+                    log.info("mailer.sent_success", to=target_email, role=role_name, attempt=attempt)
+                    return True
+                except (smtplib.SMTPServerDisconnected, TimeoutError, OSError) as exc:
+                    last_err = exc
+                    log.warning("mailer.smtp_transient_retry", attempt=attempt, error=str(exc), to=target_email)
+                    time.sleep(2.0 * attempt)
 
-            log.info("mailer.sent_success", to=target_email, role=role_name)
-            return True
+            if last_err:
+                raise last_err
+            return False
 
         except smtplib.SMTPAuthenticationError:
             log.error(

@@ -220,18 +220,22 @@ class HardFilter:
         company = job.company.lower()
         location = job.location.lower()
 
-        # Core Skill Match Requirement: At least 1 primary core skill MUST match in the job
-        if self.candidate and self.candidate.core_skills:
+        # Core Skill / Relevant Title Match Requirement
+        if self.candidate:
             haystack = _build_searchable_haystack(job)
-            has_core_match = any(
+            all_skills = self.candidate.core_skills + self.candidate.secondary_skills
+            has_skill_match = any(
                 _exact_word_match(skill, haystack) or _normalize_tech_text(skill) in haystack
-                for skill in self.candidate.core_skills
+                for skill in all_skills
             )
-            if not has_core_match:
+            has_title_match = bool(rules.title_must_include_any and _contains_any(title, rules.title_must_include_any))
+
+            # Only reject if NEITHER relevant skills nor target role title matches
+            if not has_skill_match and not has_title_match:
                 return FilterDecision(
                     False,
                     SkipReason.FILTER_DESCRIPTION,
-                    f"job lacks any required primary skill ({', '.join(self.candidate.core_skills[:5])})",
+                    f"job lacks any relevant skill or title keyword ({', '.join(self.candidate.core_skills[:5])})",
                 )
 
         # Title blocklist (with tech normalization)

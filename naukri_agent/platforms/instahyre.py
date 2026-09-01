@@ -136,49 +136,30 @@ class InstahyrePlatform(BaseJobPlatform):
             timeout_ms=2500,
         )
 
-        target_skills = []
-        if profile.core_skills:
-            skill_map = {
-                "node": "Node.js", "node.js": "Node.js", "nodejs": "Node.js",
-                "react": "React", "react.js": "React", "reactjs": "React",
-                "aws": "AWS", "gcp": "GCP", "azure": "Azure",
-                "python": "Python", "java": "Java", "ruby": "Ruby", "php": "PHP",
-                "c++": "C++", "c#": "C#"
-            }
-            for skill in profile.core_skills:
-                mapped = skill_map.get(skill.lower(), skill.title())
-                if mapped not in target_skills:
-                    target_skills.append(mapped)
-                if len(target_skills) >= 2:
-                    break
-        if not target_skills:
-            target_skills = ["Python", "Node.js"]
+        # Only target Node.js and Python for Instahyre filter search
+        target_skills = ["Node.js", "Python"]
 
         if skills_input:
+            # Clear any pre-existing stale skill tags
+            try:
+                remove_buttons = await self.page.locator("div.selectize-input div.item a.remove, div.selectize-input a.remove").all()
+                for rem in remove_buttons:
+                    try:
+                        await rem.click()
+                        await human_pause(100, 300)
+                    except Exception:
+                        pass
+            except Exception:
+                pass
+
             for skill in target_skills:
                 try:
                     await skills_input.click()
                     await human_pause(200, 400)
                     await skills_input.fill("")
                     await human_type(skills_input, skill)
-                    await human_pause(500, 1000)
-
-                    # Select from Selectize dropdown
-                    opt = await first_visible(
-                        self.page,
-                        [
-                            f"div.selectize-dropdown-content div.option:has-text('{skill}')",
-                            f"div.option:has-text('{skill}')",
-                            "div.selectize-dropdown-content div.option",
-                        ],
-                        timeout_ms=1500,
-                    )
-                    if opt:
-                        await opt.click()
-                    else:
-                        await self.page.keyboard.press("ArrowDown")
-                        await human_pause(200, 400)
-                        await self.page.keyboard.press("Enter")
+                    await human_pause(400, 600)
+                    await skills_input.press("Enter")
                     await human_pause(400, 800)
                 except Exception as exc:
                     log.debug("instahyre.filters.skill_select_failed", skill=skill, error=str(exc))
@@ -293,6 +274,22 @@ class InstahyrePlatform(BaseJobPlatform):
                 log.info("instahyre.modal.dismissing_premium_modal")
                 await premium_close.click()
                 await human_pause(800, 1200)
+
+            # 4. Error / Toast Message Popups (#messages)
+            error_close = await first_visible(
+                self.page,
+                [
+                    "#messages button",
+                    "#messages button.close",
+                    "#messages div.alert button",
+                    "div.toast-close-button",
+                ],
+                timeout_ms=800,
+            )
+            if error_close:
+                log.info("instahyre.modal.dismissing_error_toast")
+                await error_close.click()
+                await human_pause(400, 800)
 
         except Exception as exc:
             log.debug("instahyre.dismiss_modals_error", error=str(exc))
@@ -434,7 +431,7 @@ class InstahyrePlatform(BaseJobPlatform):
                                 url=url,
                                 description=note_text,
                                 tags=tags,
-                                recommendation_tab="default",
+                                recommendation_tab=f"page_{page_num}",
                                 recommendation_position=index,
                             )
                         )
@@ -472,6 +469,15 @@ class InstahyrePlatform(BaseJobPlatform):
                 else:
                     log.info("instahyre.fetch.last_page_reached", pages=page_num)
                     break
+
+            # Always return to Page 1 so apply phase starts from the top
+            try:
+                first_page = self.page.locator("div.pagination li:text-is('1')").first
+                if await first_page.count() > 0 and await first_page.is_visible():
+                    await first_page.click()
+                    await human_pause(1000, 2000)
+            except Exception:
+                pass
 
         except Exception as exc:
             log.warning("instahyre.fetch.error", url=feed_url, error=str(exc))
@@ -534,15 +540,38 @@ class InstahyrePlatform(BaseJobPlatform):
                 modal = None
 
         if not modal:
-            # Open modal from card — find by title text or position index
-            # Escape single quotes in company/title for CSS :has-text()
+            # 1. Determine target pagination page
+            target_page = 1
+            if job.recommendation_tab and job.recommendation_tab.startswith("page_"):
+                try:
+                    target_page = int(job.recommendation_tab.split("_")[1])
+                except Exception:
+                    target_page = 1
+
+            # Check currently active page in pagination
+            active_page_loc = self.page.locator("div.pagination li.active").first
+            current_page_num = 1
+            if await active_page_loc.count() > 0:
+                try:
+                    current_page_num = int((await safe_text(active_page_loc)).strip())
+                except Exception:
+                    current_page_num = 1
+
+            if current_page_num != target_page:
+                log.info("instahyre.apply.switching_page", from_page=current_page_num, to_page=target_page)
+                page_btn = self.page.locator(f"div.pagination li:text-is('{target_page}')").first
+                if await page_btn.count() > 0 and await page_btn.is_visible():
+                    await page_btn.click()
+                    await human_pause(1200, 2000)
+
+            # Open modal from card — find by company or title text
             safe_title = job.title.replace("'", "\\'")
             safe_company = job.company.replace("'", "\\'")
 
             card = None
 
-            # Try finding card by title text first
-            for text_match in [safe_title, safe_company]:
+            # Try finding card by company name or title text
+            for text_match in [safe_company, safe_title]:
                 if not text_match:
                     continue
                 try:
@@ -553,60 +582,84 @@ class InstahyrePlatform(BaseJobPlatform):
                 except Exception:
                     continue
 
-            # Fallback: use recommendation_position to find nth card
-            if not card and job.recommendation_position:
-                try:
-                    pos = job.recommendation_position - 1  # 0-indexed
-                    all_cards = self.page.locator("div.employer-row")
-                    count = await all_cards.count()
-                    if pos < count:
-                        card = all_cards.nth(pos)
-                        if not await card.is_visible():
-                            card = None
-                except Exception:
-                    pass
+            # Fallback: if not found, search across all employer-rows on page
+            if not card:
+                all_rows = await self.page.locator("div.employer-row").all()
+                for row in all_rows:
+                    row_text = (await safe_text(row)).lower()
+                    if (job.company and job.company.lower() in row_text) or (job.title and job.title.lower()[:30] in row_text):
+                        card = row
+                        break
+
+            # If not found on target_page, check alternate page (since earlier applies shift cards across pages)
+            if not card:
+                alternate_page = 1 if target_page == 2 else 2
+                alt_btn = self.page.locator(f"div.pagination li:text-is('{alternate_page}')").first
+                if await alt_btn.count() > 0 and await alt_btn.is_visible():
+                    log.info("instahyre.apply.checking_alternate_page", alt_page=alternate_page, job=f"{job.company} - {job.title}")
+                    await alt_btn.click()
+                    await human_pause(1200, 2000)
+                    for text_match in [safe_company, safe_title]:
+                        if not text_match:
+                            continue
+                        try:
+                            loc = self.page.locator(f"div.employer-row:has-text('{text_match}')").first
+                            if await loc.count() > 0 and await loc.is_visible():
+                                card = loc
+                                break
+                        except Exception:
+                            continue
+                    if not card:
+                        all_rows = await self.page.locator("div.employer-row").all()
+                        for row in all_rows:
+                            row_text = (await safe_text(row)).lower()
+                            if (job.company and job.company.lower() in row_text) or (job.title and job.title.lower()[:30] in row_text):
+                                card = row
+                                break
 
             if not card:
-                return ApplyOutcome(ApplicationStatus.FAILED, detail="Job card not found on page to open modal")
+                return ApplyOutcome(ApplicationStatus.FAILED, detail=f"Job card for {job.company} - {job.title} not found on feed")
 
             try:
-                # Click the View » button on the card
-                view_btn = card.locator("button#interested-btn, button.button-interested, button.btn-success").first
-                if await view_btn.count() > 0:
-                    await view_btn.scroll_into_view_if_needed()
-                    await human_pause(200, 400)
+                # Click the opportunity card / view button to trigger openApplyModal(opp)
+                await card.scroll_into_view_if_needed()
+                await human_pause(300, 600)
+
+                clicked = False
+                view_btn = card.locator("button#interested-btn, span#interested-btn, .button-interested").first
+                if await view_btn.count() > 0 and await view_btn.is_visible():
                     await view_btn.click(force=True)
+                    clicked = True
                 else:
-                    # Fallback: click the card link directly
                     link = card.locator("a#employer-profile-opportunity, a.text-link").first
-                    if await link.count() > 0:
-                        await link.scroll_into_view_if_needed()
-                        await human_pause(200, 400)
-                        await link.evaluate("node => node.click()")
-                    else:
-                        await card.scroll_into_view_if_needed()
-                        await human_pause(200, 400)
-                        await card.evaluate("node => node.click()")
+                    if await link.count() > 0 and await link.is_visible():
+                        await link.click()
+                        clicked = True
+
+                if not clicked:
+                    await card.evaluate("node => node.click()")
                 await human_pause(1500, 2500)
             except Exception as exc:
                 return ApplyOutcome(ApplicationStatus.FAILED, detail=f"Failed to click job card: {str(exc)}")
 
-
             modal = await first_visible(
                 self.page,
                 [
-                    "div.modal-content",
                     "div#employer-profile-modal",
-                    "div[class*='modal']",
+                    "div.modal.fade.in",
+                    "div.modal.in",
+                    "div.modal.show",
+                    "div.modal-dialog",
+                    "div.modal-content",
+                    "div.bar-actions",
                     "div[class*='opportunity-modal']",
                 ],
-                timeout_ms=5000,
+                timeout_ms=7000,
             )
             if not modal:
                 return ApplyOutcome(ApplicationStatus.FAILED, detail="Modal did not open after clicking card")
 
             # Wait for AngularJS candidateOpportunityCtrl to render the action bar
-            # The bar-actions div with Apply/Not Interested is dynamically injected
             bar_actions = await first_visible(
                 self.page,
                 [
@@ -698,6 +751,8 @@ class InstahyrePlatform(BaseJobPlatform):
         apply_btn = await first_visible(
             self.page,
             [
+                "#candidate-suggested-employers div.apply.ng-scope > button",
+                "#candidate-suggested-employers div.apply",
                 "div.apply",
                 "div.apply button",
                 "button.btn-primary.new-btn",
@@ -741,12 +796,29 @@ class InstahyrePlatform(BaseJobPlatform):
 
 
 
+        # Ensure the modal action bar (Not Interested & Apply buttons) is scrolled into view
+        bar = self.page.locator("div.bar-actions, div.row.bar-actions").first
+        if await bar.count() > 0:
+            try:
+                await bar.scroll_into_view_if_needed()
+                await human_pause(800, 1500)
+            except Exception:
+                pass
+
         try:
-            await apply_btn.scroll_into_view_if_needed()
-            await human_pause(200, 400)
-            raise RuntimeError("STOP_BEFORE_APPLY_CLICK")
-            await apply_btn.click(force=True)
-            await human_pause(800, 1500)
+            # Click div.apply / button which carries ng-click="submitChoice(opp, true)"
+            apply_target = self.page.locator("div.bar-actions div.apply, div.apply, button.btn-primary.new-btn:has-text('Apply'), button:has-text('Apply')").first
+            if await apply_target.count() > 0:
+                await apply_target.scroll_into_view_if_needed()
+                await human_pause(300, 600)
+                try:
+                    await apply_target.click()
+                except Exception:
+                    await apply_target.evaluate("node => node.click()")
+            else:
+                await apply_btn.scroll_into_view_if_needed()
+                await apply_btn.click(force=True)
+            await human_pause(1000, 2000)
         except Exception as exc:
             return ApplyOutcome(ApplicationStatus.FAILED, detail=f"Click apply failed: {str(exc)}")
 
@@ -776,8 +848,14 @@ class InstahyrePlatform(BaseJobPlatform):
                 "text=You have applied",
                 "button:has-text('Applied')",
                 "button.btn-disabled:has-text('Applied')",
+                "div.apply button:has-text('Applied')",
+                "div.apply[class*='disabled']",
+                "div.apply[class*='applied']",
+                "div#refer",
+                "div#go-premium-modal",
+                "div.application-modal",
             ],
-            timeout_ms=4000,
+            timeout_ms=5000,
         )
 
         # Post-apply cleanup: Instahyre advances the carousel / pops the bulk

@@ -49,20 +49,15 @@ SEARCH_URLS = [
 def _get_resume_path(role: str, resume_dir: Path) -> Path:
     """Find appropriate resume path for the classified role."""
     if "AI" in role or "Python" in role or "ML" in role:
-        candidates = list(resume_dir.glob("*AI*.pdf")) + list(resume_dir.glob("*Python*.pdf"))
+        candidates = list(resume_dir.glob("*2026.pdf")) + list(resume_dir.glob("*AI*.pdf")) + list(resume_dir.glob("*Python*.pdf"))
         if candidates:
             return candidates[0]
+        return resume_dir / "CV_Mahesh_Chitakoti_2026.pdf"
     else:
-        candidates = list(resume_dir.glob("*FullStack*.pdf")) + list(resume_dir.glob("*Full_Stack*.pdf"))
+        candidates = list(resume_dir.glob("*2026_1_*.pdf")) + list(resume_dir.glob("*FullStack*.pdf")) + list(resume_dir.glob("*Full_Stack*.pdf"))
         if candidates:
             return candidates[0]
-
-    all_pdfs = list(resume_dir.glob("*.pdf"))
-    if all_pdfs:
-        return all_pdfs[0]
-    
-    fallback_name = (AgentConfig.load().applicant_name or "Applicant").replace(" ", "_")
-    return resume_dir / f"{fallback_name}_Resume.pdf"
+        return resume_dir / "CV_Mahesh_Chitakoti_2026_1_.pdf"
 
 
 async def run_campaign(

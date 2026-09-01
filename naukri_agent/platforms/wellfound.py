@@ -170,6 +170,28 @@ class WellfoundPlatform(BaseJobPlatform):
                 detail="External company-site application is not automated",
             )
 
+        # Check for Location-gated rejection
+        if await first_visible(self.page, ["text=not accepting applications from your", "text=not accepting applications from your location"]):
+            log.info("wellfound.apply.location_gated", job_id=job.job_id)
+            return ApplyOutcome(ApplicationStatus.SKIPPED, reason=SkipReason.BLOCKED_LOCATION, detail="Location-gated by company")
+
+        # Handle Relocation Prompt if requested by Wellfound
+        relocate_choice = await first_visible(
+            self.page,
+            [
+                "label:has-text('I can relocate')",
+                "button:has-text('I can relocate')",
+                "div:has-text('I can relocate')",
+            ],
+            timeout_ms=1000,
+        )
+        if relocate_choice:
+            try:
+                await relocate_choice.click()
+                await human_pause(400, 800)
+            except Exception:
+                pass
+
         # Handle Pitch Textarea ("What interests you about working for this company?")
         textarea = await first_visible(
             self.page,
@@ -178,6 +200,8 @@ class WellfoundPlatform(BaseJobPlatform):
                 "textarea[name='userNote']",
                 "textarea[placeholder*='interests' i]",
                 "textarea[placeholder*='note' i]",
+                "[role='dialog'] textarea",
+                "div[class*='modal'] textarea",
                 "textarea",
             ],
             timeout_ms=4000,
@@ -200,10 +224,14 @@ class WellfoundPlatform(BaseJobPlatform):
             await human_type(textarea, pitch)
             await human_pause(500, 1000)
 
-        # Submit Application
+        # Submit Application inside Dialog
         submit_btn = await first_visible(
             self.page,
             [
+                "[role='dialog'] button:has-text('Apply')",
+                "[role='dialog'] button:has-text('Send application')",
+                "[role='dialog'] button:has-text('Submit application')",
+                "[role='dialog'] button[type='submit']",
                 "button:has-text('Apply')",
                 "button:has-text('Send application')",
                 "button:has-text('Submit application')",
@@ -217,7 +245,14 @@ class WellfoundPlatform(BaseJobPlatform):
 
             # Check for success
             if await first_visible(
-                self.page, ["text=Application sent", "text=You applied", "button:has-text('Applied')", "text=Applied"]
+                self.page, [
+                    "text=Application sent",
+                    "text=You applied",
+                    "button:has-text('Applied')",
+                    "text=Applied",
+                    "div[class*='success']",
+                ],
+                timeout_ms=5000,
             ):
                 return ApplyOutcome(
                     ApplicationStatus.APPLIED,

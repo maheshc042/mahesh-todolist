@@ -18,10 +18,13 @@
 # to re-enable it.
 # ---------------------------------------------------------------------------
 
+applicant_name: "Mahesh Chitakoti"
+applicant_location: "Bengaluru, India"
+
 platforms:
-  instahyre: false
-  cutshort: false
-  linkedin: false
+  instahyre: true
+  cutshort: true
+  linkedin: true
   naukri: true
   wellfound: false
 
@@ -39,7 +42,6 @@ browser:
   block_resources: [font, media]
 
 run:
-  daily_application_cap: 35
   dedupe_window_days: 90
   max_consecutive_failures: 5
   min_delay_between_applies_s: 8   # Human pacing with room for coffee (8-22s)
@@ -410,8 +412,9 @@ profiles:
       instahyre: 150
       linkedin: 50
       cutshort: 150
+      wellfound: 50
     resume_label: "Full Stack Engineer"
-    resume_file: null
+    resume_file: "resumes/CV_Mahesh_Chitakoti_2026_1_.pdf"
 
     # Primary skills required: AT LEAST ONE of core_skills MUST match in every job
     # Explicit title keywords for scoring (so it doesn't divide by 50)
@@ -427,7 +430,7 @@ profiles:
 
     filters:
       title_must_include_any: [full stack, fullstack, mern, react, node, javascript, typescript, frontend, backend, web, software engineer, software developer, backend developer, backend engineer, frontend developer, frontend engineer, qa, automation, sdet, next]
-      title_must_exclude_any: [intern, internship, sales, bpo, php, wordpress, .net, dotnet, dot net, spring boot, asp.net, c#, c++, golang, go, java developer, java engineer, mainframe, sap, salesforce, drupal, magento, engineering manager, project manager, product manager, general manager, solution architect, enterprise architect, tech architect, technical architect, sr. manager]
+      title_must_exclude_any: [intern, internship, sales, bpo, php, wordpress, .net, dotnet, dot net, spring boot, asp.net, c#, c++, golang developer, golang engineer, go developer, go engineer, java developer, java engineer, mainframe, sap, salesforce, drupal, magento, engineering manager, project manager, product manager, general manager, solution architect, enterprise architect, tech architect, technical architect, sr. manager]
       description_must_exclude_any: [
         "bpo", "commission only", "unpaid", "registration fee", "security deposit",
         "prefers women", "women diversity", "women-only", "women only", "female only", "female diversity", "diversity drive"
@@ -469,8 +472,9 @@ profiles:
       instahyre: 150
       linkedin: 50
       cutshort: 150
+      wellfound: 50
     resume_label: "AI / Python Engineer"
-    resume_file: null
+    resume_file: "resumes/CV_Mahesh_Chitakoti_2026.pdf"
 
     # Explicit title keywords for scoring (so it doesn't divide by 33)
     title_keywords: ["ai", "python", "machine learning", "ml", "genai", "llm", "data scientist", "data engineer", "backend", "chatbot", "rag", "nlp", "agent"]
@@ -485,7 +489,7 @@ profiles:
 
     filters:
       title_must_include_any: [ai, artificial intelligence, machine learning, ml, python, llm, genai, generative ai, nlp, chatbot, prompt, agent, data science, data engineer, python developer, ai engineer, ml engineer, backend engineer, backend developer, software engineer, software developer]
-      title_must_exclude_any: [intern, internship, sales, bpo, php, wordpress, .net, dotnet, dot net, asp.net, c#, c++, golang, go, java developer, java engineer, network, hardware, engineering manager, project manager, product manager, general manager, solution architect, enterprise architect, tech architect, technical architect, sr. manager]
+      title_must_exclude_any: [intern, internship, sales, bpo, php, wordpress, .net, dotnet, dot net, asp.net, c#, c++, golang developer, golang engineer, go developer, go engineer, java developer, java engineer, network, hardware, engineering manager, project manager, product manager, general manager, solution architect, enterprise architect, tech architect, technical architect, sr. manager]
       description_must_exclude_any: [
         "bpo", "commission only", "unpaid", "phd required", "registration fee", "security deposit",
         "prefers women", "women diversity", "women-only", "women only", "female only", "female diversity", "diversity drive"

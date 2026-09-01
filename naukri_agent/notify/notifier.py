@@ -51,8 +51,8 @@ class TelegramNotifier(Notifier):
         self.timeout_s = timeout_s
 
     async def send(self, title: str, body: str, *, is_error: bool = False) -> None:
-        prefix = "FAILED" if is_error else "OK"
-        text = f"<b>[{prefix}] {html.escape(title)}</b>\n<pre>{html.escape(body)}</pre>"
+        prefix = "🚨 FAILED" if is_error else "🚀 SUCCESS"
+        text = f"<b>{prefix}: {html.escape(title)}</b>\n\n<pre>{html.escape(body)}</pre>"
         if len(text) > TELEGRAM_LIMIT:
             text = text[: TELEGRAM_LIMIT - 12] + "\n…</pre>"
         try:
@@ -111,37 +111,43 @@ def format_run_summary(
     duration_s: float,
     run_id: int | None,
     include_job_list: bool = True,
-    max_jobs: int = 15,
+    max_jobs: int = 20,
     error: str | None = None,
 ) -> str:
-    """Plain text, aligned, greppable — reads well in both Telegram and logs."""
+    """Executive product-grade run summary formatted for clarity and readability."""
+    mins = int(duration_s // 60)
+    secs = int(duration_s % 60)
     lines = [
-        f"run id        : {run_id if run_id is not None else 'n/a'}",
-        f"duration      : {int(duration_s // 60)}m {int(duration_s % 60)}s",
-        f"scraped       : {stats.scraped}",
-        f"considered    : {stats.considered}",
-        f"filtered out  : {stats.filtered_out}",
-        f"APPLIED       : {stats.applied}",
-        f"already applied: {stats.already_applied}",
-        f"external skip : {stats.external}",
-        f"needs review  : {stats.needs_review}",
-        f"failed        : {stats.failed}",
+        f"📊 RUN METRICS (ID: #{run_id if run_id is not None else 'N/A'} | ⏱️ {mins}m {secs}s):",
+        f"  • Total Scraped     : {stats.scraped}",
+        f"  • Jobs Considered   : {stats.considered}",
+        f"  • Filtered Out      : {stats.filtered_out}",
+        f"  • ✅ APPLIED        : {stats.applied}",
+        f"  • 🔄 Already Applied: {stats.already_applied}",
+        f"  • 🔗 External Links : {stats.external}",
+        f"  • ⚠️ Needs Review   : {stats.needs_review}",
+        f"  • ❌ Failed         : {stats.failed}",
     ]
 
     if stats.per_profile:
         lines.append("")
-        lines.append("per profile:")
+        lines.append("👤 PER-PROFILE BREAKDOWN:")
         for profile, counters in stats.per_profile.items():
             applied = counters.get("applied", 0)
             failed = counters.get("failed", 0)
             review = counters.get("needs_review", 0)
-            lines.append(f"  {profile}: applied={applied} failed={failed} review={review}")
+            lines.append(f"  • {profile}: {applied} applied | {failed} failed | {review} review")
 
     if include_job_list and stats.applied_jobs:
         lines.append("")
-        lines.append(f"✅ Applied Jobs ({len(stats.applied_jobs)}):")
+        lines.append(f"🚀 APPLIED POSITIONS ({len(stats.applied_jobs)}):")
         for job in stats.applied_jobs[:max_jobs]:
-            lines.append(f"  - {job.get('title', '?')} @ {job.get('company', '?')}")
+            platform = job.get("platform", "Naukri")
+            profile = job.get("profile", "")
+            title = job.get("title", "?")
+            company = job.get("company", "?")
+            prof_tag = f" [{profile}]" if profile else ""
+            lines.append(f"  • [{platform}] {title} @ {company}{prof_tag}")
             form_links = job.get("form_links", [])
             recruiter_emails = job.get("recruiter_emails", [])
             if form_links:
@@ -150,46 +156,47 @@ def format_run_summary(
                 lines.append(f"    📧 Recruiter Email: {', '.join(recruiter_emails)}")
         remaining = len(stats.applied_jobs) - max_jobs
         if remaining > 0:
-            lines.append(f"  … and {remaining} more")
+            lines.append(f"  … and {remaining} more jobs")
 
     if stats.external_jobs:
         lines.append("")
-        lines.append(f"🔗 Action Required / External Jobs ({len(stats.external_jobs)}):")
+        lines.append(f"🔗 ACTION REQUIRED / EXTERNAL JOBS ({len(stats.external_jobs)}):")
         for job in stats.external_jobs[:10]:
+            platform = job.get("platform", "Portal")
             title = job.get("title", "?")
             company = job.get("company", "?")
             url = job.get("url", "")
             form_links = job.get("form_links", [])
             recruiter_emails = job.get("recruiter_emails", [])
-            lines.append(f"  - {title} @ {company}")
+            lines.append(f"  • [{platform}] {title} @ {company}")
             if form_links:
-                lines.append(f"    Forms: {', '.join(form_links)}")
+                lines.append(f"    📝 Form: {', '.join(form_links)}")
             if recruiter_emails:
-                lines.append(f"    📧 Recruiter Email: {', '.join(recruiter_emails)}")
+                lines.append(f"    📧 Recruiter: {', '.join(recruiter_emails)}")
             if url:
-                lines.append(f"    URL: {url}")
+                lines.append(f"    🌐 URL: {url}")
 
     if stats.walkin_alerts:
         lines.append("")
-        lines.append(f"📍 Bangalore Walk-in Radar ({len(stats.walkin_alerts)}):")
+        lines.append(f"📍 BANGALORE WALK-IN RADAR ({len(stats.walkin_alerts)}):")
         for job in stats.walkin_alerts[:10]:
             title = job.get("title", "?")
             company = job.get("company", "?")
             location = job.get("location", "")
             url = job.get("url", "")
-            lines.append(f"  - {title} @ {company} ({location})")
+            lines.append(f"  • {title} @ {company} ({location})")
             if url:
-                lines.append(f"    URL: {url}")
+                lines.append(f"    🌐 URL: {url}")
 
     if stats.errors:
         lines.append("")
-        lines.append("errors:")
+        lines.append("⚠️ ERRORS / WARNINGS:")
         for message in stats.errors[:5]:
             lines.append(f"  ! {message[:160]}")
 
     if error:
         lines.append("")
-        lines.append(f"fatal: {error[:300]}")
+        lines.append(f"🚨 FATAL: {error[:300]}")
 
     return "\n".join(lines)
 

@@ -1,104 +1,24 @@
 job_id,reason,detail,company,title,url
-reco-110826039750,filter_description,job contains blocked term 'prefers women',Infosys,Gen AI Developer,https://www.naukri.com/job-listings-110826039750
-reco-130726032080,filter_description,job contains blocked term 'prefers women',Infosys,Python Django Developer - INF,https://www.naukri.com/job-listings-130726032080
-reco-200826034122,filter_freshness,posted 11d ago > max 5d,Hotelogix,Python Developer,https://www.naukri.com/job-listings-200826034122
-reco-280826010984,filter_title,title lacks any required keyword,Synkcode,Django Developer,https://www.naukri.com/job-listings-280826010984
-reco-280826006053,filter_title,title lacks any required keyword,Bajaj Finance,Data Scientist,https://www.naukri.com/job-listings-280826006053
-reco-270826924412,filter_title,title lacks any required keyword,Fifthnote (A unit of INVERTEDI IT CONSULTANCY Private Limited),"Engineer, Software",https://www.naukri.com/job-listings-270826924412
-reco-050826036909,filter_freshness,posted 6d ago > max 5d,Client of Seventh Contact (AI-powered Industrial Automation) Co-Pune (WFO),"SDET-(Automation, Python, Linux) For a Singapore based Product Co-Pune",https://www.naukri.com/job-listings-050826036909
-reco-240826015160,filter_freshness,posted 7d ago > max 5d,Cloud Angles Digital Transformation,Agentic AI Developer,https://www.naukri.com/job-listings-240826015160
-reco-240826919508,filter_title,title lacks any required keyword,Capgemini,PYSPARK DEVELOPER,https://www.naukri.com/job-listings-240826919508
-reco-260826012796,filter_title,title lacks any required keyword,Teamware Solutions,SDET Engineer,https://www.naukri.com/job-listings-260826012796
-reco-260826009478,filter_title,title lacks any required keyword,Sagility India,Data Scientist,https://www.naukri.com/job-listings-260826009478
-reco-150626006851,filter_title,title lacks any required keyword,EY,Backend (Node.js & NestJS) + Apigee Developer - 2 To 4 Years,https://www.naukri.com/job-listings-150626006851
-reco-280826009448,filter_title,title lacks any required keyword,Elios Technologies,Data Scientist,https://www.naukri.com/job-listings-280826009448
-reco-050825015364,filter_title,title lacks any required keyword,Datacultr,Software Development Engineer,https://www.naukri.com/job-listings-050825015364
-reco-250826030352,filter_title,title lacks any required keyword,Talentzo Delhi,Data Scientist at A FinTech Company,https://www.naukri.com/job-listings-250826030352
-reco-250826029281,filter_freshness,posted 6d ago > max 5d,DS STREAM,AI Fullstack Engineer,https://www.naukri.com/job-listings-250826029281
-reco-170826927770,filter_title,title lacks any required keyword,Paytm,Data Scientist,https://www.naukri.com/job-listings-170826927770
-reco-260826031049,filter_title,title lacks any required keyword,Nxtwave Disruptive Technologies (Hiring for a client),Data Scientist,https://www.naukri.com/job-listings-260826031049
-reco-280826004268,filter_title,title lacks any required keyword,Hiring for Infosys,Hiring For MLOPS Engineer,https://www.naukri.com/job-listings-280826004268
-reco-280826012211,filter_title,title lacks any required keyword,Thyrocare,Data Analyst,https://www.naukri.com/job-listings-280826012211
-reco-300826004396,filter_title,title lacks any required keyword,Atos,Cloud & DevOps Engineer,https://www.naukri.com/job-listings-300826004396
-reco-030826007293,filter_title,title lacks any required keyword,TransOrg,Data Scientist,https://www.naukri.com/job-listings-030826007293
-reco-260826504090,filter_title,title lacks any required keyword,Kinara.ai,Lead Engineer - Compilers,https://www.naukri.com/job-listings-260826504090
-reco-300826003511,filter_description,"job lacks any required primary skill (python, fastapi, django, ai, artificial intelligence)",BT Group,Software Engineering Professional_Fullstack,https://www.naukri.com/job-listings-300826003511
-reco-280826006668,filter_description,"job lacks any required primary skill (python, fastapi, django, ai, artificial intelligence)",Leading Product / Edtech companies in the world,Senior Software Engineer,https://www.naukri.com/job-listings-280826006668
-reco-290826009802,filter_description,"job lacks any required primary skill (python, fastapi, django, ai, artificial intelligence)",US MNC,SQL Developer,https://www.naukri.com/job-listings-290826009802
-reco-280826010221,filter_description,"job lacks any required primary skill (python, fastapi, django, ai, artificial intelligence)",Neurealm,Software Engineer,https://www.naukri.com/job-listings-280826010221
-reco-290826010926,filter_description,"job lacks any required primary skill (python, fastapi, django, ai, artificial intelligence)",Infinity learn,Business Analyst,https://www.naukri.com/job-listings-290826010926
-reco-280826005020,filter_description,"job lacks any required primary skill (python, fastapi, django, ai, artificial intelligence)",HCA Healthcare,Associate II ( IT Operations),https://www.naukri.com/job-listings-280826005020
-reco-290826007820,filter_description,"job lacks any required primary skill (python, fastapi, django, ai, artificial intelligence)",Lenovo,Managed Service Desk Engineer,https://www.naukri.com/job-listings-290826007820
-reco-240826011913,filter_title,title lacks any required keyword,Tesco,Decision Scientist,https://www.naukri.com/job-listings-240826011913
-reco-270826924530,filter_description,"job lacks any required primary skill (python, fastapi, django, ai, artificial intelligence)",Bajaj Finance,Data Analyst,https://www.naukri.com/job-listings-270826924530
-reco-240826929841,filter_freshness,posted 7d ago > max 5d,Accenture,LLM Operations Engineer,https://www.naukri.com/job-listings-240826929841
-reco-280826009137,filter_description,"job lacks any required primary skill (python, fastapi, django, ai, artificial intelligence)",EY,Fullstack Developer,https://www.naukri.com/job-listings-280826009137
-reco-280826004848,filter_description,"job lacks any required primary skill (python, fastapi, django, ai, artificial intelligence)",ADP Private Limited,Walk-in || Client Support Specialist,https://www.naukri.com/job-listings-280826004848
-reco-270826503361,filter_description,"job lacks any required primary skill (python, fastapi, django, ai, artificial intelligence)",Sedin Technologies,Maximo Consultant,https://www.naukri.com/job-listings-270826503361
-reco-280826009477,filter_description,"job lacks any required primary skill (python, fastapi, django, ai, artificial intelligence)",NEC Corporation,Java Full Stack Developer,https://www.naukri.com/job-listings-280826009477
-reco-280826005434,filter_title,title lacks any required keyword,ALOIS Solutions,Walk-in || IT Service Desk / Technical Support / IT Helpdesk / Customer Support,https://www.naukri.com/job-listings-280826005434
-reco-290826013899,filter_title,title lacks any required keyword,"BharatHire represents many of the top Banks, Asset Management co's, Insurance, and IT companies",Sap Fiori Developer,https://www.naukri.com/job-listings-290826013899
-reco-270826029836,filter_title,title contains blocked term 'java developer',Upvote Consulting Services,Fullstack Developer/ Java Developer,https://www.naukri.com/job-listings-270826029836
-reco-240626026440,filter_title,title lacks any required keyword,Medpace Clinical Research India,Database Programmer - Core Laboratory (Based in Hyderabad),https://www.naukri.com/job-listings-240626026440
-reco-300826004331,filter_description,"job lacks any required primary skill (python, fastapi, django, ai, artificial intelligence)",Nooha Asp,Java Spring Boot Developer,https://www.naukri.com/job-listings-300826004331
-reco-280826007057,filter_title,title lacks any required keyword,Siemens technology and Services,DevOps & Cloud Engineer,https://www.naukri.com/job-listings-280826007057
-reco-250826922289,filter_description,"job lacks any required primary skill (python, fastapi, django, ai, artificial intelligence)",Capgemini,Connectivity & Network Engineer,https://www.naukri.com/job-listings-250826922289
-reco-150626034732,filter_title,title lacks any required keyword,Pearl,Desktop Support Technician,https://www.naukri.com/job-listings-150626034732
-reco-270826921233,filter_title,title lacks any required keyword,Leading Client,Full Stack Developer,https://www.naukri.com/job-listings-270826921233
-reco-290826006214,filter_title,title lacks any required keyword,JobShop.ai,Hiring For Verizon US Voice Process | Walk-In Interviews @CTC-6.5LPA,https://www.naukri.com/job-listings-290826006214
-reco-260826912593,filter_title,title lacks any required keyword,Accenture,Infra Tech Support Practitioner,https://www.naukri.com/job-listings-260826912593
-reco-300826003703,filter_title,title lacks any required keyword,India's topmost FMCG Conglomerate,Data Scientist,https://www.naukri.com/job-listings-300826003703
-reco-240826016278,filter_freshness,posted 7d ago > max 5d,Subhanu Technologies,Python Trainer,https://www.naukri.com/job-listings-240826016278
-reco-200826027145,filter_title,title lacks any required keyword,Infosys,Java + React.js Developer (2-3yrs),https://www.naukri.com/job-listings-200826027145
-reco-290626928590,filter_description,"job lacks any required primary skill (python, fastapi, django, ai, artificial intelligence)",Infosys,Java Fullstack Developer (React),https://www.naukri.com/job-listings-290626928590
-reco-170826929563,filter_freshness,posted 14d ago > max 5d,Paytm,Senior Software Engineer-Frontend (Full Stack),https://www.naukri.com/job-listings-170826929563
-reco-260826026801,filter_description,job contains blocked term 'prefers women',Infosys,Python Software Developer,https://www.naukri.com/job-listings-260826026801
-reco-180826022696,walkin,walk-in drive,HCLTech,Walk-in || Artificial Intelligence Engineer,https://www.naukri.com/job-listings-180826022696
-reco-240826032532,filter_title,title lacks any required keyword,Hexaware Technologies,Java Cloud Native Developer,https://www.naukri.com/job-listings-240826032532
-reco-250826017915,filter_title,title lacks any required keyword,BT Group,Software Engineering Professional-Java Full stack with cloud Native,https://www.naukri.com/job-listings-250826017915
-reco-240826004891,filter_freshness,posted 7d ago > max 5d,PwC India,Agentic AI Testing Engineer,https://www.naukri.com/job-listings-240826004891
-reco-210726911215,filter_freshness,posted 6d ago > max 5d,Infosys,Python Backend Developer,https://www.naukri.com/job-listings-210726911215
-reco-270826010570,filter_title,title lacks any required keyword,Lendingplate,Fullstack Developer,https://www.naukri.com/job-listings-270826010570
-reco-170826919935,filter_title,title lacks any required keyword,ZS Associates (India) Pvt Ltd,Senior Engineer - Large Language Model Engineer,https://www.naukri.com/job-listings-170826919935
-reco-130826021391,filter_title,title lacks any required keyword,Lenskart,C# Developer,https://www.naukri.com/job-listings-130826021391
-reco-260826927593,filter_title,title lacks any required keyword,Capgemini,Java & React Developer,https://www.naukri.com/job-listings-260826927593
-reco-310826016811,filter_title,title lacks any required keyword,Philips,Software Technologist - C# .NET Full Stack,https://www.naukri.com/job-listings-310826016811
-reco-310826005361,filter_title,title lacks any required keyword,Consilio,Fullstack Developer,https://www.naukri.com/job-listings-310826005361
-reco-180826043578,filter_title,title contains blocked term 'java developer',Crisil,Java Developer,https://www.naukri.com/job-listings-180826043578
-reco-240826925073,filter_freshness,posted 7d ago > max 5d,Accenture,AI / ML Engineer,https://www.naukri.com/job-listings-240826925073
-reco-310826010188,filter_description,"job lacks any required primary skill (python, fastapi, django, ai, artificial intelligence)",ADP Private Limited,Walk-in || Fullstack Developer (Java + AWS) - Immediate Joiners,https://www.naukri.com/job-listings-310826010188
-reco-310826501228,filter_description,"job lacks any required primary skill (python, fastapi, django, ai, artificial intelligence)",BCE Global Technology Centre,Junior Fullstack Developer,https://www.naukri.com/job-listings-310826501228
-reco-310826500902,filter_description,"job lacks any required primary skill (python, fastapi, django, ai, artificial intelligence)",Brigosha Technologies,Java + Angular Full Stack Developer,https://www.naukri.com/job-listings-310826500902
-reco-310826502562,filter_description,"job lacks any required primary skill (python, fastapi, django, ai, artificial intelligence)",IBU Consulting,JAVA AWS Fullstack Developer,https://www.naukri.com/job-listings-310826502562
-reco-310826025324,filter_description,"job lacks any required primary skill (python, fastapi, django, ai, artificial intelligence)",Only B2B,Full Stack Mobile App Developer,https://www.naukri.com/job-listings-310826025324
-reco-110826930975,filter_freshness,posted 20d ago > max 5d,ZS,Senior Software Engineer - Data Engineer,https://www.naukri.com/job-listings-110826930975
-reco-270826020146,filter_title,title lacks any required keyword,Odex India Solutions,Software Engineer_ Full Stack & Front end,https://www.naukri.com/job-listings-270826020146
-reco-260826501599,filter_description,"job lacks any required primary skill (python, fastapi, django, ai, artificial intelligence)",Indicorp It Solutions,Website Developer (Full Stack) - PHP or MERN Stack,https://www.naukri.com/job-listings-260826501599
-reco-120826015014,filter_freshness,posted 19d ago > max 5d,Deloitte US-India Offices,"Experience in AI/ML , RAG & LLM, with Agentic studio",https://www.naukri.com/job-listings-120826015014
-reco-280826007808,filter_title,title contains blocked term 'php',Green Apples Techsystems,"Software Developer - React, PHP",https://www.naukri.com/job-listings-280826007808
-reco-270826927724,filter_title,title lacks any required keyword,Cornerstone,Senior Al Engineer,https://www.naukri.com/job-listings-270826927724
-reco-310826504570,filter_title,title lacks any required keyword,Foogle,Full Stack Developer (React + Node.js) | Remote | India,https://www.naukri.com/job-listings-310826504570
-reco-260826503974,filter_description,"job lacks any required primary skill (python, fastapi, django, ai, artificial intelligence)",Super Intellisense,GHL Automation Specialist,https://www.naukri.com/job-listings-260826503974
-reco-300826000286,filter_title,title contains blocked term 'sales',Reputed Interior Designing Company,B2B Sales AM & Manager For Europe DMC,https://www.naukri.com/job-listings-300826000286
-reco-250826503537,filter_freshness,posted 6d ago > max 5d,Techcarrot Fz-llc,AI Engineer,https://www.naukri.com/job-listings-250826503537
-reco-270826925154,filter_title,title lacks any required keyword,Bajaj Finance,Deputy Manager - Risk Containment Unit,https://www.naukri.com/job-listings-270826925154
-reco-280826009364,filter_title,title lacks any required keyword,2coms,Business Process Automation (BPA) Engineer - Kolkata,https://www.naukri.com/job-listings-280826009364
-reco-270826925885,filter_title,title lacks any required keyword,Bajaj Finance,Deputy Manager - Risk Containment Unit,https://www.naukri.com/job-listings-270826925885
-reco-190626909166,filter_title,title lacks any required keyword,Gratitude India,Technical Support Executive,https://www.naukri.com/job-listings-190626909166
-reco-260826500578,filter_title,title lacks any required keyword,Mangalore Infotech Solutions,Manager - Software Engineering,https://www.naukri.com/job-listings-260826500578
-reco-270826021064,filter_description,"job lacks any required primary skill (python, fastapi, django, ai, artificial intelligence)",ORBIT & SKYLINE,Robotic Engineer,https://www.naukri.com/job-listings-270826021064
-reco-280826003712,filter_title,title lacks any required keyword,Leadtap Digi Solutions Coimbatore,DevOps Engineer (Linux & Infrastructure Focus),https://www.naukri.com/job-listings-280826003712
-reco-280826009584,filter_title,title lacks any required keyword,NEC Corporation,Azure Devops Engineer,https://www.naukri.com/job-listings-280826009584
-reco-270826017618,filter_title,title lacks any required keyword,Globallogic,DevOps Engineer,https://www.naukri.com/job-listings-270826017618
-reco-290526017397,filter_title,title contains blocked term 'golang',HCLTech,Golang Developer,https://www.naukri.com/job-listings-290526017397
-reco-260826011648,filter_title,title lacks any required keyword,ORBIT & SKYLINE,HMI Developer,https://www.naukri.com/job-listings-260826011648
-reco-260826031666,filter_title,title lacks any required keyword,Evigway Technologies,Software Development Engineer,https://www.naukri.com/job-listings-260826031666
-reco-260826503811,filter_description,"job lacks any required primary skill (python, fastapi, django, ai, artificial intelligence)",Money View,Software Development Engineer - 1,https://www.naukri.com/job-listings-260826503811
-reco-310826503326,filter_title,title lacks any required keyword,Accrete Infosolution Technologies,Data Scientist,https://www.naukri.com/job-listings-310826503326
-reco-260826500504,filter_title,title lacks any required keyword,Acenet,Full Stack Developer,https://www.naukri.com/job-listings-260826500504
-reco-250826502270,filter_freshness,posted 6d ago > max 5d,EY,CT-NITRO-Experimental AI Engineer,https://www.naukri.com/job-listings-250826502270
-reco-310826504553,filter_title,title lacks any required keyword,the Hostel Crowd,Back-end Developer,https://www.naukri.com/job-listings-310826504553
-reco-260826503982,filter_title,title lacks any required keyword,Ileaf Solutions,Full Stack Engineer,https://www.naukri.com/job-listings-260826503982
-reco-270826502186,filter_title,title contains blocked term 'golang',Aarushi Infotech,Golang Developer,https://www.naukri.com/job-listings-270826502186
-reco-270826501722,filter_title,title lacks any required keyword,Dhiwise,Full - stack Engineers,https://www.naukri.com/job-listings-270826501722
-reco-260826503969,filter_title,title lacks any required keyword,Super Intellisense,Full - Stack Developer,https://www.naukri.com/job-listings-260826503969
+cutshort-M7Hrqk53,filter_description,"job lacks any required primary skill (python, fastapi, django, ai, artificial intelligence)",Tarlan,Software Engineer,https://cutshort.io/job/Software-Engineer-Bengaluru-Bangalore-Tarlan-M7Hrqk53
+cutshort-Ahk5sCDT,filter_description,"job lacks any required primary skill (python, fastapi, django, ai, artificial intelligence)",Cutshort Lightning,Golang Backend Engineer,https://cutshort.io/job/Golang-Backend-Engineer-Cutshort-Lightning-Ahk5sCDT
+cutshort-hJrS1mWX,filter_title,title contains blocked term 'go',HyrHub,Backend SDE 1 - Python / Go,https://cutshort.io/job/Backend-SDE-1-Python-Go-Bengaluru-Bangalore-HyrHub-hJrS1mWX
+cutshort-l3fuzOWP,filter_title,title contains blocked term 'golang',Tradelab Technologies,Golang Developer(Trading Domain),https://cutshort.io/job/Golang-Developer-Trading-Domain-Bengaluru-Bangalore-Mumbai-Tradelab-Technologies-l3fuzOWP
+cutshort-fnQH2F6e,filter_description,"job lacks any required primary skill (python, fastapi, django, ai, artificial intelligence)",Right Hire,Agentic Platform QA Engineer,https://cutshort.io/job/Agentic-Platform-QA-Engineer-Bengaluru-Bangalore-Right-Hire-fnQH2F6e
+cutshort-28uXEWNi,filter_description,"job lacks any required primary skill (python, fastapi, django, ai, artificial intelligence)",Alpha,Software Development Engineer (Associate/Intern),https://cutshort.io/job/Software-Development-Engineer-Associate-Intern-Alpha-28uXEWNi
+cutshort-fm4SQJ0g,filter_description,"job lacks any required primary skill (python, fastapi, django, ai, artificial intelligence)",TalentOne HR Consulting LLP,Data Scientist- DSA,https://cutshort.io/job/Data-Scientist-DSA-Pune-TalentOne-HR-Consulting-LLP-fm4SQJ0g
+cutshort-J6lhZGAi,filter_description,"job lacks any required primary skill (python, fastapi, django, ai, artificial intelligence)",sisuni technology pvt Ltd.,UI/UX Designers & Developers,https://cutshort.io/job/UI-UX-Designers-Developers-sisuni-technology-pvt-Ltd--J6lhZGAi
+cutshort-UjST5wdm,filter_description,"job lacks any required primary skill (python, fastapi, django, ai, artificial intelligence)",Inflexion Analytics,Data Engineer,https://cutshort.io/job/Data-Engineer-Bengaluru-Bangalore-Inflexion-Analytics-UjST5wdm
+cutshort-i5ZRc5t6,filter_description,"job lacks any required primary skill (python, fastapi, django, ai, artificial intelligence)",Uplers,Java Developer,https://cutshort.io/job/Java-Developer-andheri-east-Mumbai-Uplers-i5ZRc5t6
+cutshort-6KrljgmA,filter_description,"job lacks any required primary skill (python, fastapi, django, ai, artificial intelligence)",Bharat Intelligence,SDE 2,https://cutshort.io/job/SDE-2-Bengaluru-Bangalore-Bharat-Intelligence-6KrljgmA
+cutshort-NMC60WDF,filter_description,"job lacks any required primary skill (python, fastapi, django, ai, artificial intelligence)",Timble Technologies,Devops Engineer,https://cutshort.io/job/Devops-Engineer-Delhi-Gurugram-Noida-Ghaziabad-Faridabad-Timble-Technologies-NMC60WDF
+cutshort-zAdXiwSn,filter_description,"job lacks any required primary skill (python, fastapi, django, ai, artificial intelligence)",Automate Accounts,Software Developer,https://cutshort.io/job/Software-Developer-Automate-Accounts-zAdXiwSn
+cutshort-eY3SuwLZ,filter_description,"job lacks any required primary skill (python, fastapi, django, ai, artificial intelligence)",Wissen Technology,Data Scientist - Graph & Analystics,https://cutshort.io/job/Data-Scientist-Graph-Analystics-Pune-Wissen-Technology-eY3SuwLZ
+cutshort-aSfk12ro,filter_title,title lacks any required keyword,Aiora llp,Forward Deploy Engineer,https://cutshort.io/job/Forward-Deploy-Engineer-Mumbai-Aiora-llp-aSfk12ro
+cutshort-0McaKidD,filter_description,"job lacks any required primary skill (python, fastapi, django, ai, artificial intelligence)",Incubyte,Data Craftsperson,https://cutshort.io/job/Data-Craftsperson-Incubyte-0McaKidD
+cutshort-mMe5qUUF,filter_description,"job lacks any required primary skill (python, fastapi, django, ai, artificial intelligence)",AmpereHour energy,Golang System Developer,https://cutshort.io/job/Golang-System-Developer-Pune-Mumbai-AmpereHour-energy-mMe5qUUF
+cutshort-XNg8uBi0,filter_description,"job lacks any required primary skill (python, fastapi, django, ai, artificial intelligence)",WINIT,Demand Forecasting - Data Scientist,https://cutshort.io/job/Demand-Forecasting-Data-Scientist-Hyderabad-WINIT-XNg8uBi0
+cutshort-QtpW40Gy,filter_description,"job lacks any required primary skill (python, fastapi, django, ai, artificial intelligence)",Uniprep,Software Developer,https://cutshort.io/job/Software-Developer-Uniprep-QtpW40Gy
+cutshort-sknJPf1W,filter_title,title lacks any required keyword,TestMu AI (Formely LambdaTest),Platform Engineer,https://cutshort.io/job/Platform-Engineer-Delhi-Gurugram-Noida-Ghaziabad-Faridabad-TestMu-AI-Formely-LambdaTest--sknJPf1W
+cutshort-RRDrceYp,filter_description,"job lacks any required primary skill (python, fastapi, django, ai, artificial intelligence)",OneFin,Integration Engineer,https://cutshort.io/job/Integration-Engineer-Bengaluru-Bangalore-OneFin-RRDrceYp
+cutshort-x0LLrisH,filter_description,"job lacks any required primary skill (python, fastapi, django, ai, artificial intelligence)",iDreamCareercom,Reasearch Analyst,https://cutshort.io/job/Reasearch-Analyst-Delhi-iDreamCareercom-x0LLrisH
+cutshort-Z2xcNOpf,filter_title,title lacks any required keyword,ONEPOS RETAIL SOLUTIONS PVT LTD,WPF Developer,https://cutshort.io/job/WPF-Developer-Bengaluru-Bangalore-Tirupati-ONEPOS-RETAIL-SOLUTIONS-PVT-LTD-Z2xcNOpf

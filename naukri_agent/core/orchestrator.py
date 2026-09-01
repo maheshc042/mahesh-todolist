@@ -69,6 +69,7 @@ from ..notify.notifier import build_notifier, format_run_summary
 from ..platforms.base import BaseJobPlatform
 from ..platforms.cutshort import CutshortPlatform
 from ..platforms.instahyre import InstahyrePlatform
+from ..platforms.linkedin import LinkedInPlatform
 from ..platforms.naukri_platform import NaukriPlatform
 from ..platforms.wellfound import WellfoundPlatform
 
@@ -128,6 +129,7 @@ class Orchestrator:
             bot_token=settings.telegram_bot_token,
             chat_id=settings.telegram_chat_id,
         )
+        self.headed: bool = not config.browser.headless
 
     # --------------------------------------------------------------- helpers
     @property
@@ -141,8 +143,6 @@ class Orchestrator:
             raise StopRun(
                 f"{self.consecutive_failures} consecutive failures — aborting to avoid a ban"
             )
-        if self.applied_today >= self.config.run.daily_application_cap:
-            raise StopRun(f"daily cap of {self.config.run.daily_application_cap} reached")
 
     async def _pace(self) -> None:
         """Randomised gap between applications; the single most important
@@ -251,26 +251,46 @@ class Orchestrator:
                             WellfoundPlatform(page, self.account, artifacts, self.policy)
                         )
 
+                    if self.config.platforms.linkedin:
+                        if answers is None:
+                            answers = await self._build_answer_engine(profiles[0])
+                        active_platforms.append(
+                            LinkedInPlatform(page, self.account, artifacts, answers, self.policy)
+                        )
 
 
-                # 2. Run the Multi-Platform Loop
+
                 for platform in active_platforms:
                     pause_reason = await self.repo.platform_pause_reason(
                         self.account_key,
                         platform.platform_name,
                     )
                     if pause_reason:
-                        raise FatalAgentError(
-                            f"{platform.platform_name} is paused: {pause_reason}"
-                        )
+                        if self.headed:
+                            log.warning("platform.paused_attempting_headed_recovery", platform=platform.platform_name, reason=pause_reason)
+                        else:
+                            raise FatalAgentError(
+                                f"{platform.platform_name} is paused: {pause_reason}"
+                            )
+
                     log.info("platform.start", platform=platform.platform_name)
                     t_login_0 = time.perf_counter()
                     authenticated = await platform.ensure_logged_in()
                     self.metrics.login_s += time.perf_counter() - t_login_0
                     if not authenticated:
+                        await self.repo.pause_platform(
+                            self.account_key,
+                            platform.platform_name,
+                            f"{platform.platform_name} authentication was not confirmed",
+                        )
                         raise FatalAgentError(
                             f"{platform.platform_name} authentication was not confirmed"
                         )
+
+                    # If previously paused, unpause upon confirmed authentication
+                    if pause_reason:
+                        await self.repo.resume_platform(self.account_key, platform.platform_name)
+                        log.info("platform.resumed_successfully", platform=platform.platform_name)
 
                     # Run Naukri profile refresh ONLY if it's the Naukri platform
                     if platform.platform_name == "naukri":
@@ -778,10 +798,13 @@ class Orchestrator:
     ) -> None:
         assert self.repo is not None
 
+        platform_name = getattr(platform, "platform_name", str(platform)).capitalize()
+
         if outcome.status == ApplicationStatus.APPLIED:
             self.stats.bump(profile.name, "applied")
             self.stats.applied_jobs.append(
                 {
+                    "platform": platform_name,
                     "title": job.title,
                     "company": job.company,
                     "url": job.url,
@@ -796,12 +819,13 @@ class Orchestrator:
         elif outcome.status == ApplicationStatus.FAILED:
             self.stats.bump(profile.name, "failed")
             self.consecutive_failures += 1
-            self.stats.errors.append(f"{job.title[:40]}: {outcome.detail[:120]}")
+            self.stats.errors.append(f"[{platform_name}] {job.title[:40]}: {outcome.detail[:120]}")
         elif outcome.status == ApplicationStatus.EXTERNAL or outcome.reason == SkipReason.EXTERNAL_APPLY:
             self.stats.bump(profile.name, "external")
             self.consecutive_failures = 0
             self.stats.external_jobs.append(
                 {
+                    "platform": platform_name,
                     "title": job.title,
                     "company": job.company,
                     "url": job.url,
@@ -834,7 +858,7 @@ class Orchestrator:
             self.run_id,
             outcome,
             account=self.account_key,
-            platform=platform.platform_name,
+            platform=getattr(platform, "platform_name", str(platform)),
         )
         task = asyncio.create_task(self._dispatch_recruiter_emails(job, profile, outcome))
         self._background_tasks.add(task)

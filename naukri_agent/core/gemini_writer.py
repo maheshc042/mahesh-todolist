@@ -47,8 +47,9 @@ class GeminiWriter:
         location = config.applicant_location or "India"
 
         prompt = f"""
-You are {name}, a Software Engineer based in {location}.
+You are {name}, a Software Engineer with 2.6+ years of hands-on experience based in {location}.
 Your core stack includes Python, FastAPI, React, Node.js, and AI/LLM integrations.
+You are available to join immediately (0-day notice period).
 
 Write a high-converting cold email to a recruiter for the "{role_name}" role at "{company_name or 'the company'}".
 
@@ -58,12 +59,14 @@ Job Description Context:
 STRICT INSTRUCTIONS FOR THE EMAIL:
 1. Ignore all HR boilerplate, benefits, and "Equal Opportunity" text in the description. Focus ONLY on the core technical requirements.
 2. Structure: 
-   - Hook: 1 sentence mentioning the specific role and company.
-   - Value: 1-2 sentences strictly highlighting ONE specific project or tech skill of mine that matches their exact core requirement.
-   - Call to Action: 1 short sentence mentioning the attached resume and asking for a brief chat.
+   - Salutation & Hook: Start directly with "Hi there," and 1 sentence mentioning the role.
+   - Value: 1-2 sentences strictly highlighting hands-on expertise matching their technical stack.
+   - Immediate Joiner: 1 sentence emphasizing immediate availability (0-day notice period).
+   - Call to Action: 1 short sentence mentioning the attached resume and welcoming a discussion.
+   - Sign off: "Best regards,\n{name}\n{location}"
 3. Keep the total email strictly under 120 words.
-4. Tone: Confident, direct, conversational, and human. DO NOT use overly formal words like "delve", "esteemed", "testament", or "utmost".
-5. Output ONLY the raw email body. No subject lines, no markdown, no placeholders like [Recruiter Name]. Start directly with "Hi there,".
+4. Tone: Confident, direct, professional, and human. DO NOT use overly formal words like "delve", "esteemed", "testament", or "utmost".
+5. Output ONLY the raw email body. No markdown formatting (no **bold**, no *italics*), no subject lines, no placeholders like [Recruiter Name] or [Company Name].
 """
 
         payload = {
@@ -107,7 +110,6 @@ STRICT INSTRUCTIONS FOR THE EMAIL:
                 method="POST",
             )
 
-
             try:
                 with urllib.request.urlopen(req, timeout=12) as response:
                     if response.status == 200:
@@ -118,8 +120,15 @@ STRICT INSTRUCTIONS FOR THE EMAIL:
                             if parts:
                                 text = parts[0].get("text", "").strip()
                                 if text:
-                                    log.info("gemini.email_generated", role=role_name, model=model, length=len(text))
-                                    return text
+                                    # Strip accidental markdown or Subject lines
+                                    clean_lines = []
+                                    for line in text.splitlines():
+                                        if line.lower().startswith("subject:"):
+                                            continue
+                                        clean_lines.append(line.replace("**", "").replace("`", ""))
+                                    cleaned_text = "\n".join(clean_lines).strip()
+                                    log.info("gemini.email_generated", role=role_name, model=model, length=len(cleaned_text))
+                                    return cleaned_text
             except urllib.error.HTTPError as exc:
                 log.debug("gemini.api_http_error", model=model, status=exc.code, reason=str(exc))
                 continue
