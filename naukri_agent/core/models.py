@@ -225,10 +225,20 @@ class RunStats:
         }
 
 
-def extract_description_metadata(description: str) -> tuple[list[str], list[str]]:
+def extract_description_metadata(description_or_job: str | Any) -> tuple[list[str], list[str]]:
     """Extracts form links (Google Forms, Typeform, etc.) and valid recruiter emails from job description text."""
+    if not description_or_job:
+        return [], []
+    if hasattr(description_or_job, "description"):
+        description = description_or_job.description or ""
+    elif isinstance(description_or_job, str):
+        description = description_or_job
+    else:
+        description = str(description_or_job)
+
     if not description:
         return [], []
+
     form_links = re.findall(
         r"(https?://(?:forms\.gle|docs\.google\.com/forms|forms\.office\.com|typeform\.com)[^\s\"'>]+)",
         description,

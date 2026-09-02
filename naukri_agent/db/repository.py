@@ -9,7 +9,9 @@ cold-start cost near zero and makes the queries auditable.
 
 from __future__ import annotations
 
+import asyncio
 import json
+import socket
 from datetime import datetime, timezone
 from difflib import SequenceMatcher
 from typing import Any
@@ -37,6 +39,39 @@ class Repository:
     ) -> None:
         self.pool = pool
         self.session_cipher = session_cipher
+
+    async def _execute_with_retry(self, query: str, *args: Any, retries: int = 3) -> Any:
+        for attempt in range(1, retries + 1):
+            try:
+                return await self.pool.execute(query, *args)
+            except (OSError, socket.gaierror, asyncpg.PostgresError, asyncpg.InterfaceError) as exc:
+                if attempt == retries:
+                    log.warning("db.execute_failed_after_retries", error=str(exc), attempt=attempt)
+                    raise
+                log.warning("db.execute_retry", attempt=attempt, error=str(exc))
+                await asyncio.sleep(0.5 * attempt)
+
+    async def _fetchrow_with_retry(self, query: str, *args: Any, retries: int = 3) -> Any:
+        for attempt in range(1, retries + 1):
+            try:
+                return await self.pool.fetchrow(query, *args)
+            except (OSError, socket.gaierror, asyncpg.PostgresError, asyncpg.InterfaceError) as exc:
+                if attempt == retries:
+                    log.warning("db.fetchrow_failed_after_retries", error=str(exc), attempt=attempt)
+                    raise
+                log.warning("db.fetchrow_retry", attempt=attempt, error=str(exc))
+                await asyncio.sleep(0.5 * attempt)
+
+    async def _fetch_with_retry(self, query: str, *args: Any, retries: int = 3) -> Any:
+        for attempt in range(1, retries + 1):
+            try:
+                return await self.pool.fetch(query, *args)
+            except (OSError, socket.gaierror, asyncpg.PostgresError, asyncpg.InterfaceError) as exc:
+                if attempt == retries:
+                    log.warning("db.fetch_failed_after_retries", error=str(exc), attempt=attempt)
+                    raise
+                log.warning("db.fetch_retry", attempt=attempt, error=str(exc))
+                await asyncio.sleep(0.5 * attempt)
 
     @classmethod
     async def create(cls) -> "Repository":
@@ -121,46 +156,47 @@ class Repository:
                 account,
             )
         except Exception as exc:  # pragma: no cover - telemetry must not raise
-            log.warning("db.event_log_failed", error=str(exc), event=event)
-
-    # ------------------------------------------------------------------ jobs
+            log.warning("db.event_log_failed", error=str(exc), event=event)    # ------------------------------------------------------------------ jobs
     async def upsert_job(self, job: Job, platform: str | Any = "naukri") -> None:
-        platform_str = getattr(platform, "platform_name", str(platform))
-        row = job.to_row()
-        await self.pool.execute(
-            """
-            INSERT INTO jobs (
-                job_id, title, company, url, location, experience_text, salary_text,
-                posted_text, rating, tags, min_experience, max_experience,
-                min_salary_lpa, posted_days_ago, is_walkin, source_keyword, platform
+        try:
+            platform_str = getattr(platform, "platform_name", str(platform))
+            row = job.to_row()
+            await self._execute_with_retry(
+                """
+                INSERT INTO jobs (
+                    job_id, title, company, url, location, experience_text, salary_text,
+                    posted_text, rating, tags, min_experience, max_experience,
+                    min_salary_lpa, posted_days_ago, is_walkin, source_keyword, platform
+                )
+                VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)
+                ON CONFLICT (job_id, platform) DO UPDATE
+                   SET last_seen_at = now(),
+                       salary_text = EXCLUDED.salary_text,
+                       posted_text = EXCLUDED.posted_text,
+                       posted_days_ago = EXCLUDED.posted_days_ago,
+                       rating = COALESCE(EXCLUDED.rating, jobs.rating),
+                       platform = EXCLUDED.platform
+                """,
+                row["job_id"],
+                row["title"],
+                row["company"],
+                row["url"],
+                row["location"],
+                row["experience_text"],
+                row["salary_text"],
+                row["posted_text"],
+                row["rating"],
+                row["tags"],
+                row["min_experience"],
+                row["max_experience"],
+                row["min_salary_lpa"],
+                row["posted_days_ago"],
+                row["is_walkin"],
+                row["source_keyword"],
+                platform_str,
             )
-            VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)
-            ON CONFLICT (job_id, platform) DO UPDATE
-               SET last_seen_at = now(),
-                   salary_text = EXCLUDED.salary_text,
-                   posted_text = EXCLUDED.posted_text,
-                   posted_days_ago = EXCLUDED.posted_days_ago,
-                   rating = COALESCE(EXCLUDED.rating, jobs.rating),
-                   platform = EXCLUDED.platform
-            """,
-            row["job_id"],
-            row["title"],
-            row["company"],
-            row["url"],
-            row["location"],
-            row["experience_text"],
-            row["salary_text"],
-            row["posted_text"],
-            row["rating"],
-            row["tags"],
-            row["min_experience"],
-            row["max_experience"],
-            row["min_salary_lpa"],
-            row["posted_days_ago"],
-            row["is_walkin"],
-            row["source_keyword"],
-            platform_str,
-        )
+        except Exception as exc:
+            log.warning("db.upsert_job_failed", error=str(exc), job_id=job.job_id)
 
     async def known_job_ids(
         self,
@@ -170,29 +206,33 @@ class Repository:
         platform: str = "naukri",
     ) -> set[str]:
         """Jobs already decided for this account and platform inside the window."""
-        rows = await self.pool.fetch(
-            """
-            SELECT a.job_id
-              FROM applications a
-             WHERE a.status <> 'failed'
-               AND a.platform = $2
-               AND a.account = $3
-               AND a.created_at > now() - ($1 || ' days')::interval
-               AND NOT (
-                     a.status = 'needs_review'
-                 AND NOT EXISTS (
-                          SELECT 1
-                            FROM question_review q
-                           WHERE q.job_id = a.job_id
-                             AND q.resolved = FALSE
+        try:
+            rows = await self._fetch_with_retry(
+                """
+                SELECT a.job_id
+                  FROM applications a
+                 WHERE a.status <> 'failed'
+                   AND a.platform = $2
+                   AND a.account = $3
+                   AND a.created_at > now() - ($1 || ' days')::interval
+                   AND NOT (
+                         a.status = 'needs_review'
+                     AND NOT EXISTS (
+                              SELECT 1
+                                FROM question_review q
+                               WHERE q.job_id = a.job_id
+                                 AND q.resolved = FALSE
+                          )
                       )
-                  )
-            """,
-            str(window_days),
-            platform,
-            account,
-        )
-        return {row["job_id"] for row in rows}
+                """,
+                str(window_days),
+                platform,
+                account,
+            )
+            return {row["job_id"] for row in rows}
+        except Exception as exc:
+            log.warning("db.known_job_ids_failed", error=str(exc))
+            return set()
 
     async def filter_cross_platform_duplicates(
         self,
@@ -204,18 +244,22 @@ class Repository:
         if not jobs:
             return []
 
-        rows = await self.pool.fetch(
-            """
-            SELECT j.job_id, j.company, j.title, a.platform
-              FROM applications a
-              JOIN jobs j ON j.job_id = a.job_id AND j.platform = a.platform
-             WHERE a.status IN ('applied', 'needs_review', 'external', 'already_applied')
-               AND a.account = $2
-               AND a.created_at > now() - ($1 || ' days')::interval
-            """,
-            str(window_days),
-            account,
-        )
+        try:
+            rows = await self._fetch_with_retry(
+                """
+                SELECT j.job_id, j.company, j.title, a.platform
+                  FROM applications a
+                  JOIN jobs j ON j.job_id = a.job_id AND j.platform = a.platform
+                 WHERE a.status IN ('applied', 'needs_review', 'external', 'already_applied')
+                   AND a.account = $2
+                   AND a.created_at > now() - ($1 || ' days')::interval
+                """,
+                str(window_days),
+                account,
+            )
+        except Exception as exc:
+            log.warning("db.filter_cross_platform_duplicates_failed", error=str(exc))
+            return jobs
 
         recent = []
         for row in rows:
@@ -246,18 +290,22 @@ class Repository:
         """
         Applications submitted TODAY by THIS account (Asia/Kolkata calendar day).
         """
-        row = await self.pool.fetchrow(
-            """
-            SELECT count(*) AS n
-              FROM applications
-             WHERE submitted_at IS NOT NULL
-               AND account = $1
-               AND (submitted_at AT TIME ZONE 'Asia/Kolkata')::date
-                   = (now() AT TIME ZONE 'Asia/Kolkata')::date
-            """,
-            account,
-        )
-        return int(row["n"] or 0)
+        try:
+            row = await self._fetchrow_with_retry(
+                """
+                SELECT count(*) AS n
+                  FROM applications
+                 WHERE submitted_at IS NOT NULL
+                   AND account = $1
+                   AND (submitted_at AT TIME ZONE 'Asia/Kolkata')::date
+                       = (now() AT TIME ZONE 'Asia/Kolkata')::date
+                """,
+                account,
+            )
+            return int(row["n"] or 0) if row else 0
+        except Exception as exc:
+            log.warning("db.applied_today_failed", error=str(exc))
+            return 0
 
     async def record_outcome(
         self,
@@ -268,45 +316,48 @@ class Repository:
         account: str = "primary",
         platform: str | Any = "naukri",
     ) -> None:
-        platform_str = getattr(platform, "platform_name", str(platform))
-        await self.upsert_job(job, platform=platform_str)
+        try:
+            platform_str = getattr(platform, "platform_name", str(platform))
+            await self.upsert_job(job, platform=platform_str)
 
-        await self.pool.execute(
-            """
-            INSERT INTO applications (
-                job_id, run_id, profile, status, reason, detail, attempts,
-                questions_answered, screenshot_path, account, platform,
-                confirmation_type, confirmation_evidence, submitted_at
+            await self._execute_with_retry(
+                """
+                INSERT INTO applications (
+                    job_id, run_id, profile, status, reason, detail, attempts,
+                    questions_answered, screenshot_path, account, platform,
+                    confirmation_type, confirmation_evidence, submitted_at
+                )
+                VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,
+                        CASE WHEN $4 = 'applied' THEN now() ELSE NULL END)
+                ON CONFLICT (job_id, profile, platform, account) DO UPDATE
+                   SET status = EXCLUDED.status,
+                       reason = EXCLUDED.reason,
+                       detail = EXCLUDED.detail,
+                       run_id = EXCLUDED.run_id,
+                       account = EXCLUDED.account,
+                       attempts = applications.attempts + EXCLUDED.attempts,
+                       questions_answered = EXCLUDED.questions_answered,
+                       screenshot_path = COALESCE(EXCLUDED.screenshot_path, applications.screenshot_path),
+                       confirmation_type = COALESCE(EXCLUDED.confirmation_type, applications.confirmation_type),
+                       confirmation_evidence = COALESCE(EXCLUDED.confirmation_evidence, applications.confirmation_evidence),
+                       submitted_at = COALESCE(applications.submitted_at, EXCLUDED.submitted_at)
+                """,
+                job.job_id,
+                run_id,
+                profile,
+                outcome.status.value,
+                outcome.reason.value if outcome.reason else None,
+                outcome.detail[:2000] if outcome.detail else None,
+                outcome.attempts,
+                outcome.questions_answered,
+                outcome.screenshot_path,
+                account,
+                platform_str,
+                outcome.confirmation_type,
+                outcome.confirmation_evidence[:500] if outcome.confirmation_evidence else None,
             )
-            VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,
-                    CASE WHEN $4 = 'applied' THEN now() ELSE NULL END)
-            ON CONFLICT (job_id, profile, platform, account) DO UPDATE
-               SET status = EXCLUDED.status,
-                   reason = EXCLUDED.reason,
-                   detail = EXCLUDED.detail,
-                   run_id = EXCLUDED.run_id,
-                   account = EXCLUDED.account,
-                   attempts = applications.attempts + EXCLUDED.attempts,
-                   questions_answered = EXCLUDED.questions_answered,
-                   screenshot_path = COALESCE(EXCLUDED.screenshot_path, applications.screenshot_path),
-                   confirmation_type = COALESCE(EXCLUDED.confirmation_type, applications.confirmation_type),
-                   confirmation_evidence = COALESCE(EXCLUDED.confirmation_evidence, applications.confirmation_evidence),
-                   submitted_at = COALESCE(applications.submitted_at, EXCLUDED.submitted_at)
-            """,
-            job.job_id,
-            run_id,
-            profile,
-            outcome.status.value,
-            outcome.reason.value if outcome.reason else None,
-            outcome.detail[:2000] if outcome.detail else None,
-            outcome.attempts,
-            outcome.questions_answered,
-            outcome.screenshot_path,
-            account,
-            platform_str,
-            outcome.confirmation_type,
-            outcome.confirmation_evidence[:500] if outcome.confirmation_evidence else None,
-        )
+        except Exception as exc:
+            log.warning("db.record_outcome_failed", error=str(exc), job_id=job.job_id)
 
 
     async def recent_applications(self, limit: int = 50) -> list[dict[str, Any]]:

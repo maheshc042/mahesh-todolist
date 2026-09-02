@@ -4,6 +4,7 @@ Cutshort Platform Implementation (Direct-Action & Inbox Message Handler).
 from __future__ import annotations
 
 import re
+from pathlib import Path
 from typing import Callable
 
 from playwright.async_api import Page
@@ -132,23 +133,9 @@ class CutshortChatbot:
         for _ in range(self.max_questions):
             await human_pause(1200, 2000)
 
-            # Check if chat is already complete
-            if await first_visible(
-                self.page, [
-                    "text=Application sent",
-                    "text=successfully applied",
-                    "text=Employer will review",
-                    "text=Applied successfully",
-                    "text=Your response has been recorded",
-                ],
-                timeout_ms=1000
-            ):
-                return True, answered, ""
-
             # Phase 1: Cutshort Form-based Fieldset Questionnaires (Verified in DOM)
             fieldsets = await self.page.locator("fieldset").all()
             if fieldsets:
-                form_answered = False
                 for fs in fieldsets:
                     if not await fs.is_visible():
                         continue
@@ -157,7 +144,9 @@ class CutshortChatbot:
                     if not q_text:
                         continue
 
-                    options = await fs.locator("div[tabindex='0'], div[role='radio'], label, button").all()
+                    options = await fs.locator("div[tabindex='0']").all()
+                    if not options:
+                        options = await fs.locator("div[role='radio'], label, button").all()
                     opt_texts = [(await safe_text(opt)).strip() for opt in options if (await safe_text(opt)).strip()]
 
                     resolved = self.answers.resolve(ScreeningQuestion(text=q_text, kind="radio", options=opt_texts))
@@ -167,33 +156,63 @@ class CutshortChatbot:
                         opt_text = (await safe_text(opt)).strip()
                         if target_val and (self._match_chip(opt_text, target_val) or opt_text.lower() == target_val.lower()):
                             try:
-                                await opt.click()
-                                await human_pause(300, 600)
-                                answered += 1
-                                form_answered = True
-                                break
+                                await opt.scroll_into_view_if_needed()
+                                await opt.click(force=True, timeout=1000)
                             except Exception:
-                                pass
+                                try:
+                                    await opt.evaluate("el => el.click()")
+                                except Exception:
+                                    pass
+                            log.info("cutshort.chatbot.answered_field", question=q_text[:70], selected=opt_text[:50])
+                            await human_pause(200, 400)
+                            answered += 1
+                            break
 
-                if form_answered:
-                    submit_btn = await first_visible(
-                        self.page,
-                        [
-                            "form button[type='submit']",
-                            "button:has-text('Submit')",
-                            "button:has-text('Send response')",
-                            "button:has-text('Confirm')",
-                            "button[type='submit']",
-                        ],
-                        timeout_ms=1500,
-                    )
-                    if submit_btn:
+                submit_btn = await first_visible(
+                    self.page,
+                    [
+                        "form button[type='submit']",
+                        "form button:has-text('Submit')",
+                        "button:has-text('Submit')",
+                        "button:has-text('Send response')",
+                        "button:has-text('Confirm')",
+                        "button[type='submit']",
+                    ],
+                    timeout_ms=2000,
+                )
+                if submit_btn:
+                    try:
+                        await human_pause(800, 1200)
                         try:
-                            await submit_btn.click()
-                            await human_pause(1500, 2500)
-                            return True, answered, ""
+                            await submit_btn.scroll_into_view_if_needed()
+                            await submit_btn.click(force=True, timeout=1500)
                         except Exception:
                             pass
+                        try:
+                            await submit_btn.evaluate("el => el.click()")
+                        except Exception:
+                            pass
+                        try:
+                            await self.page.evaluate("() => { const f = document.querySelector('form'); if(f) f.requestSubmit(); }")
+                        except Exception:
+                            pass
+                        log.info("cutshort.chatbot.submitted_form", answered=answered)
+                        await human_pause(2000, 3000)
+                        return True, max(answered, 1), ""
+                    except Exception as exc:
+                        log.error("cutshort.chatbot.submit_failed", error=str(exc))
+
+            # Check if chat is already complete
+            if await first_visible(
+                self.page, [
+                    "text=Application sent",
+                    "text=successfully applied",
+                    "text=Applied successfully",
+                    "text=Your response has been recorded",
+                ],
+                timeout_ms=1000
+            ):
+                return True, answered, ""
 
             # Phase 2: Check for Quick-Reply Chips / Buttons on the screen
             chips = await self.page.locator(
@@ -672,13 +691,14 @@ class CutshortPlatform(BaseJobPlatform):
             specific_achievement = "reliable, production-grade applications"
 
         applicant_name = AgentConfig.load().applicant_name or "Mahesh"
+        exp_years_str = str(prof.experience_years) if (prof and prof.experience_years) else "2.5"
 
         textarea = await first_visible(self.page, ["textarea", "input[type='text'][placeholder*='note' i]"], timeout_ms=3000)
         if textarea:
             pitch = (
                 f"Hi {recruiter_name},\n\n"
                 f"I'm applying for the {actual_title} role at {actual_company}. "
-                f"With 2.6+ years of hands-on experience in {key_tech_stack}, I specialize in building {core_specialty}—recently delivering {specific_achievement}.\n\n"
+                f"With {exp_years_str}+ years of hands-on experience in {key_tech_stack}, I specialize in building {core_specialty}—recently delivering {specific_achievement}.\n\n"
                 f"My background matches the tech stack you're looking for, and as an immediate joiner (0-day notice), I can hit the ground running with minimal ramp-up time.\n\n"
                 f"Looking forward to discussing how I can contribute to the team!\n\n"
                 f"Best,\n"
@@ -887,10 +907,31 @@ class CutshortPlatform(BaseJobPlatform):
                 except Exception:
                     continue
                 txt = (await safe_text(row)).strip()
-                key = " ".join(txt.split())[:160]
+                clean_txt = re.sub(r"\b\d+\s+(?:seconds?|minutes?|hours?|days?|weeks?|months?)\s+ago\b", "", txt, flags=re.IGNORECASE)
+                key = " ".join(clean_txt.split())[:160]
                 if key and key not in processed:
                     target = row
                     break
+
+            if target is None:
+                try:
+                    await self.page.evaluate("window.scrollBy(0, 600)")
+                    await human_pause(800, 1500)
+                    rows = self.page.locator("#tabpanel-awaiting div[role='button']")
+                    if await rows.count() == 0:
+                        rows = self.page.locator("div[role='button']").filter(has_text="[Questionnaire]")
+                    for i in range(await rows.count()):
+                        row = rows.nth(i)
+                        if not await row.is_visible():
+                            continue
+                        txt = (await safe_text(row)).strip()
+                        clean_txt = re.sub(r"\b\d+\s+(?:seconds?|minutes?|hours?|days?|weeks?|months?)\s+ago\b", "", txt, flags=re.IGNORECASE)
+                        key = " ".join(clean_txt.split())[:160]
+                        if key and key not in processed:
+                            target = row
+                            break
+                except Exception:
+                    pass
 
             if target is None:
                 break
@@ -936,7 +977,8 @@ class CutshortPlatform(BaseJobPlatform):
                 txt = " ".join((await safe_text(el)).split())
                 if len(txt) < 10 or txt.lower() in ("messages", "inbox"):
                     continue
-                key = txt[:160]
+                clean_txt = re.sub(r"\b\d+\s+(?:seconds?|minutes?|hours?|days?|weeks?|months?)\s+ago\b", "", txt, flags=re.IGNORECASE)
+                key = clean_txt[:160]
                 if key not in processed:
                     candidates.append((el, key))
 

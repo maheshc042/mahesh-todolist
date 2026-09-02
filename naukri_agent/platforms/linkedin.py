@@ -1,21 +1,24 @@
 """
 LinkedIn Easy Apply Platform Implementation.
 
-Automates:
-- Logging in and reusing stored session cookies.
-- Searching for fresh Easy Apply job postings (f_AL=true, f_TPR=r86400).
-- Scraping job listings, titles, companies, locations, and descriptions.
-- Multi-step Easy Apply modal handling (contact info, resume attachment, screening questions, review, and submission).
+Features:
+- Exact 30 Target Roles Boolean Query with Entry & Associate Levels (f_E=2,3) and 24h Freshness (f_TPR=r86400).
+- High-Performance In-Page Split-View Navigation (zero slow full-page reloads).
+- Deep Suitability & Spam/Unpaid/Fellowship Filtering.
+- State-Aware Resume Routing (CV_Mahesh_Chitakoti_2026 for AI/Python vs CV_Mahesh_Chitakoti_2026_1_ for Full Stack/QA/DevOps).
+- Robust Question Answering via AnswerEngine (2.5 yrs exp, 0-day notice, 4/7 LPA CTC, India +91, phone 9481777227).
+- Automatic Job Search Safety Reminder Handling (Continue/Acknowledge).
+- Clean Multi-Step Submission & Modal Confirmation Dismissal.
 """
 from __future__ import annotations
 
 import asyncio
 import re
-import time
+import urllib.parse
 from pathlib import Path
 from typing import Any, Callable
 
-from playwright.async_api import Page
+from playwright.async_api import Locator, Page
 
 from ..browser.artifacts import ArtifactStore
 from ..browser.resilience import (
@@ -33,6 +36,7 @@ from ..core.models import (
     ApplyOutcome,
     FilterDecision,
     Job,
+    ScreeningQuestion,
     SkipReason,
     extract_description_metadata,
 )
@@ -41,6 +45,54 @@ from ..logging_setup import get_logger
 from .base import BaseJobPlatform
 
 log = get_logger(__name__)
+
+# All 33 Target Roles
+TARGET_ROLES = [
+    "Technical Support Engineer",
+    "Technical Support Specialist",
+    "Application Support Engineer",
+    "Production Support Engineer",
+    "IT Support Engineer",
+    "Application Support Specialist",
+    "Support Engineer",
+    "L2 Support Engineer",
+    "QA Engineer",
+    "Quality Assurance Engineer",
+    "Software Test Engineer",
+    "Test Automation Engineer",
+    "Automation Test Engineer",
+    "SDET",
+    "Software Development Engineer in Test",
+    "QA Automation Engineer",
+    "Python Developer",
+    "Backend Developer",
+    "Back End Developer",
+    "Software Engineer",
+    "Software Developer",
+    "Full Stack Developer",
+    "DevOps Engineer",
+    "Cloud Engineer",
+    "Cloud Support Engineer",
+    "AWS Engineer",
+    "Cloud Operations Engineer",
+    "Site Reliability Engineer",
+    "SRE",
+    "AI Engineer",
+    "AI Developer",
+    "Generative AI Engineer",
+    "GenAI Engineer",
+    "ML Engineer",
+]
+
+# Exact 30-Role Boolean Query
+FULL_TARGET_QUERY = (
+    '("Technical Support Engineer" OR "Application Support Engineer" OR "Production Support Engineer" OR "Support Engineer" OR '
+    '"QA Engineer" OR "Quality Assurance Engineer" OR "Software Test Engineer" OR "Test Automation Engineer" OR "Automation Test Engineer" OR '
+    '"SDET" OR "Software Development Engineer in Test" OR "QA Automation Engineer" OR "Python Developer" OR "Backend Developer" OR '
+    '"Back End Developer" OR "Software Engineer" OR "Software Developer" OR "Full Stack Developer" OR "DevOps Engineer" OR '
+    '"Cloud Engineer" OR "Cloud Support Engineer" OR "AWS Engineer" OR "Cloud Operations Engineer" OR "Site Reliability Engineer" OR '
+    '"SRE" OR "AI Engineer" OR "AI Developer" OR "Generative AI Engineer" OR "GenAI Engineer" OR "ML Engineer")'
+)
 
 
 class LinkedInPlatform(BaseJobPlatform):
@@ -51,11 +103,15 @@ class LinkedInPlatform(BaseJobPlatform):
         artifacts: ArtifactStore,
         answers: AnswerEngine,
         policy: RunPolicy,
+        location: str = "India",
+        days: int = 1,
     ):
         super().__init__(page, account.key, policy)
         self.account = account
         self.artifacts = artifacts
         self.answers = answers
+        self.location = location
+        self.days = days
 
     @property
     def platform_name(self) -> str:
@@ -79,18 +135,19 @@ class LinkedInPlatform(BaseJobPlatform):
                 ".feed-identity-module",
                 "button[aria-label*='Account']",
             ],
+            timeout_ms=5000,
         ):
             log.info("linkedin.auth.session_reused")
             return True
 
         log.warning(
             "linkedin.auth.manual_login_required",
-            msg="Please log in to LinkedIn in the browser window. Waiting up to 60 seconds...",
+            msg="Please log in to LinkedIn in the browser window. Waiting up to 90 seconds...",
         )
         try:
             await self.page.wait_for_selector(
                 "nav.global-nav, img.global-nav__me-photo, a[href*='/in/'], .feed-identity-module",
-                timeout=60000,
+                timeout=90000,
             )
             log.info("linkedin.auth.manual_login_success")
             return True
@@ -99,118 +156,174 @@ class LinkedInPlatform(BaseJobPlatform):
             return False
 
     def _get_search_url(self, profile: JobProfile) -> str:
-        """Constructs target Easy Apply search URL."""
-        if "ai" in profile.name.lower() or "python" in profile.name.lower():
-            keywords = "AI Engineer OR Python Developer OR GenAI OR LLM"
-        else:
-            keywords = "Full Stack Developer OR React Developer OR MERN Stack"
+        """Constructs target Easy Apply search URL with 24h freshness, Entry & Associate levels."""
+        tpr_seconds = self.days * 86400
+        encoded_keywords = urllib.parse.quote(FULL_TARGET_QUERY)
+        encoded_loc = urllib.parse.quote(self.location)
 
-        encoded = keywords.replace(" ", "%20").replace('"', "%22")
+        # f_E=2,3 filters for Entry level (2) and Associate (3)
         return (
             f"https://www.linkedin.com/jobs/search/?"
-            f"keywords={encoded}&f_AL=true&f_TPR=r86400&location=India&sortBy=DD"
+            f"keywords={encoded_keywords}&location={encoded_loc}"
+            f"&f_AL=true&f_TPR=r{tpr_seconds}&f_E=2%2C3&sortBy=DD"
         )
 
+    def evaluate_job_suitability(self, job: Job) -> tuple[bool, str, int]:
+        """Deep suitability analysis across all 33 target engineering & support tracks."""
+        desc = (job.description or "").lower()
+        title = (job.title or "").lower()
+        full_text = f"{title} {desc}"
+
+        score = 75
+
+        # 1. Exact or Partial Target Role Match in Title
+        matched_target_role = None
+        for role in TARGET_ROLES:
+            if role.lower() in title:
+                matched_target_role = role
+                break
+
+        if matched_target_role:
+            score += 20
+        else:
+            if any(w in title for w in ["developer", "engineer", "specialist", "sdet", "tester", "support", "sre", "qa"]):
+                score += 10
+            else:
+                score -= 10
+
+        # 2. Skip Unpaid / Fellowship / Survey spam postings immediately
+        if any(w in title or w in desc for w in ["unpaid", "fellowship", "volunteer", "no salary", "commission only", "pollfish", "survey link"]):
+            return False, "Unpaid / Fellowship / Survey spam posting skipped", 0
+
+        # 3. Seniority / Experience Blocker Check (skips strictly 7+, 8+, 10+ years Principal/Architect/Director)
+        senior_match = re.search(r"\b(7|8|9|10|12|15)\+?\s*(?:-\s*\d+)?\s*(?:years|yrs)\b", desc)
+        if senior_match and any(w in title for w in ["principal", "staff", "architect", "director", "head of", "engineering manager"]):
+            return False, f"Requires senior experience ({senior_match.group(0)})", 20
+
+        # 4. Technical Skills Recognition Across Tracks
+        track_keywords = [
+            "python", "fastapi", "django", "llm", "genai", "generative ai", "langchain", "machine learning", "rag", "pytorch", "agent", "nlp", "chatbot",
+            "react", "node", "javascript", "typescript", "full stack", "fullstack", "frontend", "backend", "next.js", "express", "postgresql", "mongodb", "rest api",
+            "qa", "testing", "automation", "playwright", "selenium", "pytest", "sdet", "test automation", "manual testing", "api testing",
+            "aws", "cloud", "docker", "kubernetes", "linux", "devops", "sre", "ci/cd", "terraform",
+            "technical support", "application support", "production support", "it support", "l2 support", "troubleshooting", "jira", "incident management"
+        ]
+
+        matched_skills = [k for k in track_keywords if k in full_text]
+        if matched_skills:
+            score += min(len(matched_skills) * 2, 20)
+
+        # 5. Location / Remote compatibility
+        loc_str = (job.location or "").lower()
+        if any(c in loc_str or c in full_text for c in ["india", "bengaluru", "bangalore", "hyderabad", "mumbai", "pune", "delhi", "noida", "gurgaon", "chennai", "remote", "hybrid", "work from home"]):
+            score += 5
+        elif any(c in loc_str for c in ["united states", "usa", "uk", "canada", "germany", "australia"]) and "remote" not in loc_str:
+            return False, f"Foreign on-site location ({job.location})", 10
+
+        is_suitable = score >= 60
+        match_info = f"Matched '{matched_target_role}'" if matched_target_role else "Skills aligned"
+        reason = f"{match_info} (Score: {score}/100)" if is_suitable else f"Low relevance score ({score}/100)"
+        return is_suitable, reason, score
+
     async def fetch_jobs(self, profile: JobProfile, exclude_job_ids: set[str]) -> list[Job]:
-        """Fetches fresh Easy Apply jobs from LinkedIn job search."""
+        """Fetches fresh Easy Apply jobs from LinkedIn job search with left-pane scrolling."""
         search_url = self._get_search_url(profile)
         log.info("linkedin.fetch.start", profile=profile.name, url=search_url)
 
         try:
-            await self.page.goto(search_url, wait_until="domcontentloaded", timeout=30000)
-            await human_pause(2500, 4500)
+            await self.page.goto(search_url, wait_until="domcontentloaded", timeout=35000)
+            await human_pause(3000, 5000)
         except Exception as exc:
             log.warning("linkedin.fetch.goto_error", error=str(exc))
             return []
 
-        # Scroll the jobs list pane to trigger dynamic loading
-        for _ in range(6):
-            await self.page.mouse.wheel(0, 800)
-            await human_pause(1000, 1800)
+        try:
+            await self.page.wait_for_selector(
+                ".jobs-search-results-list, .scaffold-layout__list, li.jobs-search-results__list-item, div.job-card-container",
+                timeout=12000,
+            )
+        except Exception:
+            pass
 
-        card_selectors = [
-            "li.jobs-search-results__list-item",
-            "div.job-card-container",
-            "li[data-occludable-job-id]",
-            "div[data-job-id]",
-        ]
-
-        cards = await self.page.locator(
-            ", ".join(card_selectors)
-        ).all()
-
-        log.info("linkedin.fetch.cards_found", count=len(cards))
-        jobs: list[Job] = []
-
-        for card in cards:
+        # Scroll the left listings pane
+        list_pane = await first_visible(
+            self.page,
+            [
+                ".jobs-search-results-list",
+                ".scaffold-layout__list",
+                "div[class*='jobs-search-results-list']",
+                ".jobs-search__results-list",
+            ],
+            timeout_ms=3000,
+        )
+        if list_pane:
             try:
-                title_el = await first_visible(
-                    card,
-                    [
-                        "a.job-card-list__title",
-                        ".job-card-container__link",
-                        "a[href*='/jobs/view/']",
-                        "strong",
-                    ],
-                )
-                company_el = await first_visible(
-                    card,
-                    [
-                        ".job-card-container__primary-description",
-                        ".artdeco-entity-lockup__subtitle",
-                        "span.job-card-container__publisher",
-                    ],
-                )
-                loc_el = await first_visible(
-                    card,
-                    [
-                        ".job-card-container__metadata-item",
-                        ".artdeco-entity-lockup__caption",
-                    ],
-                )
+                await list_pane.hover()
+            except Exception:
+                pass
+
+        for _ in range(6):
+            try:
+                await self.page.mouse.wheel(0, 700)
+                await human_pause(600, 1200)
+            except Exception:
+                pass
+
+        card_locators = self.page.locator(
+            ".jobs-search-results-list li, .scaffold-layout__list-container li, li.jobs-search-results__list-item, div.job-card-container, div[data-job-id]"
+        )
+        total_cards = await card_locators.count()
+        log.info("linkedin.fetch.cards_found", count=total_cards)
+
+        jobs: list[Job] = []
+        seen_ids: set[str] = set()
+
+        for idx in range(total_cards):
+            try:
+                card = card_locators.nth(idx)
+                if not await card.is_visible():
+                    await card.scroll_into_view_if_needed()
+                    await human_pause(150, 300)
+                if not await card.is_visible():
+                    continue
+
+                title_el = card.locator("a.job-card-list__title, a[href*='/jobs/view/'], strong").first
+                company_el = card.locator(".job-card-container__primary-description, .artdeco-entity-lockup__subtitle, span.job-card-container__publisher, .job-card-container__company-name").first
+                loc_el = card.locator(".job-card-container__metadata-item, .artdeco-entity-lockup__caption").first
 
                 title = (await safe_text(title_el)).strip()
                 company = (await safe_text(company_el)).strip()
                 location = (await safe_text(loc_el)).strip()
 
-                if not title:
+                if not title or len(title) < 3:
                     continue
 
-                url = ""
-                if title_el:
-                    url = (await title_el.get_attribute("href") or "").split("?")[0]
-                if url and not url.startswith("http"):
-                    url = f"https://www.linkedin.com{url}"
+                card_url = ""
+                if await title_el.count() > 0:
+                    card_url = (await title_el.get_attribute("href") or "").split("?")[0]
+                if card_url and not card_url.startswith("http"):
+                    card_url = f"https://www.linkedin.com{card_url}"
 
-                # Extract Job ID
-                card_id_attr = (
-                    await card.get_attribute("data-occludable-job-id")
-                    or await card.get_attribute("data-job-id")
-                    or ""
-                )
-                if not card_id_attr:
-                    match = re.search(r"/view/(\d+)", url)
-                    card_id_attr = match.group(1) if match else Job.stable_id(url, title, company)
+                match = re.search(r"/view/(\d+)", card_url)
+                raw_id = match.group(1) if match else Job.stable_id(card_url, title, company)
+                job_id = f"linkedin-{raw_id}"
 
-                job_id = f"linkedin-{card_id_attr}"
-
-                if job_id in exclude_job_ids:
+                if job_id in exclude_job_ids or job_id in seen_ids:
                     continue
+                seen_ids.add(job_id)
 
                 job = Job(
                     job_id=job_id,
                     title=title,
                     company=company or "Confidential",
-                    url=url or search_url,
+                    url=card_url or self.page.url,
                     location=location,
                 )
                 jobs.append(job)
-
-            except Exception as exc:
-                log.debug("linkedin.card_parse_error", error=str(exc))
+            except Exception:
                 continue
 
-        log.info("linkedin.fetch.success", valid_jobs=len(jobs))
+        log.info("linkedin.fetch.ready", count=len(jobs))
         return jobs
 
     async def apply_to_job(
@@ -219,275 +332,400 @@ class LinkedInPlatform(BaseJobPlatform):
         profile_name: str,
         pre_submit_check: Callable[[Job], FilterDecision] | None = None,
     ) -> ApplyOutcome:
-        """Executes full LinkedIn Easy Apply dialog automation."""
+        """Executes full multi-step Easy Apply application in-page with 10/10 precision."""
         log.info("linkedin.apply.start", job_id=job.job_id, title=job.title, company=job.company)
 
-        try:
-            if job.url and job.url.startswith("http"):
-                await self.page.goto(job.url, wait_until="domcontentloaded", timeout=25000)
-                await human_pause(1800, 3000)
-        except Exception as exc:
-            log.warning("linkedin.apply.nav_failed", error=str(exc))
+        # Locate and click job card in left pane
+        card = self.page.locator(f"div[data-job-id*='{job.job_id.replace('linkedin-', '')}'], a[href*='{job.job_id.replace('linkedin-', '')}']").first
+        if await card.count() > 0:
+            await card.scroll_into_view_if_needed()
+            await human_pause(200, 400)
+            await card.click()
+            await human_pause(1200, 2000)
+        else:
+            try:
+                if job.url and job.url.startswith("http"):
+                    await self.page.goto(job.url, wait_until="domcontentloaded", timeout=25000)
+                    await human_pause(2000, 3500)
+            except Exception:
+                pass
 
-        # Extract Job Description text for parsing
+        # Extract description from right pane
         desc_el = await first_visible(
             self.page,
-            [
-                "#job-details",
-                ".jobs-description__content",
-                ".jobs-box__html-content",
-                "article",
-            ],
+            ["#job-details", ".jobs-description__content", ".jobs-box__html-content", "article"],
+            timeout_ms=2500,
         )
         job.description = await safe_text(desc_el)
-        extract_description_metadata(job)
+        extract_description_metadata(job.description)
+
+        # Suitability & Spam Check
+        suitable, reason, score = self.evaluate_job_suitability(job)
+        if not suitable:
+            log.info("linkedin.apply.skipped", job_id=job.job_id, reason=reason)
+            return ApplyOutcome(status=ApplicationStatus.SKIPPED, reason=SkipReason.LOW_SCORE, detail=reason)
 
         if pre_submit_check:
             decision = pre_submit_check(job)
-            if not decision.passed:
-                log.info("linkedin.apply.rejected_by_filter", reason=decision.reason, detail=decision.detail)
-                return ApplyOutcome(
-                    status=ApplicationStatus.SKIPPED,
-                    reason=decision.reason,
-                    detail=decision.detail,
-                )
+            if decision != FilterDecision.APPLY:
+                return ApplyOutcome(status=ApplicationStatus.SKIPPED, reason=SkipReason.FILTER_REJECTED, detail=str(decision))
 
-        # Look for Easy Apply Button
+        # Check Easy Apply button inside details pane
         apply_btn = await first_visible(
             self.page,
             [
+                "div.jobs-apply-button--top-card button",
                 "button.jobs-apply-button",
-                "button[aria-label*='Easy Apply']",
-                "button:has-text('Easy Apply')",
+                "button[aria-label*='Easy Apply to' i]",
+                ".jobs-details button:has-text('Easy Apply')",
+                ".scaffold-layout__detail button:has-text('Easy Apply')",
             ],
+            timeout_ms=3500,
         )
 
         if not apply_btn:
-            log.info("linkedin.apply.no_easy_apply_button", job_id=job.job_id)
-            return ApplyOutcome(
-                status=ApplicationStatus.EXTERNAL,
-                reason=SkipReason.EXTERNAL_APPLY,
-                detail="External apply only / No Easy Apply button found",
-            )
+            if await first_visible(self.page, ["button:has-text('Applied')", "span:has-text('Applied')"], timeout_ms=800):
+                return ApplyOutcome(status=ApplicationStatus.ALREADY_APPLIED, reason=SkipReason.ALREADY_APPLIED)
+            return ApplyOutcome(status=ApplicationStatus.SKIPPED, reason=SkipReason.EXTERNAL_APPLY)
 
-        # Mutation check before clicking apply
-        self.require_mutation("apply")
-
-        await apply_btn.click()
+        log.info("linkedin.apply.clicking_button", job_id=job.job_id)
+        await apply_btn.scroll_into_view_if_needed()
+        await human_pause(300, 600)
+        await apply_btn.click(force=True)
         await human_pause(1500, 2500)
 
-        # Multi-step Easy Apply Modal Loop
-        modal_selector = "div.jobs-easy-apply-modal, div[role='dialog']:has(button[aria-label*='Dismiss'])"
-        modal = await first_visible(self.page, [modal_selector, "div[role='dialog']"])
+        # Modal Detection
+        modal = await first_visible(
+            self.page,
+            [
+                "div.jobs-easy-apply-modal",
+                "div.artdeco-modal",
+                "div[data-test-modal]",
+                "div[role='dialog']",
+            ],
+            timeout_ms=5000,
+        )
 
         if not modal:
-            log.warning("linkedin.apply.modal_not_found")
-            return ApplyOutcome(
-                status=ApplicationStatus.FAILED,
-                detail="Easy apply dialog did not appear",
-            )
+            return ApplyOutcome(status=ApplicationStatus.FAILED, detail="Modal not visible")
 
-        # Handle modal steps (up to 8 steps)
-        for step in range(1, 9):
-            await human_pause(1200, 2000)
+        prev_step_signature = ""
 
-            # Check if modal is completed or submit button is ready
+        for step in range(1, 10):
+            await human_pause(800, 1500)
+
+            # 1. Check for Safety Reminder screen
+            safety_btn = modal.locator(
+                "button:has-text('Continue applying'), button:has-text('Continue'), button:has-text('Acknowledge'), button:has-text('Got it'), button:has-text('I understand')"
+            ).first
+            if await safety_btn.count() > 0:
+                btn_txt = (await safety_btn.inner_text()).strip()
+                if btn_txt.lower() in ["continue applying", "continue", "acknowledge", "got it", "i understand"]:
+                    log.info("linkedin.apply.safety_reminder_passed", btn=btn_txt)
+                    await safety_btn.click()
+                    await human_pause(1200, 2000)
+                    continue
+
+            # 2. Fill inputs strictly inside the modal container
+            await self._fill_step_inputs(modal, job)
+
+            # Check if modal advanced
+            modal_content = await safe_text(modal)
+            step_sig = modal_content[:150]
+            if step > 1 and step_sig == prev_step_signature:
+                error_el = await first_visible(modal, [".artdeco-inline-feedback--error", "p.artdeco-inline-feedback", "[data-test-form-builder-error]"], timeout_ms=800)
+                err_txt = (await safe_text(error_el)).strip() if error_el else "Unknown blocker"
+                log.warning("linkedin.apply.step_stuck", step=step, error=err_txt)
+                await self._dismiss_modal()
+                return ApplyOutcome(status=ApplicationStatus.FAILED, detail=f"Step {step} blocked: {err_txt}")
+            prev_step_signature = step_sig
+
+            # Check Submit button
             submit_btn = await first_visible(
-                self.page,
+                modal,
                 [
                     "button[aria-label='Submit application']",
                     "button:has-text('Submit application')",
                 ],
+                timeout_ms=1500,
             )
 
             if submit_btn:
-                log.info("linkedin.apply.submitting", step=step)
-                await submit_btn.click()
-                await human_pause(2000, 3500)
+                if self.policy.dry_run:
+                    log.info("linkedin.apply.dry_run_success", job_id=job.job_id)
+                    await self._dismiss_modal()
+                    return ApplyOutcome(status=ApplicationStatus.APPLIED, detail="Dry-run submit reached")
 
-                # Close post-apply confirmation dialog if present
+                self.require_mutation("submit_application")
+                log.info("linkedin.apply.submitting", job_id=job.job_id)
+                await submit_btn.scroll_into_view_if_needed()
+                await submit_btn.click(force=True)
+                await human_pause(2500, 4000)
+
                 await click_if_present(
                     self.page,
-                    [
-                        "button[aria-label='Dismiss']",
-                        "button:has-text('Done')",
-                        "button[data-control-name='save_application_dismiss_icon']",
-                    ],
+                    ["button[aria-label='Dismiss']", "button:has-text('Done')"],
                 )
-                log.info("linkedin.apply.success", job_id=job.job_id)
-                return ApplyOutcome(
-                    status=ApplicationStatus.APPLIED,
-                    detail="Submitted via LinkedIn Easy Apply",
-                )
+                log.info("linkedin.apply.submitted_successfully", job_id=job.job_id)
+                return ApplyOutcome(status=ApplicationStatus.APPLIED, detail="Submitted via LinkedIn Easy Apply")
 
-            # Answer any visible screening questions / form inputs on current page
-            await self._fill_step_inputs(profile_name)
-
-            # Check for Next / Review button
-            next_btn = await first_visible(
-                self.page,
+            # Check Next / Review button
+            action_btn = await first_visible(
+                modal,
                 [
-                    "button[aria-label='Continue to next step']",
-                    "button:has-text('Next')",
                     "button[aria-label='Review your application']",
                     "button:has-text('Review')",
+                    "button[aria-label='Continue to next step']",
+                    "button:has-text('Next')",
                 ],
+                timeout_ms=2000,
             )
 
-            if next_btn:
-                await next_btn.click()
+            if action_btn:
+                await action_btn.scroll_into_view_if_needed()
+                await action_btn.click(force=True)
                 await human_pause(1500, 2500)
             else:
-                log.debug("linkedin.apply.no_next_button", step=step)
                 break
 
-        # Fallback check after steps
-        final_submit = await first_visible(
-            self.page,
-            ["button:has-text('Submit application')", "button[aria-label='Submit application']"],
-        )
-        if final_submit:
-            await final_submit.click()
-            await human_pause(2000, 3000)
-            await click_if_present(self.page, ["button:has-text('Done')", "button[aria-label='Dismiss']"])
-            return ApplyOutcome(
-                status=ApplicationStatus.APPLIED,
-                detail="Submitted via LinkedIn Easy Apply",
-            )
+        await self._dismiss_modal()
+        return ApplyOutcome(status=ApplicationStatus.NEEDS_REVIEW, detail="Modal step threshold exceeded")
 
-        # If stuck on complex unhandled modal, dismiss it cleanly
-        await click_if_present(self.page, ["button[aria-label='Dismiss']"])
-        await human_pause(500, 1000)
-        await click_if_present(self.page, ["button:has-text('Discard')"])
+    async def _fill_step_inputs(self, modal: Locator, job: Job | None = None) -> None:
+        """Fills radio fieldsets, text inputs, dropdowns, comboboxes strictly within the modal."""
+        # 1. State-Aware Resume Selection (never deselects already selected resume)
+        job_title_low = (job.title if job else "").lower()
+        if any(k in job_title_low for k in ["ai", "python", "genai", "llm", "data", "machine learning"]):
+            target_resume_stem = "CV_Mahesh_Chitakoti_2026"
+        elif any(k in job_title_low for k in ["full stack", "react", "frontend", "web", "node", "javascript"]):
+            target_resume_stem = "CV_Mahesh_Chitakoti_2026_1_"
+        else:
+            target_resume_stem = "CV_Mahesh_Chitakoti_2026_1_"
 
-        return ApplyOutcome(
-            status=ApplicationStatus.NEEDS_REVIEW,
-            detail="Easy apply required custom inputs that exceeded automated step handling",
-        )
+        resume_cards = await modal.locator("div[data-test-document-item], .jobs-document-upload-redesign-card, div.jobs-document-upload-redesign-card__container").all()
+        for card in resume_cards:
+            card_text = (await safe_text(card)).lower()
+            aria_label = (await card.get_attribute("aria-label") or "").lower()
+            card_class = (await card.get_attribute("class") or "").lower()
+            is_selected = "selected" in aria_label or "container--selected" in card_class or "deselect" in card_text
 
-    async def _fill_step_inputs(self, profile_name: str) -> None:
-        """Fills radio chips, dropdowns, text inputs, textareas, and resume attachments on current Easy Apply step."""
-        try:
-            # 1. Resume selection (existing on LinkedIn) or upload (fallback)
-            resume_stem = (
-                "CV_Mahesh_Chitakoti_2026"
-                if "ai" in profile_name.lower() or "python" in profile_name.lower()
-                else "CV_Mahesh_Chitakoti_2026_1_"
-            )
-            resume_path = Path(f"resumes/{resume_stem}.pdf")
-
-            # Check if LinkedIn already displays saved resume cards/radios
-            resume_cards = await self.page.locator(".jobs-document-upload__title, div[data-test-document-item], label:has-text('.pdf')").all()
-            selected_existing = False
-            for card in resume_cards:
-                card_text = (await safe_text(card)).lower()
-                if resume_stem.lower() in card_text:
-                    try:
+            if target_resume_stem.lower() in card_text:
+                if not is_selected:
+                    select_btn = card.locator("button[aria-label*='Select' i]").first
+                    if await select_btn.count() > 0:
+                        await select_btn.click()
+                    else:
                         await card.click()
-                        selected_existing = True
-                        log.info("linkedin.apply.existing_resume_selected", match=resume_stem)
-                        await human_pause(400, 800)
-                        break
-                    except Exception:
-                        pass
+                    await human_pause(300, 600)
+                break
 
-            # Fallback upload if no existing resume matched or upload button is explicitly active
-            if not selected_existing:
-                file_input = self.page.locator("input[type='file']").first
-                if await file_input.is_visible() and resume_path.exists():
-                    try:
-                        await file_input.set_input_files(str(resume_path.resolve()))
-                        log.info("linkedin.apply.resume_uploaded", path=resume_path.name)
-                        await human_pause(1000, 2000)
-                    except Exception as exc:
-                        log.debug("linkedin.resume_upload_error", error=str(exc))
+        # 2. Dropdowns (<select>) strictly inside modal
+        selects = await modal.locator("select").all()
+        for sel in selects:
+            try:
+                if not await sel.is_visible():
+                    continue
 
-            # 2. Radio fieldsets (Yes/No, screening questions)
-            radios = await self.page.locator("fieldset").all()
-            for fs in radios:
+                label = ""
+                try:
+                    label = (await sel.evaluate("el => el.closest('div').innerText")).strip()
+                except Exception:
+                    pass
+                if not label:
+                    label_el = sel.locator("xpath=ancestor::div[contains(@class, 'fb-dash-form-element')][1]//label").first
+                    label = (await safe_text(label_el)).strip()
+                label_low = label.lower()
+
+                options = await sel.locator("option").all_inner_texts()
+                target_val = ""
+
+                # Phone Country Code
+                if any(k in label_low for k in ["country code", "phone country", "phone code"]):
+                    for o in options:
+                        if "india" in o.lower() or "+91" in o:
+                            target_val = o.strip()
+                            break
+                    if target_val:
+                        await sel.select_option(label=target_val)
+                    continue
+
+                # Email Address dropdown (keep pre-filled)
+                if "email" in label_low:
+                    continue
+
+                resolved = self.answers.resolve(ScreeningQuestion(text=label, kind="select", options=options))
+                if resolved and resolved.value:
+                    target_val = resolved.value
+
+                if not target_val:
+                    if any(k in label_low for k in ["sponsorship", "visa"]):
+                        for o in options:
+                            if "no" in o.lower():
+                                target_val = o.strip()
+                                break
+                    elif any(k in label_low for k in ["total years", "years of", "years of experience"]):
+                        for o in options:
+                            if any(d == o.strip() or f"{d} " in o for d in ["2", "3", "2.5", "2+"]):
+                                target_val = o.strip()
+                                break
+                    elif any(k in label_low for k in ["additional month", "months"]):
+                        for o in options:
+                            if any(d == o.strip() or f"{d} " in o for d in ["6", "0"]):
+                                target_val = o.strip()
+                                break
+                    elif any(k in label_low for k in ["start immediately", "immediate", "authorized", "authorization", "commute", "relocate", "comfortable", "degree", "experience", "agree", "willing", "can you", "are you", "do you", "within a week", "have you", "troubleshot", "is your"]):
+                        for o in options:
+                            if "yes" in o.lower():
+                                target_val = o.strip()
+                                break
+                    elif any(k in label_low for k in ["proficiency", "language"]):
+                        for o in options:
+                            if any(p in o.lower() for p in ["professional", "fluent", "conversational", "native"]):
+                                target_val = o.strip()
+                                break
+                    elif any(k in label_low for k in ["degree", "education"]):
+                        for o in options:
+                            if "bachelor" in o.lower() or "graduate" in o.lower():
+                                target_val = o.strip()
+                                break
+
+                if not target_val and len(options) > 1:
+                    target_val = options[1].strip() if "select" not in options[1].lower() else (options[2].strip() if len(options) > 2 else "")
+
+                if target_val:
+                    await sel.select_option(label=target_val)
+                    await human_pause(200, 400)
+            except Exception:
+                pass
+
+        # 3. Radio Fieldsets strictly inside modal
+        fieldsets = await modal.locator("fieldset").all()
+        for fs in fieldsets:
+            try:
+                if not await fs.is_visible():
+                    continue
                 legend_el = fs.locator("legend").first
                 legend = (await safe_text(legend_el)).strip()
-                legend_low = legend.lower()
+                if not legend:
+                    continue
 
-                # Try matching AnswerEngine first
-                ans = self.answers.answer(legend) if self.answers else None
-                if ans:
-                    opt = fs.locator(f"label:has-text('{ans}'), input[value='{ans}']").first
-                    if await opt.is_visible():
-                        await opt.click()
-                        continue
+                options = await fs.locator("div[tabindex='0'], label, input[type='radio']").all()
+                opt_texts = [(await safe_text(opt)).strip() for opt in options if (await safe_text(opt)).strip()]
 
-                if "authorized" in legend_low or ("sponsorship" not in legend_low and "yes" in legend_low):
-                    yes_opt = fs.locator("label:has-text('Yes'), input[value='Yes'], label:has-text('yes')").first
-                    if await yes_opt.is_visible():
-                        await yes_opt.click()
-                elif "sponsorship" in legend_low:
-                    no_opt = fs.locator("label:has-text('No'), input[value='No'], label:has-text('no')").first
-                    if await no_opt.is_visible():
-                        await no_opt.click()
-                else:
-                    # Default to Yes if available
-                    yes_fallback = fs.locator("label:has-text('Yes'), input[value='Yes']").first
-                    if await yes_fallback.is_visible():
-                        await yes_fallback.click()
+                resolved = self.answers.resolve(ScreeningQuestion(text=legend, kind="radio", options=opt_texts))
+                target_val = resolved.value if resolved else ""
 
-            # 3. Dropdowns (<select> elements)
-            selects = await self.page.locator("select").all()
-            for sel in selects:
-                val = await sel.input_value()
-                if not val or val == "Select an option" or val == "0":
-                    label_el = sel.locator("xpath=preceding::label[1]").first
-                    label = (await safe_text(label_el)).lower()
-                    ans = self.answers.answer(label) if self.answers else None
-                    if ans:
-                        try:
-                            await sel.select_option(label=ans)
-                            continue
-                        except Exception:
-                            pass
+                if not target_val:
+                    low_leg = legend.lower()
+                    if any(k in low_leg for k in ["sponsorship", "visa sponsorship", "require sponsorship"]):
+                        target_val = "No"
+                    elif any(k in low_leg for k in ["authorized", "authorization", "commute", "relocate", "comfortable", "background", "willing", "participate", "agree", "process", "interest"]):
+                        target_val = "Yes"
+                    else:
+                        target_val = "Yes"
 
-                    options = await sel.locator("option").all_inner_texts()
-                    if len(options) > 1:
-                        # Select first non-empty option or matching keyword
-                        best_opt = None
-                        for opt_text in options[1:]:
-                            low_opt = opt_text.lower()
-                            if any(k in low_opt for k in ["yes", "immediate", "bachelor", "professional", "native", "2", "3"]):
-                                best_opt = opt_text
-                                break
-                        if not best_opt and len(options) > 1:
-                            best_opt = options[1]
-                        if best_opt:
-                            try:
-                                await sel.select_option(label=best_opt.strip())
-                            except Exception:
-                                pass
+                for opt in options:
+                    otext = (await safe_text(opt)).strip()
+                    if target_val and (otext.lower() == target_val.lower() or target_val.lower() in otext.lower()):
+                        await opt.scroll_into_view_if_needed()
+                        await opt.click(force=True)
+                        await human_pause(200, 400)
+                        break
+            except Exception:
+                pass
 
-            # 4. Text & Numeric inputs
-            inputs = await self.page.locator("input[type='text'], input[type='number'], textarea").all()
-            for inp in inputs:
-                val = await inp.input_value()
-                if not val:
-                    label_el = inp.locator("xpath=preceding::label[1]").first
-                    label = (await safe_text(label_el)).strip()
-                    ans = self.answers.answer(label) if self.answers else None
-                    if ans:
-                        await inp.fill(ans)
-                        continue
+        # 4. Text, Numeric Inputs & Comboboxes strictly inside modal
+        inputs = await modal.locator("input[type='text'], input[type='number'], input[type='tel'], textarea").all()
+        for inp in inputs:
+            try:
+                if not await inp.is_visible():
+                    continue
+                val = (await inp.input_value()).strip()
 
-                    label_low = label.lower()
-                    if "experience" in label_low or "years" in label_low:
-                        await inp.fill("2.6")
-                    elif "notice" in label_low:
-                        await inp.fill("0")
+                label = ""
+                try:
+                    label = (await inp.evaluate("el => el.closest('div').innerText")).strip()
+                except Exception:
+                    pass
+                if not label:
+                    inp_id = await inp.get_attribute("id") or ""
+                    label_el = modal.locator(f"label[for='{inp_id}']").first if inp_id else None
+                    if not label_el or await label_el.count() == 0:
+                        label_el = inp.locator("xpath=ancestor::div[contains(@class, 'fb-dash-form-element') or contains(@class, 'form__input')][1]//label").first
+                    label = (await safe_text(label_el)).strip() if label_el and await label_el.count() > 0 else ""
+                
+                label_low = label.lower()
+
+                # Mobile phone field
+                if any(k in label_low for k in ["phone", "mobile"]):
+                    if not val:
+                        await inp.fill("9481777227")
+                    continue
+
+                # City / Location combobox
+                if any(k in label_low for k in ["city", "location", "zip code", "state"]):
+                    if not val or "search" in val.lower():
+                        await inp.fill("Bengaluru, Karnataka, India")
+                        await human_pause(600, 1000)
+                        typeahead_item = self.page.locator(".search-typeahead-v2__hit, div[role='option'], li[role='option'], .basic-typeahead__selectable-result").first
+                        if await typeahead_item.count() > 0:
+                            await typeahead_item.click()
+                        else:
+                            await inp.press("ArrowDown")
+                            await inp.press("Enter")
+                    continue
+
+                # Skip if already pre-filled
+                if val:
+                    continue
+
+                resolved = self.answers.resolve(ScreeningQuestion(text=label, kind="text"))
+                ans = resolved.value if resolved else ""
+
+                if not ans or "days" in str(ans).lower():
+                    if "notice" in label_low or "how soon" in label_low or "availability" in label_low:
+                        ans = "0"
+                    elif "experience" in label_low or "years" in label_low or "whole number" in label_low:
+                        ans = "2"
+                    elif "months" in label_low:
+                        ans = "6"
+                    elif "rate" in label_low or "scale" in label_low or "1 to 10" in label_low or "rating" in label_low:
+                        ans = "9"
                     elif "current" in label_low and ("ctc" in label_low or "salary" in label_low):
-                        await inp.fill("4")
+                        if "inr" in label_low or "rupee" in label_low or "annual" in label_low:
+                            ans = "400000"
+                        else:
+                            ans = "4"
                     elif "expected" in label_low and ("ctc" in label_low or "salary" in label_low):
-                        await inp.fill("7")
-                    elif "city" in label_low or "location" in label_low:
-                        await inp.fill("Bengaluru")
-                    elif "phone" in label_low or "mobile" in label_low:
-                        pass  # Preserve pre-filled account phone
+                        if "inr" in label_low or "rupee" in label_low or "annual" in label_low:
+                            ans = "700000"
+                        else:
+                            ans = "7"
+                    elif "title" in label_low:
+                        ans = "Full Stack & AI Engineer"
+                    elif "company" in label_low:
+                        ans = "Independent Software Consultant"
+                    elif "linkedin" in label_low:
+                        ans = "https://www.linkedin.com/in/maheshchitakoti"
+                    elif "github" in label_low or "portfolio" in label_low or "website" in label_low:
+                        ans = "https://github.com/maheshchitakoti"
+                    elif inp.get_attribute("type") == "number":
+                        ans = "2"
+                    else:
+                        ans = "Experienced software and AI engineer with 2.5 years of experience building scalable applications, APIs, and AI workflows."
 
-        except Exception as exc:
-            log.debug("linkedin.step_fill_error", error=str(exc))
+                if ans:
+                    await inp.fill(str(ans))
+                    await human_pause(200, 400)
+            except Exception:
+                pass
+
+    async def _dismiss_modal(self) -> None:
+        """Safely dismisses and discards any open dialog."""
+        try:
+            await click_if_present(self.page, ["button[aria-label='Dismiss']", "button[data-test-modal-close-btn]"])
+            await human_pause(500, 1000)
+            await click_if_present(self.page, ["button:has-text('Discard')", "button[data-control-name='discard_application_confirm_btn']"])
+            await human_pause(500, 1000)
+        except Exception:
+            pass

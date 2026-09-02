@@ -23,7 +23,7 @@ from ..logging_setup import get_logger
 
 log = get_logger(__name__)
 
-YES_TOKENS = ("yes", "yeah", "yep", "sure", "agree", "willing", "true", "available")
+YES_TOKENS = ("yes", "yeah", "yep", "sure", "agree", "willing", "true", "available", "ok", "okay", "comfortable", "works", "acceptable")
 NO_TOKENS = ("no", "nope", "never", "false")
 
 STOPWORDS = frozenset(
@@ -63,12 +63,14 @@ _WILLINGNESS_INTENT = re.compile(
     r"\b(?:"
     r"willing|open\s+to|ready\s+to|comfortable|agree|able\s+to|attend|available\s+for|"
     r"would\s+you|can\s+you|are\s+you\s+willing|are\s+you\s+open|are\s+you\s+ready|are\s+you\s+able|"
-    r"are\s+you\s+fine|are\s+you\s+ok|do\s+you\s+agree|will\s+you|"
+    r"are\s+you\s+fine|are\s+you\s+ok(?:ay)?|do\s+you\s+agree|will\s+you|"
+    r"does\s+this\s+work(?:\s+for\s+you)?|works?\s+for\s+you|"
     r"face[\s-]to[\s-]face|f2f|in[\s-]person|offline\s+interview|"
     r"rounds?\s+of\s+(?:technical\s+)?interviews?|technical\s+interviews?|interview\s+rounds?|"
     r"relocate|relocation|"
     r"work\s+from\s+office|wfo|hybrid|onsite|on[\s-]site|"
-    r"join\s+immediately|immediate\s+joiner"
+    r"join\s+immediately|immediate\s+joiner|"
+    r"location\s+of\s+this\s+job|job\s+location"
     r")\b",
     re.IGNORECASE,
 )
@@ -356,15 +358,10 @@ class AnswerEngine:
             if _normalise(option) == wanted:
                 return ResolvedAnswer(option, pattern, source)
 
-        if len(wanted) >= 4:
-            for option in options:
-                low = _normalise(option)
-                if wanted in low or low in wanted:
-                    return ResolvedAnswer(option, pattern, source)
-        else:
-            for option in options:
-                if _contains_word(_normalise(option), wanted):
-                    return ResolvedAnswer(option, pattern, source)
+        for option in options:
+            low = _normalise(option)
+            if _contains_word(low, wanted) or _contains_word(wanted, low):
+                return ResolvedAnswer(option, pattern, source)
 
         polarity = self._polarity(wanted)
         if polarity is not None:
@@ -378,19 +375,28 @@ class AnswerEngine:
             exact_single: str | None = None
             for option in options:
                 opt_low = option.lower()
-                bounds = [float(v) for v in _NUMBER.findall(option)]
+                matches = re.findall(r"(\d+(?:\.\d+)?)\s*(months?|mos?|years?|yrs?|\+)?", opt_low)
+                bounds = []
+                for num_str, unit in matches:
+                    val = float(num_str)
+                    if "month" in unit or "mo" in unit:
+                        val = val / 12.0
+                    bounds.append(val)
+
                 if len(bounds) >= 2 and min(bounds) <= value <= max(bounds):
                     return ResolvedAnswer(option, pattern, "option-match")
                 if len(bounds) == 1:
                     target_b = bounds[0]
                     if target_b == value:
                         exact_single = option
-                    elif ("<" in option or "less than" in opt_low or "under" in opt_low) and value < target_b:
+                    elif ("<" in option or "less than" in opt_low or "under" in opt_low) and value <= target_b:
                         return ResolvedAnswer(option, pattern, "option-match")
                     elif (">" in option or "+" in option or "more than" in opt_low or "greater than" in opt_low) and value >= target_b:
                         exact_single = exact_single or option
                 elif not bounds:
-                    if ("no experience" in opt_low or "none" in opt_low or "fresher" in opt_low) and value == 0:
+                    if ("no experience" in opt_low or "none" in opt_low or "not much" in opt_low or "fresher" in opt_low) and value <= 0.5:
+                        return ResolvedAnswer(option, pattern, "option-match")
+                    if ("served notice" in opt_low or "immediately" in opt_low or "immediate" in opt_low or "0 days" in opt_low or "serving" in opt_low) and value == 0:
                         return ResolvedAnswer(option, pattern, "option-match")
             if exact_single:
                 return ResolvedAnswer(exact_single, pattern, "option-match")
@@ -413,13 +419,10 @@ class AnswerEngine:
         if not tokens:
             return None
 
-        meaningful = [t for t in tokens if t not in ("i", "am", "is", "are", "be", "do", "will", "would")]
-        head = meaningful[0] if meaningful else tokens[0]
-
-        if any(w in ("no", "nope", "never", "false", "cannot", "can't", "cant", "unwilling", "unavailable", "disagree") for w in tokens):
+        if any(w in ("no", "nope", "never", "false", "cannot", "can't", "cant", "unwilling", "unavailable", "disagree", "not") for w in tokens):
             return False
-        if head in YES_TOKENS or any(w in YES_TOKENS for w in tokens):
+        if any(w in YES_TOKENS for w in tokens):
             return True
-        if head in ("can", "ready", "immediately", "immediate", "acceptable"):
+        if any(w in ("can", "ready", "immediately", "immediate", "acceptable") for w in tokens):
             return True
         return None

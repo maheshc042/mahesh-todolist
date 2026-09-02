@@ -62,6 +62,25 @@ class InstahyrePlatform(BaseJobPlatform):
             log.info("instahyre.auth.session_reused")
             return True
         if not email_input or not pass_input:
+            # Check if we can wait for manual login in headed mode
+            log.warning("instahyre.auth.waiting_for_manual_login", msg="Please log in to Instahyre in the open browser window if prompted...")
+            try:
+                authenticated = await first_visible(
+                    self.page,
+                    [
+                        "a[href*='/candidate/profile']",
+                        "a[href*='/candidate/opportunities']",
+                        "div.employer-row",
+                        "button:has-text('Logout')",
+                        "#opportunities",
+                    ],
+                    timeout_ms=30000,
+                )
+                if authenticated:
+                    log.info("instahyre.auth.manual_login_success")
+                    return True
+            except Exception:
+                pass
             log.error("instahyre.auth.uncertain_state", url=self.page.url)
             return False
 

@@ -671,10 +671,18 @@ class Orchestrator:
                 job = rjob.job
                 known.add(job.job_id)
 
-                outcome = await self._process_job(
-                    job, profile, filters, platform, page, artifacts
-                )
-
+                try:
+                    outcome = await self._process_job(
+                        job, profile, filters, platform, page, artifacts
+                    )
+                except FatalAgentError:
+                    raise
+                except Exception as exc:
+                    log.exception("job.unhandled_processing_error", job_id=job.job_id, error=str(exc))
+                    outcome = ApplyOutcome(
+                        status=ApplicationStatus.FAILED,
+                        detail=f"Unhandled job error: {exc}",
+                    )
 
                 if outcome.status == ApplicationStatus.APPLIED:
                     applied_this_profile += 1
@@ -852,32 +860,40 @@ class Orchestrator:
         else:
             self.stats.bump(profile.name, "filtered_out")
 
-        await self.repo.record_outcome(
-            job,
-            profile.name,
-            self.run_id,
-            outcome,
-            account=self.account_key,
-            platform=getattr(platform, "platform_name", str(platform)),
-        )
+        try:
+            await self.repo.record_outcome(
+                job,
+                profile.name,
+                self.run_id,
+                outcome,
+                account=self.account_key,
+                platform=getattr(platform, "platform_name", str(platform)),
+            )
+        except Exception as exc:
+            log.warning("repo.record_outcome_failed", error=str(exc), job_id=job.job_id)
+
         task = asyncio.create_task(self._dispatch_recruiter_emails(job, profile, outcome))
         self._background_tasks.add(task)
         task.add_done_callback(self._background_tasks.discard)
-        await self.repo.log_event(
-            self.run_id,
-            f"apply.{outcome.status.value}",
-            level="error" if outcome.status == ApplicationStatus.FAILED else "info",
-            job_id=job.job_id,
-            profile=profile.name,
-            payload={
-                "account": self.account_key,
-                "title": job.title,
-                "company": job.company,
-                "reason": outcome.reason.value if outcome.reason else None,
-                "detail": outcome.detail[:500],
-                "questions_answered": outcome.questions_answered,
-            },
-        )
+
+        try:
+            await self.repo.log_event(
+                self.run_id,
+                f"apply.{outcome.status.value}",
+                level="error" if outcome.status == ApplicationStatus.FAILED else "info",
+                job_id=job.job_id,
+                profile=profile.name,
+                payload={
+                    "account": self.account_key,
+                    "title": job.title,
+                    "company": job.company,
+                    "reason": outcome.reason.value if outcome.reason else None,
+                    "detail": outcome.detail[:500],
+                    "questions_answered": outcome.questions_answered,
+                },
+            )
+        except Exception as exc:
+            log.warning("repo.log_event_failed", error=str(exc), job_id=job.job_id)
 
     async def _dispatch_recruiter_emails(self, job: Job, profile: JobProfile, outcome: ApplyOutcome) -> None:
         """Dispatches Gemini-tailored cold emails to HR emails extracted from job descriptions."""
