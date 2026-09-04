@@ -39,7 +39,7 @@ _EXPERIENCE_INTENT = re.compile(
     r"(how\s+(?:many|much)\s+(?:years?|yrs?|months?))"
     r"|(?:total|overall|relevant|work|professional|hands[\s-]?on)\s+experience"
     r"|(?:years?|yrs?)\s+of\s+(?:experience|exp)"
-    r"|experience\s+(?:do\s+you\s+have|in|with|on|using)"
+    r"|experience\s+(?:do\s+you\s+have|in|with|on|using|of|\w+ing\b)"
     r"|(?:years?|yrs?)\s+(?:in|with|of)\s+\w+"
     r"|\bexp\s+in\b",
     re.IGNORECASE,
@@ -55,6 +55,17 @@ _NUMBER = re.compile(r"\d+(?:\.\d+)?")
 
 _LWD_INTENT = re.compile(
     r"\b(?:last\s+working\s+(?:day|date)|lwd|relieving\s+date|end\s+date\s+of\s+(?:notice|employment))\b",
+    re.IGNORECASE,
+)
+
+_AVAILABILITY_TIMING_INTENT = re.compile(
+    r"\b(?:"
+    r"(?:l1|l2|bot|interview|technical|discussion|meeting|call)\s+(?:availability|available)\s+(?:date|timing|time|slot)s?"
+    r"|(?:l1|l2|technical|discussion|meeting|call|interview)\s+(?:slot|date|timing|time)s?"
+    r"|(?:availability|available)\s+(?:for\s+)?(?:l1|l2|interview|discussion|call|meeting)"
+    r"|(?:preferred|convenient|select|choose)\s+(?:a\s+)?(?:date|time|timing|slot)s?\s+(?:for\s+)?(?:interview|discussion)?"
+    r"|date\s+and\s+time\s+(?:for\s+)?(?:interview|round)"
+    r")\b",
     re.IGNORECASE,
 )
 
@@ -214,7 +225,12 @@ class AnswerEngine:
                 self._record_hit(entry)
                 return fitted
 
-        # Stage 1.5: Generic Affirmative Fallback
+        # Stage 1.5: Dynamic Interview Availability Scheduling
+        availability = self._resolve_availability(text, question)
+        if availability is not None:
+            return availability
+
+        # Stage 1.6: Generic Affirmative & Location Fallback
         willingness = self._resolve_willingness(text, question)
         if willingness is not None:
             return willingness
@@ -249,9 +265,66 @@ class AnswerEngine:
                 )
         return None
 
+    def _resolve_availability(self, text: str, question: ScreeningQuestion) -> ResolvedAnswer | None:
+        if not _AVAILABILITY_TIMING_INTENT.search(text):
+            return None
+        log.info("answers.availability_intent", question=question.text[:100])
+        # If options are given, choose the first reasonable weekday/business hour slot
+        if question.options:
+            for opt in question.options:
+                opt_low = opt.lower()
+                if any(w in opt_low for w in ("weekday", "anytime", "immediate", "morning", "afternoon", "10", "11", "2", "3", "4", "5", "6")):
+                    return ResolvedAnswer(opt, "intent:availability", "intent-map")
+            return ResolvedAnswer(question.options[0], "intent:availability", "intent-map")
+        return ResolvedAnswer(
+            "Available on weekdays between 10:00 AM to 6:00 PM IST",
+            "intent:availability",
+            "intent-map",
+        )
+
     def _resolve_willingness(self, text: str, question: ScreeningQuestion) -> ResolvedAnswer | None:
         if not _WILLINGNESS_INTENT.search(text) or _NEGATIVE_QUESTIONS.search(text):
             return None
+
+        # Location-aware and multi-choice willingness handling
+        if question.options:
+            # 1. Check for preferred locations (Bengaluru, Remote, Hybrid)
+            for opt in question.options:
+                if self._polarity(_normalise(opt)) is False:
+                    continue
+                opt_low = opt.strip().lower()
+                if any(pref in opt_low for pref in ("bengaluru", "bangalore", "remote", "hybrid", "work from home")):
+                    return ResolvedAnswer(opt, "intent:willingness_location_preferred", "intent-map")
+
+            # 2. Check for Cutshort-style affirmative presence / relocation options
+            for opt in question.options:
+                if self._polarity(_normalise(opt)) is False:
+                    continue
+                opt_low = opt.strip().lower()
+                if any(neg in opt_low for neg in ("not", "unwilling", "cannot", "none", "neither", "no")):
+                    continue
+                if "currently in this location" in opt_low or "okay with it" in opt_low:
+                    return ResolvedAnswer(opt, "intent:willingness_current_location", "intent-map")
+                if "can relocate" in opt_low or "willing to relocate" in opt_low:
+                    return ResolvedAnswer(opt, "intent:willingness_can_relocate", "intent-map")
+
+            # 3. Check for explicit affirmative tokens (Yes, Willing, Agree, Acceptable)
+            for opt in question.options:
+                if self._polarity(_normalise(opt)) is True:
+                    return ResolvedAnswer(opt, "intent:willingness_affirmative", "intent-map")
+
+            # 4. Fallback for relocation city options (e.g. Mumbai, Navi Mumbai, Pune, Hyderabad):
+            # Candidate is willing to relocate almost anywhere in this job market.
+            # Select the first option that is not explicitly negative.
+            for opt in question.options:
+                if self._polarity(_normalise(opt)) is False:
+                    continue
+                opt_low = opt.strip().lower()
+                if any(neg in opt_low for neg in ("not willing", "unwilling", "cannot", "none", "neither", "not okay", "not open", "not", "no")):
+                    continue
+                log.info("answers.willingness_location_fallback", selected=opt, question=question.text[:70])
+                return ResolvedAnswer(opt, "intent:willingness_location_fallback", "intent-map")
+
         log.info("answers.willingness_intent", question=question.text[:100])
         return self._fit_to_options("Yes", question, "intent:willingness", "intent-map")
 
@@ -362,6 +435,12 @@ class AnswerEngine:
             low = _normalise(option)
             if _contains_word(low, wanted) or _contains_word(wanted, low):
                 return ResolvedAnswer(option, pattern, source)
+
+        if wanted in ("bengaluru", "bangalore"):
+            for option in options:
+                low = _normalise(option)
+                if "bengaluru" in low or "bangalore" in low:
+                    return ResolvedAnswer(option, pattern, source)
 
         polarity = self._polarity(wanted)
         if polarity is not None:

@@ -194,6 +194,8 @@ answers:
   interviews in person on weekends: "Yes"
   interviews in person: "Yes"
   "re:available for f2f|available for interview|f2f interview on|interview on": "Yes"
+  "re:availability.*(?:date|time|timing|schedule)|interview.*(?:date|time|timing|slot)": "Available on weekdays between 10:00 AM to 6:00 PM IST"
+  "l1 bot availability date and timing": "Available on weekdays between 10:00 AM to 6:00 PM IST"
   # Both spellings: recruiters type this one wrong at least as often as not.
   need special accommodation for interview: "No"
   need specifal accomodation for interview: "No"

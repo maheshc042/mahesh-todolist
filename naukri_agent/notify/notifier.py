@@ -138,6 +138,15 @@ def format_run_summary(
             review = counters.get("needs_review", 0)
             lines.append(f"  • {profile}: {applied} applied | {failed} failed | {review} review")
 
+    if stats.per_platform:
+        lines.append("")
+        lines.append("🌐 PER-PLATFORM BREAKDOWN:")
+        for platform, counters in stats.per_platform.items():
+            applied = counters.get("applied", 0)
+            failed = counters.get("failed", 0)
+            external = counters.get("external", 0)
+            lines.append(f"  • {platform.capitalize():<10}: {applied} applied | {failed} failed | {external} external")
+
     if include_job_list and stats.applied_jobs:
         lines.append("")
         lines.append(f"🚀 APPLIED POSITIONS ({len(stats.applied_jobs)}):")

@@ -214,10 +214,21 @@ class ApplyEngine:
             "div[class*='msg-box']",
             "div:has-text('Application sent')",
             "div:has-text('Successfully applied')",
+            "div.acp-container",
+            "div.acp-header-container",
+            "img[alt='success-icon']",
+            "div.job-title-text",
+            "div:has-text('Applied to')",
         ]
         for _ in range(75):  # ~11.25s resilient SLA poll for enterprise network latency
             if self._popup_opened:
                 return "popup"
+            try:
+                title = await self.page.title()
+                if "Apply Confirmation" in title:
+                    return "success"
+            except Exception:
+                pass
             if await self._fast_check(extended_success):
                 return "success"
             if await self._fast_check(S.CHATBOT_DRAWER):
@@ -344,10 +355,17 @@ class ApplyEngine:
             shot = await self.artifacts.capture_failure(self.page, "apply-error-toast", profile, job.job_id)
             return ApplyOutcome(status=ApplicationStatus.FAILED, detail=f"Toast error: {toast[:100]}", screenshot_path=shot, attempts=attempts)
 
-        # Fail-Fast Verification: Instead of a massive 60s page reload, we just check the DOM. 
-        # If Naukri didn't render the success banner in time, we drop the job and grab the next one.
+        # Fail-Fast Verification: Check page title and DOM confirmation markers
         t_ver_0 = time.perf_counter()
-        is_success = await first_visible(self.page, S.JD_ALREADY_APPLIED + S.APPLY_SUCCESS, timeout_ms=3_000) is not None
+        is_success = False
+        try:
+            cur_title = await self.page.title()
+            if "Apply Confirmation" in cur_title or "Applied" in cur_title:
+                is_success = True
+        except Exception:
+            pass
+        if not is_success:
+            is_success = await first_visible(self.page, S.JD_ALREADY_APPLIED + S.APPLY_SUCCESS, timeout_ms=3_000) is not None
         jt.verify_s += time.perf_counter() - t_ver_0
 
         if is_success:
@@ -355,7 +373,7 @@ class ApplyEngine:
                 status=ApplicationStatus.APPLIED,
                 attempts=attempts,
                 confirmation_type="dom_marker",
-                confirmation_evidence="Naukri success or already-applied marker observed after submission",
+                confirmation_evidence="Naukri success, ACP confirmation, or already-applied marker observed after submission",
             )
 
         shot = await self.artifacts.capture_failure(self.page, "no-confirmation", profile, job.job_id)

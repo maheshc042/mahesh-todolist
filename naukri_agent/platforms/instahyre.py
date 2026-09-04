@@ -30,6 +30,8 @@ class InstahyrePlatform(BaseJobPlatform):
         super().__init__(page, account.key, policy)
         self.account = account
         self.artifacts = artifacts
+        self._current_view: str = "recommended"
+        self._current_profile: JobProfile | None = None
 
     @property
     def platform_name(self) -> str:
@@ -155,8 +157,14 @@ class InstahyrePlatform(BaseJobPlatform):
             timeout_ms=2500,
         )
 
-        # Only target Node.js and Python for Instahyre filter search
-        target_skills = ["Node.js", "Python"]
+        # Target skills dynamically tailored to the profile
+        prof_name = (profile.name or "").lower()
+        if any(k in prof_name for k in ["ai", "python", "machine learning", "ml"]):
+            target_skills = ["Python", "Machine Learning", "FastAPI"]
+        elif any(k in prof_name for k in ["full stack", "mern", "web", "frontend", "backend"]):
+            target_skills = ["Node.js", "React.js", "Python"]
+        else:
+            target_skills = ["Python", "React.js"]
 
         if skills_input:
             # Clear any pre-existing stale skill tags
@@ -313,23 +321,174 @@ class InstahyrePlatform(BaseJobPlatform):
         except Exception as exc:
             log.debug("instahyre.dismiss_modals_error", error=str(exc))
 
+    async def _scrape_page_cards(
+        self,
+        tab_name: str,
+        page_num: int,
+        exclude_job_ids: set[str],
+        seen_ids: set[str],
+        jobs: list[Job],
+        max_jobs: int,
+    ) -> int:
+        card_selector = (
+            "div.employer-row, div.opportunity-box, div.opportunity-card, "
+            "div.job-card, div[class*='employer-row']"
+        )
+        try:
+            await self.page.wait_for_selector(card_selector, timeout=8000)
+        except Exception:
+            pass
+
+        cards = await self.page.locator(card_selector).all()
+        if not cards:
+            return 0
+
+        added_this_page = 0
+        for index, card in enumerate(cards, start=len(jobs) + 1):
+            if len(jobs) >= max_jobs:
+                break
+            try:
+                raw_name = ""
+                name_loc = card.locator("div.employer-job-name div.company-name").first
+                try:
+                    if await name_loc.count() > 0:
+                        raw_name = (await name_loc.inner_text(timeout=2000)).strip()
+                except Exception:
+                    pass
+
+                if not raw_name:
+                    title_attr_loc = card.locator("div.employer-job-name").first
+                    try:
+                        raw_name = (await title_attr_loc.get_attribute("title") or "").strip()
+                    except Exception:
+                        pass
+
+                if not raw_name:
+                    continue
+
+                if " - " in raw_name:
+                    parts = raw_name.split(" - ", 1)
+                    company = parts[0].strip()
+                    title = parts[1].strip()
+                else:
+                    company = raw_name
+                    title = raw_name
+
+                if not title:
+                    continue
+
+                tags: list[str] = []
+                seen_tags: set[str] = set()
+                for t in await card.locator("ul.tags li").all():
+                    txt = (await safe_text(t)).strip()
+                    if txt and not txt.startswith("+") and txt.lower() not in seen_tags:
+                        seen_tags.add(txt.lower())
+                        tags.append(txt)
+
+                location = ""
+                loc_node = card.locator("div.employer-locations span").first
+                if await loc_node.count() > 0:
+                    location = (await safe_text(loc_node)).strip()
+
+                note_text = ""
+                note_loc = card.locator("div.employer-notes").first
+                if await note_loc.count() > 0:
+                    note_text = (await safe_text(note_loc)).strip()
+
+                url = "https://www.instahyre.com/candidate/opportunities/"
+                job_id = f"instahyre-{Job.stable_id(url, title, company)}"
+
+                if job_id in exclude_job_ids or job_id in seen_ids:
+                    continue
+
+                seen_ids.add(job_id)
+                jobs.append(
+                    Job(
+                        job_id=job_id,
+                        title=title,
+                        company=company,
+                        location=location,
+                        url=url,
+                        description=note_text,
+                        tags=tags,
+                        recommendation_tab=f"{tab_name}_{page_num}",
+                        recommendation_position=index,
+                    )
+                )
+                added_this_page += 1
+            except Exception as exc:
+                log.debug("instahyre.fetch.parse_error", error=str(exc))
+                continue
+
+        return added_this_page
+
+    async def _paginate_and_collect(
+        self,
+        tab_name: str,
+        max_pages: int,
+        exclude_job_ids: set[str],
+        seen_ids: set[str],
+        jobs: list[Job],
+        max_jobs: int,
+    ) -> None:
+        page_num = 1
+        while page_num <= max_pages and len(jobs) < max_jobs:
+            log.info("instahyre.fetch.scraping_page", tab=tab_name, page_num=page_num, total_jobs=len(jobs))
+            added = await self._scrape_page_cards(tab_name, page_num, exclude_job_ids, seen_ids, jobs, max_jobs)
+            if added == 0 and page_num > 1:
+                break
+
+            if len(jobs) >= max_jobs or page_num >= max_pages:
+                break
+
+            has_next = False
+            next_li = self.page.locator("div.pagination li:has-text('Next'):not(.hidden)").first
+            try:
+                has_next = await next_li.count() > 0 and await next_li.is_visible()
+            except Exception:
+                pass
+
+            if not has_next:
+                next_num = self.page.locator(f"div.pagination li:text-is('{page_num + 1}')").first
+                try:
+                    has_next = await next_num.count() > 0 and await next_num.is_visible()
+                    if has_next:
+                        next_li = next_num
+                except Exception:
+                    pass
+
+            if has_next:
+                await next_li.click()
+                await human_pause(1500, 2500)
+                page_num += 1
+            else:
+                log.info("instahyre.fetch.last_page_reached", tab=tab_name, pages=page_num)
+                break
+
+        # Return to page 1
+        try:
+            first_page = self.page.locator("div.pagination li:text-is('1')").first
+            if await first_page.count() > 0 and await first_page.is_visible():
+                await first_page.click()
+                await human_pause(1000, 1800)
+        except Exception:
+            pass
+
     async def fetch_jobs(self, profile: JobProfile, exclude_job_ids: set[str]) -> list[Job]:
         log.info("instahyre.fetch.start", profile=profile.name)
-
         jobs: list[Job] = []
         seen_ids: set[str] = set()
-
         feed_url = "https://www.instahyre.com/candidate/opportunities/"
-        log.info("instahyre.fetch.query", url=feed_url)
+        max_jobs = profile.platform_limits.get(self.platform_name, 150)
+        self._current_profile = profile
+        self._current_view = "recommended"
 
         try:
             await self.page.goto(feed_url, wait_until="domcontentloaded")
             await human_pause(2000, 3000)
-
-            # Automatically dismiss blocking popup modals
             await self._dismiss_modals()
 
-            # Dump feed HTML for exact inspection
+            # Dump feed HTML for diagnostic trace
             try:
                 dump_path = self.artifacts.dir / "instahyre-feed.html"
                 content = await self.page.content()
@@ -338,170 +497,41 @@ class InstahyrePlatform(BaseJobPlatform):
             except Exception as exc:
                 log.debug("instahyre.feed_html_dump_failed", error=str(exc))
 
-            card_selector = (
-                "div.employer-row, div.opportunity-box, div.opportunity-card, "
-                "div.job-card, div[class*='employer-row']"
+            # Stage 1: Scrape Recommended Opportunities Feed
+            log.info("instahyre.fetch.stage1_recommended_start", target_limit=max_jobs)
+            await self._paginate_and_collect(
+                tab_name="recommended_page",
+                max_pages=5,
+                exclude_job_ids=exclude_job_ids,
+                seen_ids=seen_ids,
+                jobs=jobs,
+                max_jobs=max_jobs,
             )
+            log.info("instahyre.fetch.stage1_recommended_done", count=len(jobs))
 
-
-
-            # Feed already showing opportunities? (Instahyre remembers filter
-            # state in the URL/session.) The old check looked for hrefs and
-            # .position-title classes that don't exist in this AngularJS DOM —
-            # cards carry no hrefs at all (they use ng-click), so it matched
-            # nothing and forced a re-filter on every single run.
-            existing_cards = await self.page.locator("div.employer-row").count()
-            if existing_cards == 0:
-                log.info("instahyre.fetch.no_initial_jobs_filtering")
+            # Stage 2: Profile Search Filters (collect more jobs up to target limit)
+            if len(jobs) < max_jobs:
+                log.info(
+                    "instahyre.fetch.stage2_search_filters_start",
+                    current_count=len(jobs),
+                    target_limit=max_jobs,
+                )
                 await self._apply_ui_filters(profile)
-
-
-            page_num = 1
-            while True:
-                log.info("instahyre.fetch.scraping_page", page_num=page_num)
-
-                try:
-                    await self.page.wait_for_selector(card_selector, timeout=8000)
-                except Exception:
-                    log.debug("instahyre.fetch.card_selector_timeout", page_num=page_num)
-
-                cards = await self.page.locator(card_selector).all()
-
-                if not cards:
-                    log.info("instahyre.fetch.no_cards_found_exiting", page_num=page_num)
-                    break  # No cards found on this feed page
-
-                log.info("instahyre.fetch.cards_found", count=len(cards))
-
-
-                for index, card in enumerate(cards, start=len(jobs) + 1):
-                    try:
-                        # Extract company-title from the desktop employer-job-name div
-                        # Structure: div.employer-job-name > div.company-name
-                        raw_name = ""
-                        name_loc = card.locator("div.employer-job-name div.company-name").first
-                        try:
-                            if await name_loc.count() > 0:
-                                raw_name = (await name_loc.inner_text(timeout=2000)).strip()
-                        except Exception:
-                            pass
-
-                        # Fallback: try the title attribute on employer-job-name
-                        if not raw_name:
-                            title_attr_loc = card.locator("div.employer-job-name").first
-                            try:
-                                raw_name = (await title_attr_loc.get_attribute("title") or "").strip()
-                            except Exception:
-                                pass
-
-                        if not raw_name:
-                            log.debug("instahyre.fetch.card_no_name", index=index)
-                            continue
-
-                        if " - " in raw_name:
-                            parts = raw_name.split(" - ", 1)
-                            company = parts[0].strip()
-                            title = parts[1].strip()
-                        else:
-                            company = raw_name
-                            title = raw_name
-
-                        if not title:
-                            continue
-
-                        # Enrich card metadata for HardFilter/RankingEngine —
-                        # a blank location fails allowed_locations checks
-                        # (filters.py) and empty tags/description gut the skill
-                        # ranking signal (ranking.py scores on all three).
-                        tags: list[str] = []
-                        seen_tags: set[str] = set()
-                        for t in await card.locator("ul.tags li").all():
-                            txt = (await safe_text(t)).strip()
-                            if txt and not txt.startswith("+") and txt.lower() not in seen_tags:
-                                seen_tags.add(txt.lower())
-                                tags.append(txt)
-
-                        location = ""
-                        loc_node = card.locator("div.employer-locations span").first
-                        if await loc_node.count() > 0:
-                            location = (await safe_text(loc_node)).strip()
-
-                        note_text = ""
-                        note_loc = card.locator("div.employer-notes").first
-                        if await note_loc.count() > 0:
-                            note_text = (await safe_text(note_loc)).strip()
-
-                        # Instahyre links have no href — they use ng-click="openApplyModal(opp)"
-                        url = "https://www.instahyre.com/candidate/opportunities/"
-
-                        # Generate stable ID from title+company
-                        job_id = f"instahyre-{Job.stable_id(url, title, company)}"
-
-                        if job_id in exclude_job_ids or job_id in seen_ids:
-                            continue
-
-                        seen_ids.add(job_id)
-                        jobs.append(
-                            Job(
-                                job_id=job_id,
-                                title=title,
-                                company=company,
-                                location=location,
-                                url=url,
-                                description=note_text,
-                                tags=tags,
-                                recommendation_tab=f"page_{page_num}",
-                                recommendation_position=index,
-                            )
-                        )
-
-                    except Exception as exc:
-                        log.debug("instahyre.fetch.parse_error", index=index, error=str(exc))
-                        continue
-
-
-                # Pagination (verified from saved DOM): div.pagination holds
-                # « Previous / numbered lis / 'Next »'. Next is an <li> with
-                # ng-click="nextPage()" that gains class 'hidden' on the last
-                # page — there is no <a> or .next link.
-                has_next = False
-                if page_num < 2:  # Safety cap for testing
-                    next_li = self.page.locator("div.pagination li:has-text('Next'):not(.hidden)").first
-                    try:
-                        has_next = await next_li.count() > 0 and await next_li.is_visible()
-                    except Exception:
-                        pass
-
-                    if not has_next:
-                        # Fallback: click the next page number directly
-                        next_num = self.page.locator(f"div.pagination li:text-is('{page_num + 1}')").first
-                        try:
-                            has_next = await next_num.count() > 0 and await next_num.is_visible()
-                        except Exception:
-                            pass
-                        next_li = next_num
-
-                if has_next:
-                    await next_li.click()
-                    await human_pause(1500, 3000)
-                    page_num += 1
-                else:
-                    log.info("instahyre.fetch.last_page_reached", pages=page_num)
-                    break
-
-            # Always return to Page 1 so apply phase starts from the top
-            try:
-                first_page = self.page.locator("div.pagination li:text-is('1')").first
-                if await first_page.count() > 0 and await first_page.is_visible():
-                    await first_page.click()
-                    await human_pause(1000, 2000)
-            except Exception:
-                pass
+                self._current_view = "search"
+                await self._paginate_and_collect(
+                    tab_name="search_page",
+                    max_pages=10,
+                    exclude_job_ids=exclude_job_ids,
+                    seen_ids=seen_ids,
+                    jobs=jobs,
+                    max_jobs=max_jobs,
+                )
+                log.info("instahyre.fetch.stage2_search_filters_done", total_gathered=len(jobs))
 
         except Exception as exc:
             log.warning("instahyre.fetch.error", url=feed_url, error=str(exc))
 
-        log.info("instahyre.fetch.done", count=len(jobs))
+        log.info("instahyre.fetch.done", count=len(jobs), current_view=self._current_view)
         return jobs
 
     async def _ensure_modal_closed(self) -> None:
@@ -559,11 +589,28 @@ class InstahyrePlatform(BaseJobPlatform):
                 modal = None
 
         if not modal:
+            feed_url = "https://www.instahyre.com/candidate/opportunities/"
+            tab = job.recommendation_tab or ""
+            is_search_job = "search" in tab
+            cur_view = getattr(self, "_current_view", "search" if is_search_job else "recommended")
+
+            if is_search_job and cur_view != "search":
+                log.info("instahyre.apply.switching_view_to_search", job_id=job.job_id)
+                if self._current_profile:
+                    await self._apply_ui_filters(self._current_profile)
+                self._current_view = "search"
+            elif not is_search_job and cur_view != "recommended":
+                log.info("instahyre.apply.switching_view_to_recommended", job_id=job.job_id)
+                await self.page.goto(feed_url, wait_until="domcontentloaded")
+                await human_pause(1500, 2500)
+                await self._dismiss_modals()
+                self._current_view = "recommended"
+
             # 1. Determine target pagination page
             target_page = 1
-            if job.recommendation_tab and job.recommendation_tab.startswith("page_"):
+            if tab and "_" in tab:
                 try:
-                    target_page = int(job.recommendation_tab.split("_")[1])
+                    target_page = int(tab.split("_")[-1])
                 except Exception:
                     target_page = 1
 

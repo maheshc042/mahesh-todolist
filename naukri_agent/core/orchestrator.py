@@ -121,6 +121,10 @@ class Orchestrator:
         self.applier: ApplyEngine | None = None
         self.api_client: NaukriApiClient | None = None
         self.consecutive_failures = 0
+        self.platform_consecutive_failures = 0
+        self.platform_started_at = 0.0
+        self.platform_time_budget_s = 0.0
+        self.current_platform_name = ""
         self.applied_today = 0
         self._background_tasks: set[asyncio.Task[Any]] = set()
         self.started_at = time.monotonic()
@@ -142,6 +146,20 @@ class Orchestrator:
         if self.consecutive_failures >= self.config.run.max_consecutive_failures:
             raise StopRun(
                 f"{self.consecutive_failures} consecutive failures — aborting to avoid a ban"
+            )
+
+    def _check_platform_limits(self, platform_name: str) -> None:
+        if self.elapsed_s > self.config.run.run_timeout_minutes * 60:
+            raise StopRun(f"run timeout of {self.config.run.run_timeout_minutes} minutes reached")
+        if self.platform_time_budget_s > 0 and self.platform_started_at > 0:
+            plat_elapsed = time.monotonic() - self.platform_started_at
+            if plat_elapsed >= self.platform_time_budget_s:
+                raise StopRun(
+                    f"platform time budget of {round(self.platform_time_budget_s / 60, 1)}m reached for {platform_name}"
+                )
+        if self.platform_consecutive_failures >= self.config.run.max_consecutive_failures:
+            raise StopRun(
+                f"{self.platform_consecutive_failures} consecutive failures on {platform_name} — stopping platform"
             )
 
     async def _pace(self) -> None:
@@ -212,118 +230,181 @@ class Orchestrator:
                 session_key=self.account.session_key,
             ) as browser:
                 self.metrics.browser_startup_s = time.perf_counter() - t_b_0
-                page = await browser.new_page()
-
-                # 1. Initialize Active Platforms
-                active_platforms: list[BaseJobPlatform] = []
-                answers: AnswerEngine | None = None
-
+                # 1. Determine which platforms run in this session
+                platform_specs: list[str] = []
                 if self.config.platforms.naukri:
-                    answers = await self._build_answer_engine(profiles[0])
-                    active_platforms.append(
-                        NaukriPlatform(
-                            page,
-                            browser,
-                            self.account,
-                            self.config,
-                            artifacts,
-                            answers,
-                            self.policy,
-                            self.metrics,
-                        )
-                    )
+                    platform_specs.append("naukri")
 
                 if self.account_key == "primary":
                     if self.config.platforms.instahyre:
-                        active_platforms.append(
-                            InstahyrePlatform(page, self.account, artifacts, self.policy)
-                        )
-
+                        platform_specs.append("instahyre")
                     if self.config.platforms.cutshort:
-                        if answers is None:
-                            answers = await self._build_answer_engine(profiles[0])
-                        active_platforms.append(
-                            CutshortPlatform(page, self.account, artifacts, answers, self.policy)
-                        )
-
+                        platform_specs.append("cutshort")
                     if self.config.platforms.wellfound:
-                        active_platforms.append(
-                            WellfoundPlatform(page, self.account, artifacts, self.policy)
-                        )
-
+                        platform_specs.append("wellfound")
                     if self.config.platforms.linkedin:
-                        if answers is None:
-                            answers = await self._build_answer_engine(profiles[0])
-                        active_platforms.append(
-                            LinkedInPlatform(page, self.account, artifacts, answers, self.policy)
+                        platform_specs.append("linkedin")
+
+                answers: AnswerEngine | None = None
+                total_timeout_s = self.config.run.run_timeout_minutes * 60
+                executed_platforms: list[BaseJobPlatform] = []
+
+                for p_idx, p_name in enumerate(platform_specs):
+                    remaining_run_time_s = total_timeout_s - self.elapsed_s
+                    if remaining_run_time_s < 120:
+                        log.warning(
+                            "run.time_budget_exhausted",
+                            remaining_s=round(remaining_run_time_s, 1),
+                            skipping=platform_specs[p_idx:],
                         )
+                        self.stats.errors.append(f"run timeout reached before {p_name}")
+                        break
 
+                    platforms_left = len(platform_specs) - p_idx
+                    if platforms_left > 1:
+                        if p_name == "naukri":
+                            # Naukri gets up to 52% of remaining time, capped at 22 minutes
+                            self.platform_time_budget_s = min(remaining_run_time_s * 0.52, 1320.0)
+                        else:
+                            # Divide remaining time fairly, leaving 60s for sweep/cleanup
+                            self.platform_time_budget_s = max((remaining_run_time_s - 60.0) / platforms_left, 180.0)
+                    else:
+                        self.platform_time_budget_s = max(remaining_run_time_s - 30.0, 120.0)
 
+                    self.platform_started_at = time.monotonic()
+                    self.platform_consecutive_failures = 0
+                    self.current_platform_name = p_name
 
-                for platform in active_platforms:
+                    log.info(
+                        "platform.time_slice_allocated",
+                        platform=p_name,
+                        budget_minutes=round(self.platform_time_budget_s / 60, 1),
+                        total_elapsed_minutes=round(self.elapsed_s / 60, 1),
+                    )
+
                     pause_reason = await self.repo.platform_pause_reason(
                         self.account_key,
-                        platform.platform_name,
+                        p_name,
                     )
                     if pause_reason:
                         if self.headed:
-                            log.warning("platform.paused_attempting_headed_recovery", platform=platform.platform_name, reason=pause_reason)
+                            log.warning("platform.paused_attempting_headed_recovery", platform=p_name, reason=pause_reason)
                         else:
-                            raise FatalAgentError(
-                                f"{platform.platform_name} is paused: {pause_reason}"
-                            )
-
-                    log.info("platform.start", platform=platform.platform_name)
-                    t_login_0 = time.perf_counter()
-                    authenticated = await platform.ensure_logged_in()
-                    self.metrics.login_s += time.perf_counter() - t_login_0
-                    if not authenticated:
-                        await self.repo.pause_platform(
-                            self.account_key,
-                            platform.platform_name,
-                            f"{platform.platform_name} authentication was not confirmed",
-                        )
-                        raise FatalAgentError(
-                            f"{platform.platform_name} authentication was not confirmed"
-                        )
-
-                    # If previously paused, unpause upon confirmed authentication
-                    if pause_reason:
-                        await self.repo.resume_platform(self.account_key, platform.platform_name)
-                        log.info("platform.resumed_successfully", platform=platform.platform_name)
-
-                    # Run Naukri profile refresh ONLY if it's the Naukri platform
-                    if platform.platform_name == "naukri":
-                        ms_cfg = self.config.match_score_prefilter
-                        if ms_cfg.enabled:
-                            token = await extract_naukri_token(page)
-                            if token:
-                                self.api_client = NaukriApiClient(
-                                    token,
-                                    timeout_s=ms_cfg.request_timeout_s,
-                                    max_concurrent=ms_cfg.max_concurrent,
+                            if p_name == "naukri":
+                                raise FatalAgentError(
+                                    f"{p_name} is paused: {pause_reason}"
                                 )
-                                await self.api_client.__aenter__()
-                                log.info("match_score.api_client_ready")
-                            else:
-                                log.info("match_score.no_token_skipping_api")
+                            log.warning(
+                                "platform.paused_skipping",
+                                platform=p_name,
+                                reason=pause_reason,
+                            )
+                            self.stats.errors.append(f"{p_name} skipped (paused: {pause_reason})")
+                            continue
 
-                        t_ref_0 = time.perf_counter()
-                        await self._refresh_profile(page)
-                        self.metrics.resume_switch_s = time.perf_counter() - t_ref_0
+                    # Create dedicated, clean browser page for this platform to prevent session/modal bleed
+                    page = await browser.new_page()
+                    try:
+                        if p_name == "naukri":
+                            if answers is None:
+                                answers = await self._build_answer_engine(profiles[0])
+                            platform = NaukriPlatform(
+                                page,
+                                browser,
+                                self.account,
+                                self.config,
+                                artifacts,
+                                answers,
+                                self.policy,
+                                self.metrics,
+                            )
+                        elif p_name == "instahyre":
+                            platform = InstahyrePlatform(page, self.account, artifacts, self.policy)
+                        elif p_name == "cutshort":
+                            if answers is None:
+                                answers = await self._build_answer_engine(profiles[0])
+                            platform = CutshortPlatform(page, self.account, artifacts, answers, self.policy)
+                        elif p_name == "wellfound":
+                            platform = WellfoundPlatform(page, self.account, artifacts, self.policy)
+                        elif p_name == "linkedin":
+                            if answers is None:
+                                answers = await self._build_answer_engine(profiles[0])
+                            platform = LinkedInPlatform(page, self.account, artifacts, answers, self.policy)
+                        else:
+                            continue
 
-                    platform_profiles = profiles
-                    if platform.platform_name != "naukri":
-                        platform_profiles = self.config.active_profiles(self.only_profiles, account=None)
+                        executed_platforms.append(platform)
 
-                    for profile in platform_profiles:
+                        log.info("platform.start", platform=platform.platform_name)
+                        t_login_0 = time.perf_counter()
+                        authenticated = await platform.ensure_logged_in()
+                        self.metrics.login_s += time.perf_counter() - t_login_0
+                        if not authenticated:
+                            await self.repo.pause_platform(
+                                self.account_key,
+                                platform.platform_name,
+                                f"{platform.platform_name} authentication was not confirmed",
+                            )
+                            if platform.platform_name == "naukri":
+                                raise FatalAgentError(
+                                    f"{platform.platform_name} authentication was not confirmed"
+                                )
+                            log.warning(
+                                "platform.login_failed_skipping",
+                                platform=platform.platform_name,
+                            )
+                            self.stats.errors.append(
+                                f"{platform.platform_name} authentication was not confirmed — skipping platform"
+                            )
+                            continue
+
+                        # If previously paused, unpause upon confirmed authentication
+                        if pause_reason:
+                            await self.repo.resume_platform(self.account_key, platform.platform_name)
+                            log.info("platform.resumed_successfully", platform=platform.platform_name)
+
+                        # Run Naukri profile refresh ONLY if it's the Naukri platform
+                        if platform.platform_name == "naukri":
+                            ms_cfg = self.config.match_score_prefilter
+                            if ms_cfg.enabled:
+                                token = await extract_naukri_token(page)
+                                if token:
+                                    self.api_client = NaukriApiClient(
+                                        token,
+                                        timeout_s=ms_cfg.request_timeout_s,
+                                        max_concurrent=ms_cfg.max_concurrent,
+                                    )
+                                    await self.api_client.__aenter__()
+                                    log.info("match_score.api_client_ready")
+                                else:
+                                    log.info("match_score.no_token_skipping_api")
+
+                            t_ref_0 = time.perf_counter()
+                            await self._refresh_profile(page)
+                            self.metrics.resume_switch_s = time.perf_counter() - t_ref_0
+
+                        platform_profiles = profiles
+                        if platform.platform_name != "naukri":
+                            platform_profiles = self.config.active_profiles(self.only_profiles, account=None)
+
+                        for profile in platform_profiles:
+                            try:
+                                await self._run_profile(platform, profile, page, artifacts)
+                            except StopRun as stop:
+                                log.warning("platform.stopped_early", platform=platform.platform_name, reason=str(stop))
+                                self.stats.errors.append(f"{platform.platform_name}: {stop}")
+                                break
+                            except Exception as exc:
+                                log.exception("platform.profile_failed", platform=platform.platform_name, profile=profile.name)
+                                self.stats.errors.append(f"{platform.platform_name} failed for {profile.name}: {exc}")
+                                status = RunStatus.PARTIAL
+                                break
+                    finally:
                         try:
-                            await self._run_profile(platform, profile, page, artifacts)
-                        except StopRun as stop:
-                            log.warning("run.stopped_early", reason=str(stop))
-                            self.stats.errors.append(f"stopped early: {stop}")
-                            status = RunStatus.PARTIAL
-                            break
+                            if not page.is_closed():
+                                await page.close()
+                        except Exception:
+                            pass
 
                 # =========================================================
                 # PHASE 2: Questionnaire Sweep (after ALL applications sent)
@@ -333,16 +414,22 @@ class Orchestrator:
                 # this run's questionnaires AND any older threads still
                 # waiting for an answer.
                 # =========================================================
-                message_platforms = [p for p in active_platforms if hasattr(p, "handle_messages")]
+                message_platforms = [p for p in executed_platforms if hasattr(p, "handle_messages")]
                 if message_platforms and self.policy.may_mutate:
                     log.info(
                         "run.questionnaire_sweep.start",
                         platforms=[p.platform_name for p in message_platforms],
                     )
-                    await asyncio.sleep(60)  # settle time so auto-replies can fire
+                    await asyncio.sleep(15)  # settle time so auto-replies can fire
                     for m_platform in message_platforms:
                         try:
-                            await m_platform.handle_messages()
+                            sweep_page = await browser.new_page()
+                            m_platform.page = sweep_page
+                            try:
+                                await m_platform.handle_messages()
+                            finally:
+                                if not sweep_page.is_closed():
+                                    await sweep_page.close()
                         except Exception as exc:
                             log.warning(
                                 "run.questionnaire_sweep.platform_failed",
@@ -393,13 +480,13 @@ class Orchestrator:
             if self._background_tasks:
                 await asyncio.gather(*self._background_tasks, return_exceptions=True)
             # Detach popup listeners before the page dies.
-            if 'active_platforms' in locals():
-                for platform in active_platforms:
-                    if hasattr(platform, "applier") and getattr(platform, "applier") is not None:
-                        try:
-                            platform.applier.close()
-                        except Exception:
-                            pass
+            platforms_to_clean = locals().get('executed_platforms') or locals().get('active_platforms') or []
+            for platform in platforms_to_clean:
+                if hasattr(platform, "applier") and getattr(platform, "applier") is not None:
+                    try:
+                        platform.applier.close()
+                    except Exception:
+                        pass
             if self.applier is not None:
                 self.applier.close()
                 self.applier = None
@@ -541,7 +628,7 @@ class Orchestrator:
                 exclude_job_ids=known,
             )
             if collected_jobs:
-                self.stats.bump(profile.name, "scraped", len(collected_jobs))
+                self.stats.bump(profile.name, "scraped", len(collected_jobs), platform=platform.platform_name)
 
         if not collected_jobs:
             log.info("search.jobs_empty", profile=profile.name, platform=platform.platform_name)
@@ -558,7 +645,7 @@ class Orchestrator:
         )
         if len(collected_jobs) < pre_dedupe_count:
             deduped = pre_dedupe_count - len(collected_jobs)
-            self.stats.bump(profile.name, "filtered_out", deduped)
+            self.stats.bump(profile.name, "filtered_out", deduped, platform=platform.platform_name)
             log.info("search.cross_platform_dedupe", deduplicated=deduped, profile=profile.name)
 
         if not collected_jobs:
@@ -663,7 +750,7 @@ class Orchestrator:
         candidate_queue = plan.eligible_jobs
         try:
             for rjob in candidate_queue:
-                self._check_global_limits()
+                self._check_platform_limits(platform.platform_name)
                 if remaining() <= 0:
                     log.info("profile.cap_reached", profile=profile.name, cap=platform_limit)
                     break
@@ -723,7 +810,8 @@ class Orchestrator:
     ) -> ApplyOutcome:
         assert self.repo is not None
         bind_context(job_id=job.job_id)
-        self.stats.bump(profile.name, "considered")
+        platform_name = getattr(platform, "platform_name", str(platform)).capitalize()
+        self.stats.bump(profile.name, "considered", platform=platform_name)
 
         # Phase 1: free, card-level filtering.
         decision = filters.evaluate_card(job)
@@ -733,7 +821,7 @@ class Orchestrator:
                 reason=decision.reason,
                 detail=decision.detail,
             )
-            self.stats.bump(profile.name, "filtered_out")
+            self.stats.bump(profile.name, "filtered_out", platform=platform_name)
             if decision.reason == SkipReason.BANGALORE_WALKIN_ALERT:
                 self.stats.walkin_alerts.append(
                     {
@@ -809,7 +897,7 @@ class Orchestrator:
         platform_name = getattr(platform, "platform_name", str(platform)).capitalize()
 
         if outcome.status == ApplicationStatus.APPLIED:
-            self.stats.bump(profile.name, "applied")
+            self.stats.bump(profile.name, "applied", platform=platform_name)
             self.stats.applied_jobs.append(
                 {
                     "platform": platform_name,
@@ -824,13 +912,16 @@ class Orchestrator:
                 }
             )
             self.consecutive_failures = 0
+            self.platform_consecutive_failures = 0
         elif outcome.status == ApplicationStatus.FAILED:
-            self.stats.bump(profile.name, "failed")
+            self.stats.bump(profile.name, "failed", platform=platform_name)
             self.consecutive_failures += 1
+            self.platform_consecutive_failures += 1
             self.stats.errors.append(f"[{platform_name}] {job.title[:40]}: {outcome.detail[:120]}")
         elif outcome.status == ApplicationStatus.EXTERNAL or outcome.reason == SkipReason.EXTERNAL_APPLY:
-            self.stats.bump(profile.name, "external")
+            self.stats.bump(profile.name, "external", platform=platform_name)
             self.consecutive_failures = 0
+            self.platform_consecutive_failures = 0
             self.stats.external_jobs.append(
                 {
                     "platform": platform_name,
@@ -843,11 +934,13 @@ class Orchestrator:
                 }
             )
         elif outcome.status == ApplicationStatus.ALREADY_APPLIED:
-            self.stats.bump(profile.name, "already_applied")
+            self.stats.bump(profile.name, "already_applied", platform=platform_name)
             self.consecutive_failures = 0
+            self.platform_consecutive_failures = 0
         elif outcome.status == ApplicationStatus.NEEDS_REVIEW:
-            self.stats.bump(profile.name, "needs_review")
+            self.stats.bump(profile.name, "needs_review", platform=platform_name)
             self.consecutive_failures = 0
+            self.platform_consecutive_failures = 0
             for question in outcome.unanswered_questions:
                 await self.repo.queue_question_for_review(
                     profile=profile.name,

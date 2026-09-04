@@ -93,20 +93,21 @@ jobs:
           else
             # If triggered by Cron schedule, check the UTC hour
             CURRENT_HOUR=$(date -u +"%H")
+            CURRENT_HOUR_NUM=$((10#$CURRENT_HOUR))
             
-            # 03:xx UTC is the Morning run -> Primary Account
-            if [ "$CURRENT_HOUR" == "03" ]; then
-              echo "Morning Run Detected: Running Primary Account"
+            # 02:00 - 05:59 UTC is the Morning window -> Primary Account (AI / Python)
+            if [ "$CURRENT_HOUR_NUM" -ge 2 ] && [ "$CURRENT_HOUR_NUM" -le 5 ]; then
+              echo "Morning Run Detected (UTC $CURRENT_HOUR): Running Primary Account"
               python -m naukri_agent run -a primary
               
-            # 08:xx UTC is the Afternoon run -> Secondary Account
-            elif [ "$CURRENT_HOUR" == "08" ]; then
-              echo "Afternoon Run Detected: Running Secondary Account"
+            # 07:00 - 11:59 UTC is the Afternoon window -> Secondary Account (Full Stack / MERN)
+            elif [ "$CURRENT_HOUR_NUM" -ge 7 ] && [ "$CURRENT_HOUR_NUM" -le 11 ]; then
+              echo "Afternoon Run Detected (UTC $CURRENT_HOUR): Running Secondary Account"
               python -m naukri_agent run -a secondary
               
             else
-              echo "Unknown schedule hour ($CURRENT_HOUR), running primary as fallback."
-              python -m naukri_agent run -a primary
+              echo "Outside standard schedule windows (UTC $CURRENT_HOUR), running both accounts sequentially."
+              python -m naukri_agent run --all-accounts
             fi
           fi
 

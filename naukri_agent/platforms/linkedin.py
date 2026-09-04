@@ -367,8 +367,12 @@ class LinkedInPlatform(BaseJobPlatform):
 
         if pre_submit_check:
             decision = pre_submit_check(job)
-            if decision != FilterDecision.APPLY:
-                return ApplyOutcome(status=ApplicationStatus.SKIPPED, reason=SkipReason.FILTER_REJECTED, detail=str(decision))
+            if not decision.passed:
+                return ApplyOutcome(
+                    status=ApplicationStatus.SKIPPED,
+                    reason=decision.reason or SkipReason.FILTER_REJECTED,
+                    detail=decision.detail,
+                )
 
         # Check Easy Apply button inside details pane
         apply_btn = await first_visible(
@@ -410,8 +414,9 @@ class LinkedInPlatform(BaseJobPlatform):
             return ApplyOutcome(status=ApplicationStatus.FAILED, detail="Modal not visible")
 
         prev_step_signature = ""
+        stuck_count = 0
 
-        for step in range(1, 10):
+        for step in range(1, 12):
             await human_pause(800, 1500)
 
             # 1. Check for Safety Reminder screen
@@ -429,15 +434,22 @@ class LinkedInPlatform(BaseJobPlatform):
             # 2. Fill inputs strictly inside the modal container
             await self._fill_step_inputs(modal, job)
 
-            # Check if modal advanced
-            modal_content = await safe_text(modal)
-            step_sig = modal_content[:150]
+            # Check if modal advanced (inspecting actual input counts and form content, not static header)
+            form_content = modal.locator(".jobs-easy-apply-modal__content, .artdeco-modal__content, form").first
+            form_text = (await safe_text(form_content)).strip()
+            input_count = await modal.locator("input, select, textarea").count()
+            step_sig = f"inputs:{input_count}::{form_text[:250]}"
+
             if step > 1 and step_sig == prev_step_signature:
-                error_el = await first_visible(modal, [".artdeco-inline-feedback--error", "p.artdeco-inline-feedback", "[data-test-form-builder-error]"], timeout_ms=800)
-                err_txt = (await safe_text(error_el)).strip() if error_el else "Unknown blocker"
-                log.warning("linkedin.apply.step_stuck", step=step, error=err_txt)
-                await self._dismiss_modal()
-                return ApplyOutcome(status=ApplicationStatus.FAILED, detail=f"Step {step} blocked: {err_txt}")
+                stuck_count += 1
+                if stuck_count >= 2:
+                    error_el = await first_visible(modal, [".artdeco-inline-feedback--error", "p.artdeco-inline-feedback", "[data-test-form-builder-error]"], timeout_ms=800)
+                    err_txt = (await safe_text(error_el)).strip() if error_el else "Required field unfilled"
+                    log.warning("linkedin.apply.step_stuck", step=step, error=err_txt)
+                    await self._dismiss_modal()
+                    return ApplyOutcome(status=ApplicationStatus.FAILED, detail=f"Step {step} blocked: {err_txt}")
+            else:
+                stuck_count = 0
             prev_step_signature = step_sig
 
             # Check Submit button
@@ -631,6 +643,44 @@ class LinkedInPlatform(BaseJobPlatform):
                         await opt.click(force=True)
                         await human_pause(200, 400)
                         break
+            except Exception:
+                pass
+
+        # 3.5 Checkboxes strictly inside modal
+        checkboxes = await modal.locator("input[type='checkbox']").all()
+        for cb in checkboxes:
+            try:
+                if not await cb.is_visible():
+                    continue
+                cb_label = ""
+                cb_id = await cb.get_attribute("id") or ""
+                if cb_id:
+                    lbl = modal.locator(f"label[for='{cb_id}']").first
+                    if await lbl.count() > 0:
+                        cb_label = (await safe_text(lbl)).strip()
+                if not cb_label:
+                    lbl = cb.locator("xpath=ancestor::label[1], xpath=following-sibling::label[1]").first
+                    if await lbl.count() > 0:
+                        cb_label = (await safe_text(lbl)).strip()
+
+                cb_label_low = cb_label.lower()
+                is_checked = await cb.is_checked()
+                is_required = await cb.get_attribute("required") is not None or "required" in (await cb.get_attribute("class") or "")
+
+                if is_required or any(k in cb_label_low for k in ["agree", "consent", "acknowledge", "confirm", "certify", "terms", "policy", "authorized"]):
+                    if not is_checked:
+                        await cb.scroll_into_view_if_needed()
+                        try:
+                            await cb.check(force=True)
+                        except Exception:
+                            await cb.click(force=True)
+                        await human_pause(200, 400)
+                elif "follow" in cb_label_low:
+                    if is_checked:
+                        try:
+                            await cb.uncheck(force=True)
+                        except Exception:
+                            pass
             except Exception:
                 pass
 

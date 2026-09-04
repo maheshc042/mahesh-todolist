@@ -197,15 +197,25 @@ class RunStats:
     already_applied: int = 0
     needs_review: int = 0
     per_profile: dict[str, dict[str, int]] = field(default_factory=dict)
+    per_platform: dict[str, dict[str, int]] = field(default_factory=dict)
     applied_jobs: list[dict[str, str]] = field(default_factory=list)
     external_jobs: list[dict[str, str]] = field(default_factory=list)
     walkin_alerts: list[dict[str, str]] = field(default_factory=list)
     errors: list[str] = field(default_factory=list)
 
-    def bump(self, profile: str, key: str, amount: int = 1) -> None:
+    def bump(self, profile: str, key: str, amount: int = 1, platform: str | None = None) -> None:
         setattr(self, key, getattr(self, key, 0) + amount)
         bucket = self.per_profile.setdefault(profile, {})
         bucket[key] = bucket.get(key, 0) + amount
+        if platform:
+            plat_key = platform.lower()
+            p_bucket = self.per_platform.setdefault(plat_key, {})
+            p_bucket[key] = p_bucket.get(key, 0) + amount
+
+    def bump_platform(self, platform: str, key: str, amount: int = 1) -> None:
+        plat_key = platform.lower()
+        p_bucket = self.per_platform.setdefault(plat_key, {})
+        p_bucket[key] = p_bucket.get(key, 0) + amount
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -218,6 +228,7 @@ class RunStats:
             "already_applied": self.already_applied,
             "needs_review": self.needs_review,
             "per_profile": self.per_profile,
+            "per_platform": self.per_platform,
             "applied_jobs": self.applied_jobs,
             "external_jobs": self.external_jobs,
             "walkin_alerts": self.walkin_alerts,

@@ -264,6 +264,17 @@ JD_POSTED = ["span:has-text('Posted:') + span", "div.styles_jhc__stat__PgY67 spa
 
 # Success confirmation after a successful Easy Apply.
 APPLY_SUCCESS = [
+    # Modern Apply Confirmation Page (ACP) & Drawer
+    "div.acp-container",
+    "div.acp-header-container",
+    "img[alt='success-icon']",
+    "div.applied-job-content",
+    "div.job-title-text:has-text('Applied to')",
+    "div.job-title-text",
+    "span.job-title",
+    "div:has-text('Applied to')",
+    "div.acp-header-container img[src*='check_circle']",
+    # Legacy and in-page confirmation banners
     "div.apply-message",
     "span:has-text('You have successfully applied')",
     "div:has-text('successfully applied')",
@@ -297,7 +308,6 @@ CHATBOT_QUESTION = [
     "div.botMsg span",
     "div.botItem span",
     "li.chatbot_ListItem span",
-    "span.botMsg",
     "div._msg",
 ]
 CHATBOT_TEXT_INPUT = [
@@ -305,6 +315,17 @@ CHATBOT_TEXT_INPUT = [
     "div[contenteditable='true']",
     "textarea.textArea",
     "input.textInput",
+    "input[type='text']",
+    "input[placeholder*='Type' i]",
+    "input[placeholder*='answer' i]",
+    "input[placeholder*='Enter' i]",
+    "input[placeholder*='city' i]",
+    "input[placeholder*='location' i]",
+    "input[placeholder*='Search' i]",
+    "div.chatBot-input input",
+    "div.chatInput",
+    "div[class*='chat'] input",
+    "div[class*='chat'] textarea",
 ]
 CHATBOT_SEND = [
     "div.sendMsg",
@@ -317,6 +338,7 @@ CHATBOT_RADIO_OPTIONS = [
     "div.singleselect-radiobutton-container label",
     "label.ssrc__label",
     "div.radioOption label",
+    "div[class*='radio'] label",
 ]
 CHATBOT_CHECKBOX_OPTIONS = [
     "div.multi-checkbox-container label",
@@ -330,8 +352,50 @@ CHATBOT_CHIPS = [
     "div.chipsContainer div.chipItem",
     "div.chatbot_MessageContainer div.chip",
     "div.chipsContainer div.chip",
+    "div.chip-container div",
+    "div.chips-wrapper div",
 ]
-CHATBOT_DROPDOWN = ["select.dropdownWrapper", "select[class*='dropdown']"]
+CHATBOT_DROPDOWN = ["select.dropdownWrapper", "select[class*='dropdown']", "select"]
+CHATBOT_COMBOBOX_TRIGGER = [
+    "div.dropdownWrapper",
+    "div.custom-select",
+    "div[class*='dropdownWrapper']",
+    "div[class*='dropdownContainer']",
+    "div.botItem div.dropdown",
+    "div.chatbot_Dropdown",
+    "div[role='combobox']",
+    "input[role='combobox']",
+    "div.select-dropdown",
+    "div.search-select",
+    "div[class*='select-container']",
+    "div.chatBot-input div.dropdown",
+    "div[class*='city-select']",
+    "div[class*='location-select']",
+]
+CHATBOT_DROPDOWN_OPTIONS = [
+    "div.dropdownWrapper ul li",
+    "div.dropdownWrapper div.option",
+    "ul.dropdownOptions li",
+    "div.options-container div",
+    "div[class*='dropdown-options'] div",
+    "div[class*='option-item']",
+    "li[role='option']",
+    "div[role='option']",
+    "ul[role='listbox'] li",
+    "div[role='listbox'] div",
+    "div.suggestion-list li",
+    "div.search-list li",
+    "div.botItem li",
+    "div.custom-select-option",
+]
+CHATBOT_SEARCH_INPUT = [
+    "div.dropdownWrapper input",
+    "input.search-input",
+    "input[placeholder*='Search' i]",
+    "input[placeholder*='Select' i]",
+    "input.dropdown-search",
+    "div.search-box input",
+]
 CHATBOT_SAVE = [
     "div.botItem button:has-text('Save')",
     "button:has-text('Save')",

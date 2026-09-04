@@ -101,29 +101,52 @@ class ChatbotHandler:
         return ScreeningQuestion(text=text, kind=kind, options=options)
 
     async def _classify_input(self) -> tuple[str, list[str]]:
-        """Inspect which widget the drawer is currently rendering."""
-        radios = await self._option_texts(S.CHATBOT_RADIO_OPTIONS)
-        if radios:
-            return "radio", radios
+        """Inspect which widget the drawer is currently rendering, allowing time for React hydration."""
+        for attempt in range(5):
+            radios = await self._option_texts(S.CHATBOT_RADIO_OPTIONS)
+            if radios:
+                return "radio", radios
 
-        checkboxes = await self._option_texts(S.CHATBOT_CHECKBOX_OPTIONS)
-        if checkboxes:
-            return "checkbox", checkboxes
+            checkboxes = await self._option_texts(S.CHATBOT_CHECKBOX_OPTIONS)
+            if checkboxes:
+                return "checkbox", checkboxes
 
-        chips = await self._option_texts(S.CHATBOT_CHIPS)
-        if chips:
-            return "radio", chips
+            chips = await self._option_texts(S.CHATBOT_CHIPS)
+            if chips:
+                return "radio", chips
 
-        dropdown = await first_visible(self.page, S.CHATBOT_DROPDOWN, timeout_ms=800)
-        if dropdown is not None:
-            option_texts = [
-                (await safe_text(option))
-                for option in await dropdown.locator("option").all()
-            ]
-            return "dropdown", [text for text in option_texts if text]
+            dropdown = await first_visible(self.page, S.CHATBOT_DROPDOWN, timeout_ms=300)
+            if dropdown is not None:
+                option_texts = [
+                    (await safe_text(option))
+                    for option in await dropdown.locator("option").all()
+                ]
+                options = [text for text in option_texts if text]
+                if options:
+                    return "dropdown", options
 
-        if await first_visible(self.page, S.CHATBOT_TEXT_INPUT, timeout_ms=1_200):
-            return "text", []
+            # Custom combobox / dropdown options
+            combobox_options = await self._option_texts(S.CHATBOT_DROPDOWN_OPTIONS)
+            if combobox_options:
+                return "combobox", combobox_options
+
+            combobox_trigger = await first_visible(self.page, S.CHATBOT_COMBOBOX_TRIGGER, timeout_ms=300)
+            if combobox_trigger is not None:
+                try:
+                    await combobox_trigger.click(timeout=1_500)
+                    await human_pause(200, 400)
+                    options = await self._option_texts(S.CHATBOT_DROPDOWN_OPTIONS)
+                    if options:
+                        return "combobox", options
+                except Exception:
+                    pass
+                return "combobox", []
+
+            if await first_visible(self.page, S.CHATBOT_TEXT_INPUT, timeout_ms=300):
+                return "text", []
+
+            if attempt < 4:
+                await asyncio.sleep(0.4)
 
         return "unknown", []
 
@@ -166,7 +189,54 @@ class ChatbotHandler:
             log.warning("chatbot.text_answer_failed", error=str(exc)[:200])
             return False
 
+    async def _answer_combobox(self, value: str) -> bool:
+        """Handles modern React custom dropdowns and searchable select comboboxes."""
+        val_clean = value.strip().lower()
+
+        # Step 1: Ensure options list is expanded if not already visible
+        current_options = await self._option_texts(S.CHATBOT_DROPDOWN_OPTIONS)
+        if not current_options:
+            trigger = await first_visible(self.page, S.CHATBOT_COMBOBOX_TRIGGER, timeout_ms=1_500)
+            if trigger is not None:
+                try:
+                    await trigger.click(timeout=2_000)
+                    await human_pause(200, 400)
+                except Exception:
+                    pass
+
+        # Step 2: If a search input exists in the dropdown, filter by value
+        search_box = await first_visible(self.page, S.CHATBOT_SEARCH_INPUT, timeout_ms=800)
+        if search_box is not None:
+            try:
+                await search_box.click(timeout=1_500)
+                await search_box.press_sequentially(value, delay=35)
+                await human_pause(200, 400)
+            except Exception:
+                pass
+
+        # Step 3: Find matching option locator
+        for selector in S.CHATBOT_DROPDOWN_OPTIONS:
+            locators = await self.page.locator(selector).all()
+            for locator in locators:
+                try:
+                    if not await locator.is_visible():
+                        continue
+                    text = (await safe_text(locator)).strip().lower()
+                    if text and (text == val_clean or val_clean in text or text in val_clean):
+                        self.policy.require_mutation("naukri.screening.answer")
+                        await locator.click(timeout=2_500)
+                        await human_pause(200, 500)
+                        await self._submit()
+                        return True
+                except Exception:
+                    continue
+
+        return False
+
     async def _answer_option(self, value: str, kind: str) -> bool:
+        if kind == "combobox":
+            return await self._answer_combobox(value)
+
         selectors = (
             S.CHATBOT_CHECKBOX_OPTIONS if kind == "checkbox" else S.CHATBOT_RADIO_OPTIONS
         ) + S.CHATBOT_CHIPS
@@ -193,8 +263,9 @@ class ChatbotHandler:
                 await self._submit()
                 return True
             except Exception:
-                return False
-        return False
+                pass
+
+        return await self._answer_combobox(value)
 
     async def _submit(self) -> bool:
         for selector in S.CHATBOT_SAVE + S.CHATBOT_SEND:
@@ -258,18 +329,32 @@ class ChatbotHandler:
                 await self.close()
                 return result
 
-            ok = (
-                await self._answer_text(resolved.value)
-                if question.kind in ("text", "unknown")
-                else await self._answer_option(resolved.value, question.kind)
-            )
+            ok = False
+            if question.kind == "combobox":
+                ok = await self._answer_combobox(resolved.value)
+            elif question.kind in ("text", "unknown"):
+                ok = await self._answer_text(resolved.value)
+            else:
+                ok = await self._answer_option(resolved.value, question.kind)
+
             if not ok:
-                # Widget classification may have been wrong; try the other path.
-                ok = (
-                    await self._answer_option(resolved.value, "radio")
-                    if question.kind in ("text", "unknown")
-                    else await self._answer_text(resolved.value)
-                )
+                # Robust fallback cascade across all widget types
+                if question.kind in ("text", "unknown"):
+                    ok = (
+                        await self._answer_option(resolved.value, "radio")
+                        or await self._answer_combobox(resolved.value)
+                    )
+                elif question.kind == "combobox":
+                    ok = (
+                        await self._answer_option(resolved.value, "radio")
+                        or await self._answer_text(resolved.value)
+                    )
+                else:
+                    ok = (
+                        await self._answer_combobox(resolved.value)
+                        or await self._answer_text(resolved.value)
+                    )
+
             if not ok:
                 result.error = f"could not submit answer for: {question.text[:120]}"
                 log.error("chatbot.answer_submit_failed", question=question.text[:150])
