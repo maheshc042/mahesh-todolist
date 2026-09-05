@@ -477,7 +477,10 @@ class InstahyrePlatform(BaseJobPlatform):
         jobs: list[Job] = []
         seen_ids: set[str] = set()
         feed_url = "https://www.instahyre.com/candidate/opportunities/"
-        max_jobs = profile.platform_limits.get(self.platform_name, 150)
+        target_applies = profile.platform_limits.get(self.platform_name, 150)
+        # Scrape a generous pool (2x apply limit) so that after filtering out non-tech
+        # and senior roles, the apply engine actually has enough eligible jobs to reach target applies.
+        max_scrape = max(250, int(target_applies * 2))
         self._current_profile = profile
         self._current_view = "recommended"
 
@@ -496,23 +499,23 @@ class InstahyrePlatform(BaseJobPlatform):
                 log.debug("instahyre.feed_html_dump_failed", error=str(exc))
 
             # Stage 1: Scrape Recommended Opportunities Feed
-            log.info("instahyre.fetch.stage1_recommended_start", target_limit=max_jobs)
+            log.info("instahyre.fetch.stage1_recommended_start", target_limit=max_scrape)
             await self._paginate_and_collect(
                 tab_name="recommended_page",
                 max_pages=5,
                 exclude_job_ids=exclude_job_ids,
                 seen_ids=seen_ids,
                 jobs=jobs,
-                max_jobs=max_jobs,
+                max_jobs=max_scrape,
             )
             log.info("instahyre.fetch.stage1_recommended_done", count=len(jobs))
 
-            # Stage 2: Profile Search Filters (collect more jobs up to target limit)
-            if len(jobs) < max_jobs:
+            # Stage 2: Profile Search Filters (collect more jobs up to scrape limit)
+            if len(jobs) < max_scrape:
                 log.info(
                     "instahyre.fetch.stage2_search_filters_start",
                     current_count=len(jobs),
-                    target_limit=max_jobs,
+                    target_limit=max_scrape,
                 )
                 await self._apply_ui_filters(profile)
                 self._current_view = "search"
@@ -522,7 +525,7 @@ class InstahyrePlatform(BaseJobPlatform):
                     exclude_job_ids=exclude_job_ids,
                     seen_ids=seen_ids,
                     jobs=jobs,
-                    max_jobs=max_jobs,
+                    max_jobs=max_scrape,
                 )
                 log.info("instahyre.fetch.stage2_search_filters_done", total_gathered=len(jobs))
 

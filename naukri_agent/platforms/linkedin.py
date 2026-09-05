@@ -228,14 +228,18 @@ class LinkedInPlatform(BaseJobPlatform):
     async def fetch_jobs(self, profile: JobProfile, exclude_job_ids: set[str]) -> list[Job]:
         """Fetches fresh Easy Apply jobs from LinkedIn job search with left-pane scrolling across pages."""
         base_search_url = self._get_search_url(profile)
-        max_target = profile.platform_limits.get(self.platform_name, 50)
-        log.info("linkedin.fetch.start", profile=profile.name, max_target=max_target)
+        target_applies = profile.platform_limits.get(self.platform_name, 50)
+        # Scrape a generous pool (2.5x the apply target) so that after hard filtering
+        # and recruiter alignment, the apply engine actually has enough eligible jobs
+        # to satisfy the application quota (e.g. 50 successful applies).
+        scrape_target = max(125, int(target_applies * 2.5))
+        log.info("linkedin.fetch.start", profile=profile.name, target_applies=target_applies, scrape_target=scrape_target)
 
         jobs: list[Job] = []
         seen_ids: set[str] = set()
 
-        for page_idx in range(4):  # Scrape up to 4 pages (25 jobs per page = 100 max)
-            if len(jobs) >= max_target:
+        for page_idx in range(6):  # Scrape up to 6 pages (25 jobs per page = 150 max)
+            if len(jobs) >= scrape_target:
                 break
 
             start_offset = page_idx * 25
@@ -291,7 +295,7 @@ class LinkedInPlatform(BaseJobPlatform):
 
             page_added = 0
             for idx in range(total_cards):
-                if len(jobs) >= max_target:
+                if len(jobs) >= scrape_target:
                     break
                 try:
                     card = card_locators.nth(idx)
