@@ -239,12 +239,25 @@ class AnswerEngine:
         if experience is not None:
             return experience
 
+        # Stage 3: Programming Language Proficiency Intent
+        lang_prof = self._resolve_language_proficiency(text, question)
+        if lang_prof is not None:
+            return lang_prof
+
         # Stage 4: Fuzzy Math
         fuzzy = self._resolve_fuzzy(text, question)
         if fuzzy is not None:
             return fuzzy
 
         log.info("answers.unresolved", question=question.text[:160], kind=question.kind, options=len(question.options))
+        return None
+
+    def _resolve_language_proficiency(self, text: str, question: ScreeningQuestion) -> ResolvedAnswer | None:
+        low = text.lower()
+        if any(k in low for k in ("programming language", "comparable programming language", "proficiency in python", "proficiency in typescript")):
+            ans = "Proficient in Python and TypeScript, with extensive hands-on experience building production APIs and AI applications."
+            log.info("answers.language_proficiency_intent", question=question.text[:100])
+            return self._fit_to_options(ans, question, "intent:programming_language", "intent-map")
         return None
 
     def _resolve_lwd(self, text: str, question: ScreeningQuestion) -> ResolvedAnswer | None:

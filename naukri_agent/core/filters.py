@@ -32,28 +32,54 @@ REMOTE_KEYWORDS = ("remote", "work from home", "wfh", "hybrid remote")
 def _normalise_str(text: str) -> str:
     """Normalize string and unify tech synonyms like Dot Net / .NET / dot.net -> dotnet."""
     low = (text or "").lower()
-    return re.sub(r"\bdot[\s.-]?net\b|\b\.net\b", "dotnet", low)
+    return re.sub(r"\bdot[\s.-]?net\b|(?<!\w)\.net\b", "dotnet", low)
 
 
 def _contains_any(haystack: str, needles: list[str]) -> str | None:
-    """Token-aware keyword matching using word boundaries (P1-3)."""
+    """Token-aware keyword matching using boundary-safe regex (P1-3)."""
     norm_haystack = _normalise_str(haystack)
     for needle in needles:
         if not needle:
             continue
         norm_needle = _normalise_str(needle)
-        pattern = r"\b" + re.escape(norm_needle) + r"\b"
-        if re.search(pattern, norm_haystack):
+        left_b = r"\b" if re.match(r"^\w", norm_needle) else r"(?<!\w)"
+        right_b = r"\b" if re.search(r"\w$", norm_needle) else r"(?!\w)"
+        pattern = left_b + re.escape(norm_needle) + right_b
+        if re.search(pattern, norm_haystack, re.IGNORECASE):
             return needle
     return None
 
 
-def experience_matches(candidate_years: float, job_min: float | None, job_max: float | None) -> bool:
+DEDICATED_AI_KEYWORDS = (
+    "machine learning", "ml engineer", "ml developer", "data scientist",
+    "deep learning", "nlp engineer", "computer vision", "ai engineer",
+    "ai developer", "ai/ml", "ai ml", "artificial intelligence engineer",
+)
+
+
+def experience_matches(
+    candidate_years: float,
+    job_min: float | None,
+    job_max: float | None,
+    is_dedicated_ai: bool = False,
+) -> bool:
     """Centralized experience window evaluation (P1-1)."""
-    if job_min is not None and job_min > candidate_years + 1.0:
-        return False
-    if job_max is not None and job_max < max(0.0, candidate_years - 1.5):
-        return False
+    if is_dedicated_ai:
+        if job_min is not None and job_min > 2.0:
+            return False
+    if job_min is not None:
+        if job_min > 3.5:
+            return False
+        if job_min > candidate_years + 1.0:
+            return False
+    if job_max is not None:
+        if job_max < max(0.0, candidate_years - 1.5):
+            return False
+        if job_max > 6.0:
+            return False
+    if job_min is not None and job_max is not None:
+        if (job_max - job_min) >= 5.0 and job_min >= 2.0:
+            return False
     return True
 
 
@@ -74,9 +100,12 @@ class FilterEngine:
         location = (job.location or "").lower()
         if rules.title_must_include_any:
             if _contains_any(title, rules.title_must_include_any) is None:
-                return FilterDecision(
-                    False, SkipReason.FILTER_TITLE, "title lacks any required keyword"
-                )
+                # Check card tags/snippet so generic titles with matched core skills pass
+                card_text = f"{title} {' '.join(job.tags or [])} {job.description or ''}".lower()
+                if _contains_any(card_text, rules.title_must_include_any) is None:
+                    return FilterDecision(
+                        False, SkipReason.FILTER_TITLE, "title lacks any required keyword"
+                    )
 
         if rules.title_must_exclude_any:
             hit = _contains_any(title, rules.title_must_exclude_any)
@@ -113,20 +142,52 @@ class FilterEngine:
                 return FilterDecision(False, SkipReason.BANGALORE_WALKIN_ALERT, f"Bangalore walk-in drive at {job.company}")
             return FilterDecision(False, SkipReason.WALKIN, "walk-in drive")
 
+        # Dedicated AI / ML Recruiter Reality Gate:
+        # Candidate has 6 months hands-on AI/ML experience. A recruiter screening for a
+        # 3+ year dedicated ML/AI Engineer role will reject the profile immediately.
+        # Allow entry/junior AI roles (min_exp <= 2.0y).
+        is_dedicated_ai = any(term in title for term in DEDICATED_AI_KEYWORDS)
+        if is_dedicated_ai and job.min_experience is not None and job.min_experience > 2.0:
+            return FilterDecision(
+                False,
+                SkipReason.FILTER_EXPERIENCE,
+                f"dedicated AI/ML role requires {job.min_experience}y > candidate's 6m AI experience (recruiter will reject)",
+            )
+
         # --- numeric rules: only applied when data is disclosed -------
         exp = rules.experience
-        if job.min_experience is not None and job.min_experience > exp.max_years:
-            return FilterDecision(
-                False,
-                SkipReason.FILTER_EXPERIENCE,
-                f"requires {job.min_experience}y > max {exp.max_years}y",
-            )
-        if job.max_experience is not None and job.max_experience < exp.min_years:
-            return FilterDecision(
-                False,
-                SkipReason.FILTER_EXPERIENCE,
-                f"caps at {job.max_experience}y < min {exp.min_years}y",
-            )
+        if job.min_experience is not None:
+            if job.min_experience > 3.5:
+                return FilterDecision(
+                    False,
+                    SkipReason.FILTER_EXPERIENCE,
+                    f"requires {job.min_experience}y > ceiling 3.5y",
+                )
+            if job.min_experience > exp.max_years:
+                return FilterDecision(
+                    False,
+                    SkipReason.FILTER_EXPERIENCE,
+                    f"requires {job.min_experience}y > max {exp.max_years}y",
+                )
+        if job.max_experience is not None:
+            if job.max_experience < exp.min_years:
+                return FilterDecision(
+                    False,
+                    SkipReason.FILTER_EXPERIENCE,
+                    f"caps at {job.max_experience}y < min {exp.min_years}y",
+                )
+            if job.max_experience > 6.0:
+                return FilterDecision(
+                    False,
+                    SkipReason.FILTER_EXPERIENCE,
+                    f"caps at {job.max_experience}y > ceiling 6.0y (senior requisition)",
+                )
+            if job.min_experience is not None and (job.max_experience - job.min_experience) >= 5.0 and job.min_experience >= 2.0:
+                return FilterDecision(
+                    False,
+                    SkipReason.FILTER_EXPERIENCE,
+                    f"spread {job.min_experience}-{job.max_experience}y >= 5y (broad senior requisition)",
+                )
 
         if rules.min_salary_lpa is not None and job.min_salary_lpa is not None:
             if job.min_salary_lpa < rules.min_salary_lpa:

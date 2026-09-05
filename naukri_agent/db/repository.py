@@ -156,7 +156,9 @@ class Repository:
                 account,
             )
         except Exception as exc:  # pragma: no cover - telemetry must not raise
-            log.warning("db.event_log_failed", error=str(exc), event=event)    # ------------------------------------------------------------------ jobs
+            log.warning("db.event_log_failed", error=str(exc), logged_event=event)
+
+    # ------------------------------------------------------------------ jobs
     async def upsert_job(self, job: Job, platform: str | Any = "naukri") -> None:
         try:
             platform_str = getattr(platform, "platform_name", str(platform))
@@ -863,15 +865,19 @@ class Repository:
 
     # ---------------------------------------------------------- platform state
     async def platform_pause_reason(self, account: str, platform: str) -> str | None:
-        row = await self.pool.fetchrow(
-            """
-            SELECT reason FROM platform_state
-            WHERE account = $1 AND platform = $2 AND paused = TRUE
-            """,
-            account,
-            platform,
-        )
-        return str(row["reason"] or "operator intervention required") if row else None
+        try:
+            row = await self._fetchrow_with_retry(
+                """
+                SELECT reason FROM platform_state
+                WHERE account = $1 AND platform = $2 AND paused = TRUE
+                """,
+                account,
+                platform,
+            )
+            return str(row["reason"] or "operator intervention required") if row else None
+        except Exception as exc:
+            log.warning("db.platform_pause_reason_failed", error=str(exc), platform=platform)
+            return None
 
     async def pause_platform(self, account: str, platform: str, reason: str) -> None:
         await self.pool.execute(

@@ -94,17 +94,17 @@ jobs:
             # If triggered by Cron schedule, check the UTC hour
             CURRENT_HOUR=$(date -u +"%H")
             CURRENT_HOUR_NUM=$((10#$CURRENT_HOUR))
-            
+
             # 02:00 - 05:59 UTC is the Morning window -> Primary Account (AI / Python)
             if [ "$CURRENT_HOUR_NUM" -ge 2 ] && [ "$CURRENT_HOUR_NUM" -le 5 ]; then
               echo "Morning Run Detected (UTC $CURRENT_HOUR): Running Primary Account"
               python -m naukri_agent run -a primary
-              
+
             # 07:00 - 11:59 UTC is the Afternoon window -> Secondary Account (Full Stack / MERN)
             elif [ "$CURRENT_HOUR_NUM" -ge 7 ] && [ "$CURRENT_HOUR_NUM" -le 11 ]; then
               echo "Afternoon Run Detected (UTC $CURRENT_HOUR): Running Secondary Account"
               python -m naukri_agent run -a secondary
-              
+
             else
               echo "Outside standard schedule windows (UTC $CURRENT_HOUR), running both accounts sequentially."
               python -m naukri_agent run --all-accounts

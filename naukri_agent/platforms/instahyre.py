@@ -157,14 +157,12 @@ class InstahyrePlatform(BaseJobPlatform):
             timeout_ms=2500,
         )
 
-        # Target skills dynamically tailored to the profile
+        # Target skills strictly tailored to Node.js and Python (no React.js in search filter)
         prof_name = (profile.name or "").lower()
-        if any(k in prof_name for k in ["ai", "python", "machine learning", "ml"]):
-            target_skills = ["Python", "Machine Learning", "FastAPI"]
-        elif any(k in prof_name for k in ["full stack", "mern", "web", "frontend", "backend"]):
-            target_skills = ["Node.js", "React.js", "Python"]
+        if any(k in prof_name for k in ["ai", "machine learning", "ml"]):
+            target_skills = ["Python"]
         else:
-            target_skills = ["Python", "React.js"]
+            target_skills = ["Node.js", "Python"]
 
         if skills_input:
             # Clear any pre-existing stale skill tags

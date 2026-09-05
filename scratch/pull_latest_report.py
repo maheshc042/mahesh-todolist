@@ -17,11 +17,15 @@ async def main():
         
         run_id = latest_run['id']
 
-        # Recent runs list to see if multiple were run today
-        recent_runs = await conn.fetch('SELECT id, status, started_at, finished_at, account, profiles FROM runs ORDER BY id DESC LIMIT 5')
-        print('\n=== RECENT RUNS ===')
-        for r in recent_runs:
-            print(f"  Run {r['id']} | Account: {r['account']} | Status: {r['status']} | Started: {r['started_at']} | Finished: {r['finished_at']}")
+        # Check applications schema
+        cols = await conn.fetch("SELECT column_name FROM information_schema.columns WHERE table_name = 'applications' ORDER BY ordinal_position")
+        col_names = [c['column_name'] for c in cols]
+        print(f"\nApplications columns: {col_names}")
+
+        # Check jobs schema
+        job_cols = await conn.fetch("SELECT column_name FROM information_schema.columns WHERE table_name = 'jobs' ORDER BY ordinal_position")
+        job_col_names = [c['column_name'] for c in job_cols]
+        print(f"Jobs columns: {job_col_names}")
 
         # Applications by platform and status
         apps = await conn.fetch('SELECT platform, status, count(*) FROM applications WHERE run_id = $1 GROUP BY platform, status', run_id)
@@ -32,15 +36,30 @@ async def main():
             c = a['count']
             print(f'  Platform: {p} | Status: {s} | Count: {c}')
 
-        # Detailed applications
-        detailed_apps = await conn.fetch('SELECT id, job_id, platform, company, title, status, applied_at, detail, error_message FROM applications WHERE run_id = $1 ORDER BY id ASC', run_id)
+        # Detailed applications with job title and company
+        query = """
+            SELECT a.id, a.job_id, a.platform, a.status, a.submitted_at, a.reason, a.detail,
+                   j.company, j.title, j.location
+            FROM applications a
+            LEFT JOIN jobs j ON a.job_id = j.job_id
+            WHERE a.run_id = $1
+            ORDER BY a.id ASC
+        """
+        detailed_apps = await conn.fetch(query, run_id)
         print(f'\n=== DETAILED APPLICATIONS FOR RUN {run_id} ({len(detailed_apps)} total) ===')
         for app in detailed_apps:
-            print(f"  [{app['platform']}] {app['company']} - {app['title']} -> Status: {app['status']} | Detail: {app['detail']} | Error: {app['error_message']}")
+            print(f"  [{app['platform']}] {app['company']} - {app['title']} ({app['location']})")
+            print(f"       -> Status: {app['status']} | Reason: {app['reason']} | Detail: {app['detail']}")
 
-        # Events
-        events = await conn.fetch('SELECT event_type, level, payload, created_at FROM events WHERE run_id = $1 ORDER BY id ASC', run_id)
-        print(f'\n=== EVENTS FOR RUN {run_id} ({len(events)} total) ===')
+        # Events breakdown
+        event_counts = await conn.fetch('SELECT event_type, count(*) FROM events WHERE run_id = $1 GROUP BY event_type', run_id)
+        print(f'\n=== EVENT COUNTS FOR RUN {run_id} ===')
+        for ec in event_counts:
+            print(f"  {ec['event_type']}: {ec['count']}")
+
+        # Recent key events (errors, warnings, questionnaires, apply)
+        events = await conn.fetch("SELECT event_type, level, payload, created_at FROM events WHERE run_id = $1 AND (level IN ('warning', 'error') OR event_type LIKE '%questionnaire%' OR event_type LIKE '%message%' OR event_type LIKE '%apply%' OR event_type LIKE '%search%') ORDER BY id ASC", run_id)
+        print(f'\n=== KEY EVENTS FOR RUN {run_id} ({len(events)} total) ===')
         for e in events:
             etype = e['event_type']
             lvl = e['level']

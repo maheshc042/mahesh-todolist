@@ -203,6 +203,24 @@ def _exponential_decay(diff: float, lambda_param: float) -> float:
 # ---------------------------------------------------------------------------
 # 1. Hard Filter
 # ---------------------------------------------------------------------------
+LEAD_ARCHITECT_EXCLUDES = (
+    "lead", "principal", "staff", "architect",
+    "manager", "head", "director", "vp", "president",
+)
+NON_DEV_TITLE_EXCLUDES = (
+    "aptitude trainer", "trainer", "desktop support", "it support",
+    "technical support", "helpdesk", "service desk", "customer support",
+    "salesforce", "sap", "mainframe", "teradata",
+    "data engineer", "data analyst", "etl", "snowflake", "bi developer",
+    "powerbi", "tableau", "data warehousing", "databricks",
+)
+DEDICATED_AI_KEYWORDS = (
+    "machine learning", "ml engineer", "ml developer", "data scientist",
+    "deep learning", "nlp engineer", "computer vision", "ai engineer",
+    "ai developer", "ai/ml", "ai ml", "artificial intelligence engineer",
+)
+
+
 class HardFilter:
     """
     Synchronous Hard Filter.
@@ -220,25 +238,19 @@ class HardFilter:
         company = job.company.lower()
         location = job.location.lower()
 
-        # Core Skill / Relevant Title Match Requirement
-        if self.candidate:
-            haystack = _build_searchable_haystack(job)
-            all_skills = self.candidate.core_skills + self.candidate.secondary_skills
-            has_skill_match = any(
-                _exact_word_match(skill, haystack) or _normalize_tech_text(skill) in haystack
-                for skill in all_skills
+        # 1. Lead / Architect title blocklist (Preserves startup senior roles)
+        if any(_exact_word_match(term, title) or term in title for term in LEAD_ARCHITECT_EXCLUDES):
+            return FilterDecision(
+                False, SkipReason.FILTER_TITLE, "title indicates lead/architect/management role"
             )
-            has_title_match = bool(rules.title_must_include_any and _contains_any(title, rules.title_must_include_any))
 
-            # Only reject if NEITHER relevant skills nor target role title matches
-            if not has_skill_match and not has_title_match:
-                return FilterDecision(
-                    False,
-                    SkipReason.FILTER_DESCRIPTION,
-                    f"job lacks any relevant skill or title keyword ({', '.join(self.candidate.core_skills[:5])})",
-                )
+        # 2. Non-developer and unaligned data track blocklist
+        if any(term in title for term in NON_DEV_TITLE_EXCLUDES):
+            return FilterDecision(
+                False, SkipReason.FILTER_TITLE, "title indicates non-developer/unaligned track"
+            )
 
-        # Title blocklist (with tech normalization)
+        # 4. Title blocklist (with tech normalization)
         if rules.title_must_exclude_any:
             hit = _contains_any(title, rules.title_must_exclude_any)
             if hit:
@@ -246,12 +258,26 @@ class HardFilter:
                     False, SkipReason.FILTER_TITLE, f"title contains blocked term '{hit}'"
                 )
 
-        # Title required keywords
-        if rules.title_must_include_any:
-            if _contains_any(title, rules.title_must_include_any) is None:
-                return FilterDecision(
-                    False, SkipReason.FILTER_TITLE, "title lacks any required keyword"
-                )
+        # 5. Dual-Gate Role Matching (Title OR Core Skills):
+        has_title_match = bool(rules.title_must_include_any and _contains_any(title, rules.title_must_include_any))
+        has_skill_match = False
+        if self.candidate:
+            haystack = _build_searchable_haystack(job)
+            matched_core = [
+                s for s in self.candidate.core_skills
+                if _exact_word_match(s, haystack) or _normalize_tech_text(s) in haystack
+            ]
+            matched_sec = [
+                s for s in self.candidate.secondary_skills
+                if _exact_word_match(s, haystack) or _normalize_tech_text(s) in haystack
+            ]
+            if len(matched_core) >= 2 or (len(matched_core) >= 1 and len(matched_sec) >= 1):
+                has_skill_match = True
+
+        if rules.title_must_include_any and not has_title_match and not has_skill_match:
+            return FilterDecision(
+                False, SkipReason.FILTER_TITLE, "title lacks required keywords and lacks matching core skills"
+            )
 
         # Company & Location blocklists
         if rules.blocked_companies:
@@ -280,20 +306,52 @@ class HardFilter:
                     False, SkipReason.FILTER_DESCRIPTION, f"job contains blocked term '{hit}'"
                 )
 
+        # Dedicated AI / ML Recruiter Reality Gate:
+        # Candidate has 6 months hands-on AI/ML experience. A recruiter screening for a
+        # 3+ year dedicated ML/AI Engineer role will reject the profile immediately.
+        # Allow entry/junior AI roles (min_exp <= 2.0y).
+        is_dedicated_ai = any(term in title for term in DEDICATED_AI_KEYWORDS)
+        if is_dedicated_ai and job.min_experience is not None and job.min_experience > 2.0:
+            return FilterDecision(
+                False,
+                SkipReason.FILTER_EXPERIENCE,
+                f"dedicated AI/ML role requires {job.min_experience}y > candidate's 6m AI experience (recruiter will reject)",
+            )
+
         # Numeric experience bounds
         exp = rules.experience
-        if job.min_experience is not None and job.min_experience > exp.max_years:
-            return FilterDecision(
-                False,
-                SkipReason.FILTER_EXPERIENCE,
-                f"requires {job.min_experience}y > max {exp.max_years}y",
-            )
-        if job.max_experience is not None and job.max_experience < exp.min_years:
-            return FilterDecision(
-                False,
-                SkipReason.FILTER_EXPERIENCE,
-                f"caps at {job.max_experience}y < min {exp.min_years}y",
-            )
+        if job.min_experience is not None:
+            if job.min_experience > 3.5:
+                return FilterDecision(
+                    False,
+                    SkipReason.FILTER_EXPERIENCE,
+                    f"requires {job.min_experience}y > ceiling 3.5y",
+                )
+            if job.min_experience > exp.max_years:
+                return FilterDecision(
+                    False,
+                    SkipReason.FILTER_EXPERIENCE,
+                    f"requires {job.min_experience}y > max {exp.max_years}y",
+                )
+        if job.max_experience is not None:
+            if job.max_experience < exp.min_years:
+                return FilterDecision(
+                    False,
+                    SkipReason.FILTER_EXPERIENCE,
+                    f"caps at {job.max_experience}y < min {exp.min_years}y",
+                )
+            if job.max_experience > 6.0:
+                return FilterDecision(
+                    False,
+                    SkipReason.FILTER_EXPERIENCE,
+                    f"caps at {job.max_experience}y > ceiling 6.0y (senior requisition)",
+                )
+            if job.min_experience is not None and (job.max_experience - job.min_experience) >= 5.0 and job.min_experience >= 2.0:
+                return FilterDecision(
+                    False,
+                    SkipReason.FILTER_EXPERIENCE,
+                    f"spread {job.min_experience}-{job.max_experience}y >= 5y (broad senior requisition)",
+                )
 
         # Freshness hard ceiling (5 days)
         if rules.max_posted_days is not None and job.posted_days_ago is not None:
@@ -333,55 +391,75 @@ class RuleBasedResumeMatcher(BaseResumeMatcher):
         norm_title = _normalize_tech_text(job.title)
         reasons: list[str] = []
 
-        # 1. Role / Title Match (Max role_title_weight)
-        role_score = 0.0
+        # 1. Role / Title Match (Max role_title_weight, e.g. 20.0)
         matched_titles: list[str] = []
         for kw in self.candidate.title_keywords:
             if _exact_word_match(kw, norm_title):
                 matched_titles.append(kw)
-                role_score += weights.role_title_weight / max(1, len(self.candidate.title_keywords))
             elif _normalize_tech_text(kw) in norm_title:
                 matched_titles.append(kw)
-                role_score += (weights.role_title_weight * 0.6) / max(1, len(self.candidate.title_keywords))
 
-        role_score = min(weights.role_title_weight, role_score)
+        if len(matched_titles) >= 2:
+            role_score = weights.role_title_weight
+        elif len(matched_titles) == 1:
+            role_score = round(weights.role_title_weight * 0.8, 2)
+        else:
+            role_score = 0.0
+
         if matched_titles:
             reasons.append(f"✓ Excellent role relevance for {', '.join(matched_titles)}")
 
-        # 2. Core Skills Match (Max core_skill_weight)
-        core_score = 0.0
+        # 2. Core Skills Match (Max core_skill_weight, e.g. 18.0)
         matched_core: list[str] = []
         for skill in self.candidate.core_skills:
             if _exact_word_match(skill, haystack) or _normalize_tech_text(skill) in haystack:
                 matched_core.append(skill)
-        if self.candidate.core_skills:
-            ratio = len(matched_core) / len(self.candidate.core_skills)
-            core_score = round(ratio * weights.core_skill_weight, 2)
+        num_core = len(matched_core)
+        if num_core >= 4:
+            core_score = weights.core_skill_weight
+        elif num_core == 3:
+            core_score = round(weights.core_skill_weight * 0.85, 2)
+        elif num_core == 2:
+            core_score = round(weights.core_skill_weight * 0.70, 2)
+        elif num_core == 1:
+            core_score = round(weights.core_skill_weight * 0.45, 2)
+        else:
+            core_score = 0.0
+
         if matched_core:
             top_matched = ", ".join(matched_core[:4])
             reasons.append(f"✓ Strong core tech match ({top_matched})")
 
-        # 3. Secondary Skills Match (Max secondary_skill_weight)
-        secondary_score = 0.0
+        # 3. Secondary Skills Match (Max secondary_skill_weight, e.g. 8.0)
         matched_secondary: list[str] = []
         for skill in self.candidate.secondary_skills:
             if _exact_word_match(skill, haystack) or _normalize_tech_text(skill) in haystack:
                 matched_secondary.append(skill)
-        if self.candidate.secondary_skills:
-            ratio = len(matched_secondary) / len(self.candidate.secondary_skills)
-            secondary_score = round(ratio * weights.secondary_skill_weight, 2)
+        num_sec = len(matched_secondary)
+        if num_sec >= 3:
+            secondary_score = weights.secondary_skill_weight
+        elif num_sec == 2:
+            secondary_score = round(weights.secondary_skill_weight * 0.75, 2)
+        elif num_sec == 1:
+            secondary_score = round(weights.secondary_skill_weight * 0.50, 2)
+        else:
+            secondary_score = 0.0
+
         if matched_secondary:
             reasons.append(f"✓ Matched secondary skills ({', '.join(matched_secondary[:3])})")
 
-        # 4. Bonus Skills Match (Max bonus_skill_weight)
-        bonus_score = 0.0
+        # 4. Bonus Skills Match (Max bonus_skill_weight, e.g. 4.0)
         matched_bonus: list[str] = []
         for skill in self.candidate.bonus_skills:
             if _exact_word_match(skill, haystack) or _normalize_tech_text(skill) in haystack:
                 matched_bonus.append(skill)
-        if self.candidate.bonus_skills:
-            ratio = len(matched_bonus) / len(self.candidate.bonus_skills)
-            bonus_score = round(ratio * weights.bonus_skill_weight, 2)
+        num_bonus = len(matched_bonus)
+        if num_bonus >= 2:
+            bonus_score = weights.bonus_skill_weight
+        elif num_bonus == 1:
+            bonus_score = round(weights.bonus_skill_weight * 0.60, 2)
+        else:
+            bonus_score = 0.0
 
         total_resume_score = min(
             weights.resume_match_max,
@@ -519,9 +597,9 @@ class RankingEngine:
 
     def _score_experience(self, job: Job) -> tuple[float, str]:
         w = self.weights
-        target = self.candidate.target_experience_years
-        min_e = job.min_experience
-        max_e = job.max_experience
+        target = float(self.candidate.target_experience_years)
+        min_e = float(job.min_experience) if job.min_experience is not None else None
+        max_e = float(job.max_experience) if job.max_experience is not None else None
 
         if min_e is None and max_e is None:
             return round(w.experience_max * 0.75, 2), "✓ Experience requirements open"
@@ -597,8 +675,8 @@ class RankingEngine:
 
     def _score_salary(self, job: Job) -> tuple[float, str]:
         w = self.weights
-        sal = job.min_salary_lpa
-        target_sal = self.candidate.min_acceptable_salary_lpa
+        sal = float(job.min_salary_lpa) if job.min_salary_lpa is not None else None
+        target_sal = float(self.candidate.min_acceptable_salary_lpa) if self.candidate.min_acceptable_salary_lpa is not None else None
 
         if sal is None:
             return round(w.salary_max * 0.75, 2), ""
@@ -610,7 +688,7 @@ class RankingEngine:
 
     def _score_rating(self, job: Job) -> tuple[float, str]:
         w = self.weights
-        r = job.rating
+        r = float(job.rating) if job.rating is not None else None
 
         if r is None:
             return round(w.rating_max * 0.75, 2), ""

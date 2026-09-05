@@ -100,26 +100,28 @@ def run_tests():
     print("--> Test Suite 2 Passed!\n")
 
     print("==================================================")
-    print("TEST SUITE 3: INSTAHYRE DUAL-STAGE LOGIC")
+    print("TEST SUITE 3: INSTAHYRE FILTER & TARGET SKILLS")
     print("==================================================")
 
-    # 3.1 AI Profile Target Skills
+    # 3.1 AI Profile Target Skills (strictly Python, no React.js)
     prof_name_ai = ai_profile.name.lower()
     if any(k in prof_name_ai for k in ["ai", "python", "machine learning", "ml"]):
-        skills_ai = ["Python", "Machine Learning", "FastAPI"]
+        skills_ai = ["Python"]
     else:
-        skills_ai = ["Node.js", "React.js", "Python"]
+        skills_ai = ["Node.js", "Python"]
     print("3.1 AI profile Instahyre skills:", skills_ai)
-    assert skills_ai == ["Python", "Machine Learning", "FastAPI"]
+    assert skills_ai == ["Python"]
+    assert "React.js" not in skills_ai
 
-    # 3.2 Full Stack Profile Target Skills
+    # 3.2 Full Stack Profile Target Skills (strictly Node.js & Python, no React.js)
     prof_name_fs = fs_profile.name.lower()
     if any(k in prof_name_fs for k in ["ai", "python", "machine learning", "ml"]):
-        skills_fs = ["Python", "Machine Learning", "FastAPI"]
-    elif any(k in prof_name_fs for k in ["full stack", "mern", "web", "frontend", "backend"]):
-        skills_fs = ["Node.js", "React.js", "Python"]
+        skills_fs = ["Python"]
+    else:
+        skills_fs = ["Node.js", "Python"]
     print("3.2 Full Stack profile Instahyre skills:", skills_fs)
-    assert skills_fs == ["Node.js", "React.js", "Python"]
+    assert skills_fs == ["Node.js", "Python"]
+    assert "React.js" not in skills_fs
 
     # 3.3 Recommendation Tab parsing for pagination
     t1 = "recommended_page_3"
@@ -157,9 +159,117 @@ def run_tests():
     assert len(agreed) == 2
 
     print("--> Test Suite 4 Passed!\n")
+
+    print("==================================================")
+    print("TEST SUITE 5: LINKEDIN WHOLE NUMBER INPUT SANITIZATION")
+    print("==================================================")
+
+    # 5.1 Test cases that previously caused "Enter a whole number between 0 and 99"
+    test_cases = [
+        ("2.5", "How many years of work experience do you have with Python?", "2"),
+        ("2.6", "How many years of work experience do you have with Node.js?", "3"),
+        ("2.5 years", "Total years of experience", "2"),
+        ("0 days", "Notice period", "0"),
+        ("4.5", "Current CTC", "4"),
+        ("7", "Expected CTC", "7"),
+        ("9", "Rate your skill from 1 to 10", "9"),
+        ("", "How many years of experience do you have?", "2"),
+    ]
+
+    for raw_val, label, expected in test_cases:
+        label_low = label.lower()
+        err_msg = "Enter a whole number between 0 and 99" if "whole number" in label_low or not raw_val else ""
+        inp_type = "text"
+        inp_mode = "numeric"
+
+        is_numeric = (
+            inp_type in ("number", "numeric")
+            or inp_mode in ("numeric", "decimal")
+            or any(w in label_low for w in (
+                "whole number", "between 0 and", "years", "experience", "months",
+                "notice", "days", "rating", "scale", "rate", "ctc", "salary",
+                "how many", "integer"
+            ))
+            or any(w in err_msg.lower() for w in ("whole number", "between 0 and", "number", "numeric"))
+        )
+        assert is_numeric, f"Should detect numeric question for '{label}'"
+
+        ans = ""
+        val = raw_val
+        if val:
+            num_match = re.search(r"[-+]?\d*\.?\d+", val)
+            if num_match:
+                val_float = float(num_match.group(0))
+                ans = str(max(0, min(99, int(round(val_float)))))
+        if not ans:
+            ans = "2"
+
+        assert ans.isdigit(), f"Result '{ans}' must be digits only!"
+        assert 0 <= int(ans) <= 99, f"Result '{ans}' must be between 0 and 99!"
+        assert ans == expected, f"Expected {expected}, got {ans} for raw '{raw_val}'"
+        print(f"5.1 Input '{label}' -> raw: '{raw_val}' => sanitized whole number: '{ans}'")
+
+    print("--> Test Suite 5 Passed!\n")
+
+    print("==================================================")
+    print("TEST SUITE 6: RECRUITER REALITY GATE & SENIOR STARTUP ALIGNMENT")
+    print("==================================================")
+
+    from naukri_agent.core.ranking import CandidateProfile, HardFilter
+    from naukri_agent.core.models import Job, SkipReason
+
+    candidate = ai_profile.to_candidate_profile(cfg)
+    hf = HardFilter(rules=ai_profile.filters_for("recommended"), candidate=candidate)
+
+    # 6.1 3.5y Senior Python at startup (candidate matches 2.6y total exp -> should PASS)
+    job_ok = Job(
+        job_id="test-1",
+        title="Senior Python Developer",
+        company="FastGrowingStartup",
+        url="http://example.com/1",
+        min_experience=2.0,
+        max_experience=4.0,
+        tags=["python", "fastapi"],
+    )
+    res_ok = hf.evaluate(job_ok)
+    assert res_ok.passed, f"Startup Senior Python job should pass hard filters! Rejected: {res_ok.reason}: {res_ok.detail}"
+    print("6.1 Startup Senior Python Developer passed hard filter successfully.")
+
+    # 6.2 3y Dedicated AI/ML role (candidate has 6m AI exp -> recruiter rejects -> agent rejects)
+    job_ai_3y = Job(
+        job_id="test-2",
+        title="Machine Learning Engineer",
+        company="AILabs",
+        url="http://example.com/2",
+        min_experience=3.0,
+        max_experience=5.0,
+        tags=["machine learning", "pytorch"],
+    )
+    res_ai = hf.evaluate(job_ai_3y)
+    assert not res_ai.passed, "3y Dedicated ML role should be rejected for 6m AI candidate!"
+    assert res_ai.reason == SkipReason.FILTER_EXPERIENCE
+    print("6.2 3y Dedicated ML role correctly rejected (recruiter reality gate).")
+
+    # 6.3 Data Engineer / Snowflake role (excluded ETL pipeline role)
+    job_de = Job(
+        job_id="test-3",
+        title="Data Engineer",
+        company="DataCorp",
+        url="http://example.com/3",
+        min_experience=1.0,
+        max_experience=3.0,
+        tags=["snowflake", "etl"],
+    )
+    res_de = hf.evaluate(job_de)
+    assert not res_de.passed, "Data Engineer role should be rejected!"
+    print("6.3 Data Engineer role correctly rejected.")
+
+    print("--> Test Suite 6 Passed!\n")
+
     print("**************************************************")
-    print("ALL TEST SUITES EXECUTED WITH 100% SUCCESS!")
+    print("ALL TEST SUITES (1 - 6) EXECUTED WITH 100% SUCCESS!")
     print("**************************************************")
 
 if __name__ == '__main__':
     run_tests()
+

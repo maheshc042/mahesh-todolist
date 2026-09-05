@@ -316,6 +316,8 @@ CHATBOT_TEXT_INPUT = [
     "textarea.textArea",
     "input.textInput",
     "input[type='text']",
+    "input[type='number']",
+    "input[type='tel']",
     "input[placeholder*='Type' i]",
     "input[placeholder*='answer' i]",
     "input[placeholder*='Enter' i]",
@@ -323,9 +325,11 @@ CHATBOT_TEXT_INPUT = [
     "input[placeholder*='location' i]",
     "input[placeholder*='Search' i]",
     "div.chatBot-input input",
+    "div.chatInput input",
     "div.chatInput",
-    "div[class*='chat'] input",
+    "div[class*='chat'] input:not([type='hidden']):not([type='checkbox']):not([type='radio'])",
     "div[class*='chat'] textarea",
+    "div.botItem input:not([type='hidden']):not([type='checkbox']):not([type='radio'])",
 ]
 CHATBOT_SEND = [
     "div.sendMsg",

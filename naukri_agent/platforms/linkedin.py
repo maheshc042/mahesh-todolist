@@ -226,102 +226,139 @@ class LinkedInPlatform(BaseJobPlatform):
         return is_suitable, reason, score
 
     async def fetch_jobs(self, profile: JobProfile, exclude_job_ids: set[str]) -> list[Job]:
-        """Fetches fresh Easy Apply jobs from LinkedIn job search with left-pane scrolling."""
-        search_url = self._get_search_url(profile)
-        log.info("linkedin.fetch.start", profile=profile.name, url=search_url)
-
-        try:
-            await self.page.goto(search_url, wait_until="domcontentloaded", timeout=35000)
-            await human_pause(3000, 5000)
-        except Exception as exc:
-            log.warning("linkedin.fetch.goto_error", error=str(exc))
-            return []
-
-        try:
-            await self.page.wait_for_selector(
-                ".jobs-search-results-list, .scaffold-layout__list, li.jobs-search-results__list-item, div.job-card-container",
-                timeout=12000,
-            )
-        except Exception:
-            pass
-
-        # Scroll the left listings pane
-        list_pane = await first_visible(
-            self.page,
-            [
-                ".jobs-search-results-list",
-                ".scaffold-layout__list",
-                "div[class*='jobs-search-results-list']",
-                ".jobs-search__results-list",
-            ],
-            timeout_ms=3000,
-        )
-        if list_pane:
-            try:
-                await list_pane.hover()
-            except Exception:
-                pass
-
-        for _ in range(6):
-            try:
-                await self.page.mouse.wheel(0, 700)
-                await human_pause(600, 1200)
-            except Exception:
-                pass
-
-        card_locators = self.page.locator(
-            ".jobs-search-results-list li, .scaffold-layout__list-container li, li.jobs-search-results__list-item, div.job-card-container, div[data-job-id]"
-        )
-        total_cards = await card_locators.count()
-        log.info("linkedin.fetch.cards_found", count=total_cards)
+        """Fetches fresh Easy Apply jobs from LinkedIn job search with left-pane scrolling across pages."""
+        base_search_url = self._get_search_url(profile)
+        max_target = profile.platform_limits.get(self.platform_name, 50)
+        log.info("linkedin.fetch.start", profile=profile.name, max_target=max_target)
 
         jobs: list[Job] = []
         seen_ids: set[str] = set()
 
-        for idx in range(total_cards):
+        for page_idx in range(4):  # Scrape up to 4 pages (25 jobs per page = 100 max)
+            if len(jobs) >= max_target:
+                break
+
+            start_offset = page_idx * 25
+            search_url = f"{base_search_url}&start={start_offset}"
+            log.info("linkedin.fetch.page_start", page=page_idx + 1, start_offset=start_offset, collected_so_far=len(jobs))
+
             try:
-                card = card_locators.nth(idx)
-                if not await card.is_visible():
-                    await card.scroll_into_view_if_needed()
-                    await human_pause(150, 300)
-                if not await card.is_visible():
-                    continue
+                await self.page.goto(search_url, wait_until="domcontentloaded", timeout=35000)
+                await human_pause(2500, 4000)
+            except Exception as exc:
+                log.warning("linkedin.fetch.goto_error", page=page_idx + 1, error=str(exc))
+                break
 
-                title_el = card.locator("a.job-card-list__title, a[href*='/jobs/view/'], strong").first
-                company_el = card.locator(".job-card-container__primary-description, .artdeco-entity-lockup__subtitle, span.job-card-container__publisher, .job-card-container__company-name").first
-                loc_el = card.locator(".job-card-container__metadata-item, .artdeco-entity-lockup__caption").first
-
-                title = (await safe_text(title_el)).strip()
-                company = (await safe_text(company_el)).strip()
-                location = (await safe_text(loc_el)).strip()
-
-                if not title or len(title) < 3:
-                    continue
-
-                card_url = ""
-                if await title_el.count() > 0:
-                    card_url = (await title_el.get_attribute("href") or "").split("?")[0]
-                if card_url and not card_url.startswith("http"):
-                    card_url = f"https://www.linkedin.com{card_url}"
-
-                match = re.search(r"/view/(\d+)", card_url)
-                raw_id = match.group(1) if match else Job.stable_id(card_url, title, company)
-                job_id = f"linkedin-{raw_id}"
-
-                if job_id in exclude_job_ids or job_id in seen_ids:
-                    continue
-                seen_ids.add(job_id)
-
-                job = Job(
-                    job_id=job_id,
-                    title=title,
-                    company=company or "Confidential",
-                    url=card_url or self.page.url,
-                    location=location,
+            try:
+                await self.page.wait_for_selector(
+                    ".jobs-search-results-list, .scaffold-layout__list, li.jobs-search-results__list-item, div.job-card-container",
+                    timeout=12000,
                 )
-                jobs.append(job)
             except Exception:
-                continue
+                pass
+
+            # Scroll the left listings pane
+            list_pane = await first_visible(
+                self.page,
+                [
+                    ".jobs-search-results-list",
+                    ".scaffold-layout__list",
+                    "div[class*='jobs-search-results-list']",
+                    ".jobs-search__results-list",
+                ],
+                timeout_ms=3000,
+            )
+            if list_pane:
+                try:
+                    await list_pane.hover()
+                except Exception:
+                    pass
+
+            for _ in range(6):
+                try:
+                    await self.page.mouse.wheel(0, 700)
+                    await human_pause(500, 1000)
+                except Exception:
+                    pass
+
+            card_locators = self.page.locator(
+                ".jobs-search-results-list li, .scaffold-layout__list-container li, li.jobs-search-results__list-item, div.job-card-container, div[data-job-id]"
+            )
+            total_cards = await card_locators.count()
+            if total_cards == 0:
+                log.info("linkedin.fetch.no_more_cards", page=page_idx + 1)
+                break
+
+            page_added = 0
+            for idx in range(total_cards):
+                if len(jobs) >= max_target:
+                    break
+                try:
+                    card = card_locators.nth(idx)
+                    if not await card.is_visible():
+                        await card.scroll_into_view_if_needed()
+                        await human_pause(100, 200)
+                    if not await card.is_visible():
+                        continue
+
+                    title_el = card.locator("a.job-card-list__title, a[href*='/jobs/view/'], strong").first
+                    company_el = card.locator(".job-card-container__primary-description, .artdeco-entity-lockup__subtitle, span.job-card-container__publisher, .job-card-container__company-name").first
+                    loc_el = card.locator(".job-card-container__metadata-item, .artdeco-entity-lockup__caption").first
+
+                    title = (await safe_text(title_el)).strip()
+                    company = (await safe_text(company_el)).strip()
+                    location = (await safe_text(loc_el)).strip()
+
+                    if not title or len(title) < 3:
+                        continue
+
+                    card_url = ""
+                    if await title_el.count() > 0:
+                        card_url = (await title_el.get_attribute("href") or "").split("?")[0]
+                    if card_url and not card_url.startswith("http"):
+                        card_url = f"https://www.linkedin.com{card_url}"
+
+                    match = re.search(r"/view/(\d+)", card_url)
+                    raw_id = match.group(1) if match else Job.stable_id(card_url, title, company)
+                    job_id = f"linkedin-{raw_id}"
+
+                    if job_id in exclude_job_ids or job_id in seen_ids:
+                        continue
+                    seen_ids.add(job_id)
+
+                    card_text = (await safe_text(card)).strip()
+                    min_exp, max_exp = None, None
+                    exp_match = re.search(r"(\d+(?:\.\d+)?)\s*(?:-|to|\+)\s*(\d+(?:\.\d+)?)?\s*(?:yrs|years|yr)", f"{title} {card_text}", re.I)
+                    if exp_match:
+                        min_exp = float(exp_match.group(1))
+                        if exp_match.group(2):
+                            max_exp = float(exp_match.group(2))
+                        elif "+" in exp_match.group(0):
+                            max_exp = min_exp + 5.0
+                    elif any(k in f"{title} {card_text}".lower() for k in ("senior", "sr.", "sr ", "lead", "principal", "staff")):
+                        min_exp = 5.0
+                        max_exp = 10.0
+                    elif any(k in f"{title} {card_text}".lower() for k in ("intern", "trainee", "fresher")):
+                        min_exp = 0.0
+                        max_exp = 0.0
+
+                    job = Job(
+                        job_id=job_id,
+                        title=title,
+                        company=company or "Confidential",
+                        url=card_url or self.page.url,
+                        location=location,
+                        min_experience=min_exp,
+                        max_experience=max_exp,
+                    )
+                    jobs.append(job)
+                    page_added += 1
+                except Exception:
+                    continue
+
+            log.info("linkedin.fetch.page_done", page=page_idx + 1, added=page_added, total=len(jobs))
+            if page_added == 0 and total_cards < 5:
+                break
 
         log.info("linkedin.fetch.ready", count=len(jobs))
         return jobs
@@ -358,6 +395,15 @@ class LinkedInPlatform(BaseJobPlatform):
         )
         job.description = await safe_text(desc_el)
         extract_description_metadata(job.description)
+
+        if job.min_experience is None and job.description:
+            match = re.search(r"(\d+(?:\.\d+)?)\s*(?:-|to|\+)\s*(\d+(?:\.\d+)?)?\s*(?:yrs|years|yr)", job.description, re.I)
+            if match:
+                job.min_experience = float(match.group(1))
+                if match.group(2):
+                    job.max_experience = float(match.group(2))
+                elif "+" in match.group(0):
+                    job.max_experience = job.min_experience + 5.0
 
         # Suitability & Spam Check
         suitable, reason, score = self.evaluate_job_suitability(job)
@@ -442,7 +488,7 @@ class LinkedInPlatform(BaseJobPlatform):
 
             if step > 1 and step_sig == prev_step_signature:
                 stuck_count += 1
-                if stuck_count >= 2:
+                if stuck_count >= 3:
                     error_el = await first_visible(modal, [".artdeco-inline-feedback--error", "p.artdeco-inline-feedback", "[data-test-form-builder-error]"], timeout_ms=800)
                     err_txt = (await safe_text(error_el)).strip() if error_el else "Required field unfilled"
                     log.warning("linkedin.apply.step_stuck", step=step, error=err_txt)
@@ -706,9 +752,32 @@ class LinkedInPlatform(BaseJobPlatform):
                 
                 label_low = label.lower()
 
+                # Check if this input's container has an inline feedback error
+                container = inp.locator("xpath=ancestor::div[contains(@class, 'fb-dash-form-element') or contains(@class, 'form__input') or contains(@class, 'jobs-easy-apply-form-element')][1]").first
+                err_msg = ""
+                if await container.count() > 0:
+                    err_el = container.locator(".artdeco-inline-feedback--error, p.artdeco-inline-feedback, [data-test-form-builder-error]").first
+                    if await err_el.count() > 0:
+                        err_msg = (await safe_text(err_el)).strip()
+
+                inp_type = (await inp.get_attribute("type") or "").lower()
+                inp_mode = (await inp.get_attribute("inputmode") or "").lower()
+
+                # Comprehensive numeric question detection
+                is_numeric = (
+                    inp_type in ("number", "numeric")
+                    or inp_mode in ("numeric", "decimal")
+                    or any(w in label_low for w in (
+                        "whole number", "between 0 and", "years", "experience", "months",
+                        "notice", "days", "rating", "scale", "rate", "ctc", "salary",
+                        "how many", "integer"
+                    ))
+                    or any(w in err_msg.lower() for w in ("whole number", "between 0 and", "number", "numeric"))
+                )
+
                 # Mobile phone field
                 if any(k in label_low for k in ["phone", "mobile"]):
-                    if not val:
+                    if not val or err_msg:
                         await inp.fill("9481777227")
                     continue
 
@@ -725,48 +794,73 @@ class LinkedInPlatform(BaseJobPlatform):
                             await inp.press("Enter")
                     continue
 
-                # Skip if already pre-filled
-                if val:
-                    continue
-
-                resolved = self.answers.resolve(ScreeningQuestion(text=label, kind="text"))
-                ans = resolved.value if resolved else ""
-
-                if not ans or "days" in str(ans).lower():
-                    if "notice" in label_low or "how soon" in label_low or "availability" in label_low:
-                        ans = "0"
-                    elif "experience" in label_low or "years" in label_low or "whole number" in label_low:
-                        ans = "2"
-                    elif "months" in label_low:
-                        ans = "6"
-                    elif "rate" in label_low or "scale" in label_low or "1 to 10" in label_low or "rating" in label_low:
-                        ans = "9"
-                    elif "current" in label_low and ("ctc" in label_low or "salary" in label_low):
-                        if "inr" in label_low or "rupee" in label_low or "annual" in label_low:
-                            ans = "400000"
-                        else:
-                            ans = "4"
-                    elif "expected" in label_low and ("ctc" in label_low or "salary" in label_low):
-                        if "inr" in label_low or "rupee" in label_low or "annual" in label_low:
-                            ans = "700000"
-                        else:
-                            ans = "7"
-                    elif "title" in label_low:
-                        ans = "Full Stack & AI Engineer"
-                    elif "company" in label_low:
-                        ans = "Independent Software Consultant"
-                    elif "linkedin" in label_low:
-                        ans = "https://www.linkedin.com/in/maheshchitakoti"
-                    elif "github" in label_low or "portfolio" in label_low or "website" in label_low:
-                        ans = "https://github.com/maheshchitakoti"
-                    elif inp.get_attribute("type") == "number":
-                        ans = "2"
+                # Skip if already validly filled (never skip if an error is present or if numeric field has decimals/letters)
+                if val and not err_msg:
+                    if is_numeric:
+                        # Valid whole integer between 0 and 99
+                        if val.isdigit() and 0 <= int(val) <= 99:
+                            continue
+                        # If val contains decimals or letters (e.g. "2.5" or "2 years"), do NOT skip — fix it below
                     else:
-                        ans = "Experienced software and AI engineer with 2.5 years of experience building scalable applications, APIs, and AI workflows."
+                        continue
+
+                ans = ""
+                if is_numeric:
+                    # If val had a number (e.g. "2.5"), extract it and round to whole integer
+                    if val:
+                        num_match = re.search(r"[-+]?\d*\.?\d+", val)
+                        if num_match:
+                            val_float = float(num_match.group(0))
+                            ans = str(max(0, min(99, int(round(val_float)))))
+
+                    if not ans:
+                        resolved = self.answers.resolve(ScreeningQuestion(text=label, kind="text"))
+                        raw_ans = resolved.value if resolved else ""
+                        if raw_ans:
+                            num_match = re.search(r"[-+]?\d*\.?\d+", str(raw_ans))
+                            if num_match:
+                                ans = str(max(0, min(99, int(round(float(num_match.group(0)))))))
+
+                    if not ans:
+                        if "notice" in label_low or "how soon" in label_low or "availability" in label_low:
+                            ans = "0"
+                        elif "months" in label_low:
+                            ans = "6"
+                        elif "rate" in label_low or "scale" in label_low or "1 to 10" in label_low:
+                            ans = "9"
+                        elif "ctc" in label_low or "salary" in label_low:
+                            ans = "7"
+                        else:
+                            # Skill or general years of experience -> whole integer 2
+                            ans = "2"
+                else:
+                    resolved = self.answers.resolve(ScreeningQuestion(text=label, kind="text"))
+                    ans = resolved.value if resolved else ""
+
+                    if not ans or "days" in str(ans).lower():
+                        if "title" in label_low:
+                            ans = "Full Stack & AI Engineer"
+                        elif "company" in label_low:
+                            ans = "Independent Software Consultant"
+                        elif "linkedin" in label_low:
+                            ans = "https://www.linkedin.com/in/maheshchitakoti"
+                        elif "github" in label_low or "portfolio" in label_low or "website" in label_low:
+                            ans = "https://github.com/maheshchitakoti"
+                        else:
+                            ans = "Experienced software and AI engineer with 2.5 years of experience building scalable applications, APIs, and AI workflows."
 
                 if ans:
+                    await inp.click()
+                    await inp.fill("")
                     await inp.fill(str(ans))
-                    await human_pause(200, 400)
+                    await human_pause(100, 250)
+                    try:
+                        await inp.dispatch_event("input")
+                        await inp.dispatch_event("change")
+                        await inp.dispatch_event("blur")
+                    except Exception:
+                        pass
+                    await human_pause(100, 250)
             except Exception:
                 pass
 

@@ -149,7 +149,7 @@ class Orchestrator:
             )
 
     def _check_platform_limits(self, platform_name: str) -> None:
-        if self.elapsed_s > self.config.run.run_timeout_minutes * 60:
+        if self.elapsed_s > (self.config.run.run_timeout_minutes * 60 - 120):
             raise StopRun(f"run timeout of {self.config.run.run_timeout_minutes} minutes reached")
         if self.platform_time_budget_s > 0 and self.platform_started_at > 0:
             plat_elapsed = time.monotonic() - self.platform_started_at
@@ -260,25 +260,18 @@ class Orchestrator:
                         self.stats.errors.append(f"run timeout reached before {p_name}")
                         break
 
-                    platforms_left = len(platform_specs) - p_idx
-                    if platforms_left > 1:
-                        if p_name == "naukri":
-                            # Naukri gets up to 52% of remaining time, capped at 22 minutes
-                            self.platform_time_budget_s = min(remaining_run_time_s * 0.52, 1320.0)
-                        else:
-                            # Divide remaining time fairly, leaving 60s for sweep/cleanup
-                            self.platform_time_budget_s = max((remaining_run_time_s - 60.0) / platforms_left, 180.0)
-                    else:
-                        self.platform_time_budget_s = max(remaining_run_time_s - 30.0, 120.0)
+                    # Primary goal is to complete applications: do not artificially strangle platforms with restrictive time slices.
+                    # Each platform runs until its application cap or until global run time approaches its end.
+                    self.platform_time_budget_s = 0.0
 
                     self.platform_started_at = time.monotonic()
                     self.platform_consecutive_failures = 0
                     self.current_platform_name = p_name
 
                     log.info(
-                        "platform.time_slice_allocated",
+                        "platform.started",
                         platform=p_name,
-                        budget_minutes=round(self.platform_time_budget_s / 60, 1),
+                        remaining_run_minutes=round(remaining_run_time_s / 60, 1),
                         total_elapsed_minutes=round(self.elapsed_s / 60, 1),
                     )
 
