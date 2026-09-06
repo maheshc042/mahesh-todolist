@@ -12,11 +12,9 @@ Features:
 """
 from __future__ import annotations
 
-import asyncio
 import re
 import urllib.parse
-from pathlib import Path
-from typing import Any, Callable
+from collections.abc import Callable
 
 from playwright.async_api import Locator, Page
 
@@ -25,11 +23,9 @@ from ..browser.resilience import (
     click_if_present,
     first_visible,
     human_pause,
-    human_type,
     safe_text,
-    scroll_page,
 )
-from ..config import AgentConfig, JobProfile, NaukriAccount, get_settings
+from ..config import JobProfile, NaukriAccount
 from ..core.answers import AnswerEngine
 from ..core.models import (
     ApplicationStatus,
@@ -140,6 +136,27 @@ class LinkedInPlatform(BaseJobPlatform):
             log.info("linkedin.auth.session_reused")
             return True
 
+        # Check for immediate Cloud IP challenge / checkpoint
+        cur_url = self.page.url.lower()
+        if "checkpoint" in cur_url or "challenge" in cur_url or "security-check" in cur_url:
+            log.warning("linkedin.auth.checkpoint_detected", url=cur_url)
+            is_headless = not getattr(self.page.context, "_headed", False)
+            if is_headless:
+                log.error(
+                    "linkedin.auth.checkpoint_in_headless",
+                    msg="LinkedIn security checkpoint encountered in headless CI; skipping LinkedIn gracefully without stalling.",
+                )
+                return False
+
+        # In headless CI mode, fail-fast without hanging for 90 seconds
+        is_headless = not getattr(self.page.context, "_headed", False)
+        if is_headless:
+            log.warning(
+                "linkedin.auth.headless_session_missing",
+                msg="No active LinkedIn session in Postgres. Run 'python -m naukri_agent login --platform linkedin' locally to save session.",
+            )
+            return False
+
         log.warning(
             "linkedin.auth.manual_login_required",
             msg="Please log in to LinkedIn in the browser window. Waiting up to 90 seconds...",
@@ -243,15 +260,61 @@ class LinkedInPlatform(BaseJobPlatform):
                 break
 
             start_offset = page_idx * 25
-            search_url = f"{base_search_url}&start={start_offset}"
-            log.info("linkedin.fetch.page_start", page=page_idx + 1, start_offset=start_offset, collected_so_far=len(jobs))
+            target_page_num = page_idx + 1
+            log.info("linkedin.fetch.page_start", page=target_page_num, start_offset=start_offset, collected_so_far=len(jobs))
 
-            try:
-                await self.page.goto(search_url, wait_until="domcontentloaded", timeout=35000)
-                await human_pause(2500, 4000)
-            except Exception as exc:
-                log.warning("linkedin.fetch.goto_error", page=page_idx + 1, error=str(exc))
-                break
+            if page_idx == 0:
+                try:
+                    await self.page.goto(base_search_url, wait_until="domcontentloaded", timeout=35000)
+                    await human_pause(2500, 4000)
+                except Exception as exc:
+                    log.warning("linkedin.fetch.goto_error", page=1, error=str(exc))
+                    break
+            else:
+                page_clicked = False
+                try:
+                    # Scroll down to pagination control
+                    pag_el = await first_visible(
+                        self.page,
+                        [
+                            "ul.artdeco-pagination__pages",
+                            ".jobs-search-pagination",
+                            "div[class*='pagination']",
+                        ],
+                        timeout_ms=3000,
+                    )
+                    if pag_el:
+                        await pag_el.scroll_into_view_if_needed()
+                        await human_pause(500, 1000)
+
+                    target_page_btn = await first_visible(
+                        self.page,
+                        [
+                            f"button[aria-label='Page {target_page_num}']",
+                            f"button[aria-label*='Page {target_page_num}']",
+                            f"li[data-test-pagination-page-btn='{target_page_num}'] button",
+                            f"ul.artdeco-pagination__pages button:has-text('{target_page_num}')",
+                        ],
+                        timeout_ms=3000,
+                    )
+                    if target_page_btn:
+                        await target_page_btn.scroll_into_view_if_needed()
+                        await human_pause(300, 600)
+                        await target_page_btn.click(force=True)
+                        log.info("linkedin.fetch.clicked_pagination_button", page=target_page_num)
+                        await human_pause(2500, 4000)
+                        page_clicked = True
+                except Exception as exc:
+                    log.debug("linkedin.fetch.in_page_pagination_failed", page=target_page_num, error=str(exc))
+
+                if not page_clicked:
+                    search_url = f"{base_search_url}&start={start_offset}"
+                    try:
+                        await self.page.goto(search_url, wait_until="domcontentloaded", timeout=25000)
+                        await human_pause(2500, 4000)
+                    except Exception as exc:
+                        log.warning("linkedin.fetch.goto_error", page=target_page_num, error=str(exc))
+                        break
 
             try:
                 await self.page.wait_for_selector(
@@ -332,7 +395,7 @@ class LinkedInPlatform(BaseJobPlatform):
 
                     card_text = (await safe_text(card)).strip()
                     min_exp, max_exp = None, None
-                    exp_match = re.search(r"(\d+(?:\.\d+)?)\s*(?:-|to|\+)\s*(\d+(?:\.\d+)?)?\s*(?:yrs|years|yr)", f"{title} {card_text}", re.I)
+                    exp_match = re.search(r"(\d+(?:\.\d+)?)\s*(?:-|to|\+)\s*(\d+(?:\.\d+)?)?\s*(?:yrs|years|yr)", f"{title} {card_text}", re.IGNORECASE)
                     if exp_match:
                         min_exp = float(exp_match.group(1))
                         if exp_match.group(2):
@@ -354,6 +417,7 @@ class LinkedInPlatform(BaseJobPlatform):
                         location=location,
                         min_experience=min_exp,
                         max_experience=max_exp,
+                        platform="linkedin",
                     )
                     jobs.append(job)
                     page_added += 1
@@ -401,7 +465,7 @@ class LinkedInPlatform(BaseJobPlatform):
         extract_description_metadata(job.description)
 
         if job.min_experience is None and job.description:
-            match = re.search(r"(\d+(?:\.\d+)?)\s*(?:-|to|\+)\s*(\d+(?:\.\d+)?)?\s*(?:yrs|years|yr)", job.description, re.I)
+            match = re.search(r"(\d+(?:\.\d+)?)\s*(?:-|to|\+)\s*(\d+(?:\.\d+)?)?\s*(?:yrs|years|yr)", job.description, re.IGNORECASE)
             if match:
                 job.min_experience = float(match.group(1))
                 if match.group(2):
@@ -445,20 +509,39 @@ class LinkedInPlatform(BaseJobPlatform):
         log.info("linkedin.apply.clicking_button", job_id=job.job_id)
         await apply_btn.scroll_into_view_if_needed()
         await human_pause(300, 600)
-        await apply_btn.click(force=True)
+        try:
+            await apply_btn.click(force=True)
+        except Exception:
+            pass
+        try:
+            await apply_btn.dispatch_event("click")
+        except Exception:
+            pass
         await human_pause(1500, 2500)
 
-        # Modal Detection
-        modal = await first_visible(
-            self.page,
-            [
-                "div.jobs-easy-apply-modal",
-                "div.artdeco-modal",
-                "div[data-test-modal]",
-                "div[role='dialog']",
-            ],
-            timeout_ms=5000,
-        )
+        # Modal Detection (supporting dialogs, artdeco modals, and modern slide-out drawers)
+        modal_selectors = [
+            "div.jobs-easy-apply-modal",
+            "div.artdeco-modal",
+            "div.jobs-easy-apply-content",
+            "div[data-view-name*='easy-apply']",
+            "div[data-test-modal]",
+            "div[role='dialog']",
+            "section[role='dialog']",
+        ]
+        modal = await first_visible(self.page, modal_selectors, timeout_ms=8000)
+
+        # Retry click once if modal didn't open on first attempt
+        if not modal:
+            log.info("linkedin.apply.retrying_click_apply_btn", job_id=job.job_id)
+            try:
+                await apply_btn.click(force=True)
+            except Exception:
+                try:
+                    await apply_btn.evaluate("el => el.click()")
+                except Exception:
+                    pass
+            modal = await first_visible(self.page, modal_selectors, timeout_ms=5000)
 
         if not modal:
             return ApplyOutcome(status=ApplicationStatus.FAILED, detail="Modal not visible")
@@ -815,7 +898,7 @@ class LinkedInPlatform(BaseJobPlatform):
                         num_match = re.search(r"[-+]?\d*\.?\d+", val)
                         if num_match:
                             val_float = float(num_match.group(0))
-                            ans = str(max(0, min(99, int(round(val_float)))))
+                            ans = str(max(0, min(99, round(val_float))))
 
                     if not ans:
                         resolved = self.answers.resolve(ScreeningQuestion(text=label, kind="text"))
@@ -823,7 +906,7 @@ class LinkedInPlatform(BaseJobPlatform):
                         if raw_ans:
                             num_match = re.search(r"[-+]?\d*\.?\d+", str(raw_ans))
                             if num_match:
-                                ans = str(max(0, min(99, int(round(float(num_match.group(0)))))))
+                                ans = str(max(0, min(99, round(float(num_match.group(0))))))
 
                     if not ans:
                         if "notice" in label_low or "how soon" in label_low or "availability" in label_low:

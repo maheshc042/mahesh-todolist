@@ -29,11 +29,10 @@ import math
 import re
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from typing import Any
 
 from ..config import FilterRules
-from .filters import _contains_any, _normalise_str
-from .models import FilterDecision, Job, RecommendationTab, SkipReason
+from .filters import FilterEngine
+from .models import FilterDecision, Job, RecommendationTab
 
 
 # ---------------------------------------------------------------------------
@@ -225,144 +224,16 @@ class HardFilter:
     """
     Synchronous Hard Filter.
     Responsible ONLY for rejecting non-eligible jobs before ranking.
-    Never scores or ranks.
+    Delegates directly to FilterEngine to ensure 100% agreement with live executor.
     """
 
     def __init__(self, rules: FilterRules, candidate: CandidateProfile | None = None) -> None:
         self.rules = rules
         self.candidate = candidate
+        self._engine = FilterEngine(rules, candidate=candidate)
 
     def evaluate(self, job: Job) -> FilterDecision:
-        rules = self.rules
-        title = job.title.lower()
-        company = job.company.lower()
-        location = job.location.lower()
-
-        # 1. Lead / Architect title blocklist (Preserves startup senior roles)
-        if any(_exact_word_match(term, title) or term in title for term in LEAD_ARCHITECT_EXCLUDES):
-            return FilterDecision(
-                False, SkipReason.FILTER_TITLE, "title indicates lead/architect/management role"
-            )
-
-        # 2. Non-developer and unaligned data track blocklist
-        if any(term in title for term in NON_DEV_TITLE_EXCLUDES):
-            return FilterDecision(
-                False, SkipReason.FILTER_TITLE, "title indicates non-developer/unaligned track"
-            )
-
-        # 4. Title blocklist (with tech normalization)
-        if rules.title_must_exclude_any:
-            hit = _contains_any(title, rules.title_must_exclude_any)
-            if hit:
-                return FilterDecision(
-                    False, SkipReason.FILTER_TITLE, f"title contains blocked term '{hit}'"
-                )
-
-        # 5. Dual-Gate Role Matching (Title OR Core Skills):
-        has_title_match = bool(rules.title_must_include_any and _contains_any(title, rules.title_must_include_any))
-        has_skill_match = False
-        if self.candidate:
-            haystack = _build_searchable_haystack(job)
-            matched_core = [
-                s for s in self.candidate.core_skills
-                if _exact_word_match(s, haystack) or _normalize_tech_text(s) in haystack
-            ]
-            matched_sec = [
-                s for s in self.candidate.secondary_skills
-                if _exact_word_match(s, haystack) or _normalize_tech_text(s) in haystack
-            ]
-            if len(matched_core) >= 2 or (len(matched_core) >= 1 and len(matched_sec) >= 1):
-                has_skill_match = True
-
-        if rules.title_must_include_any and not has_title_match and not has_skill_match:
-            return FilterDecision(
-                False, SkipReason.FILTER_TITLE, "title lacks required keywords and lacks matching core skills"
-            )
-
-        # Company & Location blocklists
-        if rules.blocked_companies:
-            hit = _contains_any(company, rules.blocked_companies)
-            if hit:
-                return FilterDecision(
-                    False, SkipReason.FILTER_COMPANY, f"blocked company '{hit}'"
-                )
-
-        if rules.blocked_locations:
-            hit = _contains_any(location, rules.blocked_locations)
-            if hit:
-                return FilterDecision(
-                    False, SkipReason.FILTER_LOCATION, f"blocked location '{hit}'"
-                )
-
-        if rules.skip_walkin and job.is_walkin:
-            return FilterDecision(False, SkipReason.WALKIN, "walk-in drive")
-
-        # Description & Tags blocklist (checks title, description, and card tags/badges)
-        if rules.description_must_exclude_any:
-            full_text = f"{job.title} {job.description or ''} {' '.join(job.tags or [])}".lower()
-            hit = _contains_any(full_text, rules.description_must_exclude_any)
-            if hit:
-                return FilterDecision(
-                    False, SkipReason.FILTER_DESCRIPTION, f"job contains blocked term '{hit}'"
-                )
-
-        # Dedicated AI / ML Recruiter Reality Gate:
-        # Candidate has 6 months hands-on AI/ML experience. A recruiter screening for a
-        # 3+ year dedicated ML/AI Engineer role will reject the profile immediately.
-        # Allow entry/junior AI roles (min_exp <= 2.0y).
-        is_dedicated_ai = any(term in title for term in DEDICATED_AI_KEYWORDS)
-        if is_dedicated_ai and job.min_experience is not None and job.min_experience > 2.0:
-            return FilterDecision(
-                False,
-                SkipReason.FILTER_EXPERIENCE,
-                f"dedicated AI/ML role requires {job.min_experience}y > candidate's 6m AI experience (recruiter will reject)",
-            )
-
-        # Numeric experience bounds
-        exp = rules.experience
-        if job.min_experience is not None:
-            if job.min_experience > 3.5:
-                return FilterDecision(
-                    False,
-                    SkipReason.FILTER_EXPERIENCE,
-                    f"requires {job.min_experience}y > ceiling 3.5y",
-                )
-            if job.min_experience > exp.max_years:
-                return FilterDecision(
-                    False,
-                    SkipReason.FILTER_EXPERIENCE,
-                    f"requires {job.min_experience}y > max {exp.max_years}y",
-                )
-        if job.max_experience is not None:
-            if job.max_experience < exp.min_years:
-                return FilterDecision(
-                    False,
-                    SkipReason.FILTER_EXPERIENCE,
-                    f"caps at {job.max_experience}y < min {exp.min_years}y",
-                )
-            if job.max_experience > 6.0:
-                return FilterDecision(
-                    False,
-                    SkipReason.FILTER_EXPERIENCE,
-                    f"caps at {job.max_experience}y > ceiling 6.0y (senior requisition)",
-                )
-            if job.min_experience is not None and (job.max_experience - job.min_experience) >= 5.0 and job.min_experience >= 2.0:
-                return FilterDecision(
-                    False,
-                    SkipReason.FILTER_EXPERIENCE,
-                    f"spread {job.min_experience}-{job.max_experience}y >= 5y (broad senior requisition)",
-                )
-
-        # Freshness hard ceiling (5 days)
-        if rules.max_posted_days is not None and job.posted_days_ago is not None:
-            if job.posted_days_ago > rules.max_posted_days:
-                return FilterDecision(
-                    False,
-                    SkipReason.FILTER_FRESHNESS,
-                    f"posted {job.posted_days_ago}d ago > max {rules.max_posted_days}d",
-                )
-
-        return FilterDecision(True)
+        return self._engine.evaluate_card(job)
 
 
 # ---------------------------------------------------------------------------
@@ -394,9 +265,7 @@ class RuleBasedResumeMatcher(BaseResumeMatcher):
         # 1. Role / Title Match (Max role_title_weight, e.g. 20.0)
         matched_titles: list[str] = []
         for kw in self.candidate.title_keywords:
-            if _exact_word_match(kw, norm_title):
-                matched_titles.append(kw)
-            elif _normalize_tech_text(kw) in norm_title:
+            if _exact_word_match(kw, norm_title) or _normalize_tech_text(kw) in norm_title:
                 matched_titles.append(kw)
 
         if len(matched_titles) >= 2:

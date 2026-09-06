@@ -27,12 +27,7 @@ YES_TOKENS = ("yes", "yeah", "yep", "sure", "agree", "willing", "true", "availab
 NO_TOKENS = ("no", "nope", "never", "false")
 
 STOPWORDS = frozenset(
-    """
-    a an the and or of in on at to for with your you have has do does did are is
-    was were be been being how many much i me my we our it its that this these
-    those please kindly can could would will shall any some what which whom whose
-    if then else about from into over under per as by
-    """.split()
+    ["a", "an", "the", "and", "or", "of", "in", "on", "at", "to", "for", "with", "your", "you", "have", "has", "do", "does", "did", "are", "is", "was", "were", "be", "been", "being", "how", "many", "much", "i", "me", "my", "we", "our", "it", "its", "that", "this", "these", "those", "please", "kindly", "can", "could", "would", "will", "shall", "any", "some", "what", "which", "whom", "whose", "if", "then", "else", "about", "from", "into", "over", "under", "per", "as", "by"]
 )
 
 _EXPERIENCE_INTENT = re.compile(
@@ -136,7 +131,7 @@ class ExperienceAnswers:
     multi_skill_strategy: str = "max"
     skills: dict[str, float] | None = None
 
-    def merged_with(self, override: "ExperienceAnswers | None") -> "ExperienceAnswers":
+    def merged_with(self, override: ExperienceAnswers | None) -> ExperienceAnswers:
         if override is None:
             return self
         skills = dict(self.skills or {})

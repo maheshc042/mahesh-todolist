@@ -25,7 +25,6 @@ from __future__ import annotations
 
 import asyncio
 from pathlib import Path
-from typing import Optional
 
 import typer
 from rich.console import Console
@@ -99,7 +98,7 @@ def _resolve_accounts(account: str | None, all_accounts: bool, settings: Setting
 # ---------------------------------------------------------------------------
 @app.command()
 def migrate(
-    config_path: Optional[Path] = typer.Option(None, "--config", help="Path to config.yaml"),
+    config_path: Path | None = typer.Option(None, "--config", help="Path to config.yaml"),
 ) -> None:
     """Create or upgrade the database schema (idempotent, safe to re-run)."""
 
@@ -123,22 +122,22 @@ def migrate(
 # ---------------------------------------------------------------------------
 @app.command()
 def run(
-    account: Optional[str] = typer.Option(
+    account: str | None = typer.Option(
         None, "--account", "-a", help=f"Which login to use: {' | '.join(ACCOUNT_KEYS)}"
     ),
     all_accounts: bool = typer.Option(
         False, "--all-accounts", help="Run every configured account, one after another"
     ),
-    profile: Optional[list[str]] = typer.Option(
+    profile: list[str] | None = typer.Option(
         None, "--profile", "-p", help="Only these profile names (repeatable)"
     ),
     dry_run: bool = typer.Option(
         False, "--dry-run", help="Do everything except submitting an application"
     ),
-    headed: Optional[bool] = typer.Option(
+    headed: bool | None = typer.Option(
         None, "--headed/--headless", help="Override headless mode in browser"
     ),
-    config_path: Optional[Path] = typer.Option(None, "--config", help="Path to config.yaml"),
+    config_path: Path | None = typer.Option(None, "--config", help="Path to config.yaml"),
 ) -> None:
     """Apply to jobs once and exit."""
 
@@ -207,9 +206,9 @@ def _print_stats(account: str, stats) -> None:
 # ---------------------------------------------------------------------------
 @app.command()
 def schedule(
-    profile: Optional[list[str]] = typer.Option(None, "--profile", "-p", help="Only these profiles"),
+    profile: list[str] | None = typer.Option(None, "--profile", "-p", help="Only these profiles"),
     dry_run: bool = typer.Option(False, "--dry-run", help="Never submit an application"),
-    config_path: Optional[Path] = typer.Option(None, "--config", help="Path to config.yaml"),
+    config_path: Path | None = typer.Option(None, "--config", help="Path to config.yaml"),
 ) -> None:
     """Stay running and apply on the configured cron (one job per account)."""
 
@@ -242,15 +241,16 @@ def schedule(
 # ---------------------------------------------------------------------------
 @app.command()
 def login(
-    account: Optional[str] = typer.Option(None, "--account", "-a", help="Which login to use"),
+    account: str | None = typer.Option(None, "--account", "-a", help="Which login to use"),
+    platform: str = typer.Option("naukri", "--platform", "-p", help="Platform to log in: naukri, cutshort, wellfound, linkedin, instahyre, or all"),
     headed: bool = typer.Option(True, "--headed/--headless", help="Show the browser window"),
-    config_path: Optional[Path] = typer.Option(None, "--config", help="Path to config.yaml"),
+    config_path: Path | None = typer.Option(None, "--config", help="Path to config.yaml"),
 ) -> None:
     """
-    Log in once interactively and store the session in Postgres.
-
-    Run this on a machine with a display after a fresh deploy or an OTP
-    challenge; every later headless run reuses the saved session.
+    Log in interactively (headed browser) and store the session in Postgres.
+    
+    Supports: naukri, cutshort, wellfound, linkedin, instahyre, or all.
+    Every subsequent headless CI run reuses the saved session.
     """
 
     async def _main() -> None:
@@ -260,19 +260,154 @@ def login(
         repo = await Repository.create()
         browser_config = config.browser.model_copy(update={"headless": not headed})
         artifacts = ArtifactStore(settings.artifacts_dir, "login")
+        from .browser.resilience import first_visible, human_pause, human_type
+
+        selected_platforms = (
+            ["naukri", "cutshort", "wellfound", "linkedin", "instahyre"]
+            if platform.lower() == "all"
+            else [platform.lower()]
+        )
+
         try:
             async with BrowserManager(
                 browser_config, repo, session_key=target.session_key
             ) as browser:
-                auth = NaukriAuth(browser, target.email, target.password, artifacts)
-                page = await auth.ensure_logged_in()
+                page = await browser.new_page()
+
+                for p in selected_platforms:
+                    console.print(f"\n[bold cyan]=== Logging in to {p.upper()} (Account: {target.key}) ===[/bold cyan]")
+
+                    if p == "naukri":
+                        auth = NaukriAuth(browser, target.email, target.password, artifacts)
+                        naukri_page = await auth.ensure_logged_in()
+                        await browser.persist_session()
+                        await repo.resume_platform(target.key, "naukri")
+                        console.print(f"[green]✓ Logged in to Naukri as {target.masked_email}[/green]")
+                        await naukri_page.close()
+
+                    elif p == "cutshort":
+                        await page.goto("https://cutshort.io/profile/jobs", wait_until="domcontentloaded")
+                        await human_pause(2000, 3000)
+
+                        auth_sel = [
+                            "div[data-intercom-target='candidateProfileNav']",
+                            "a[href*='/profile']",
+                            "div.user-avatar",
+                            "button:has-text('Logout')",
+                            "div:has-text('Matches')",
+                            "div:has-text('Find jobs')",
+                        ]
+                        if await first_visible(page, auth_sel, timeout_ms=3000):
+                            console.print("[green]✓ Cutshort session already active![/green]")
+                        else:
+                            console.print("[yellow]Please log in to Cutshort (Google SSO, OTP, or email) in the open browser...[/yellow]")
+                            console.print("[dim]Waiting up to 120 seconds for login confirmation...[/dim]")
+                            try:
+                                await page.wait_for_selector(", ".join(auth_sel), timeout=120000)
+                                console.print("[green]✓ Cutshort login detected![/green]")
+                            except Exception:
+                                console.print("[red]✗ Cutshort login timed out (120s).[/red]")
+                                continue
+
+                        await browser.persist_session()
+                        await repo.resume_platform(target.key, "cutshort")
+                        console.print("[green]✓ Cutshort session persisted to Postgres and resumed![/green]")
+
+                    elif p == "wellfound":
+                        await page.goto("https://wellfound.com/jobs", wait_until="domcontentloaded")
+                        await human_pause(2000, 3000)
+
+                        auth_sel = [
+                            "button[aria-label='User Menu']",
+                            "a[href*='/profile']",
+                            "text=Applied",
+                            "div[data-test='JobCard']",
+                            "button:has-text('Discover')",
+                        ]
+                        if await first_visible(page, auth_sel, timeout_ms=3000):
+                            console.print("[green]✓ Wellfound session already active![/green]")
+                        else:
+                            console.print("[yellow]Please solve Cloudflare Turnstile / log in to Wellfound in the open browser...[/yellow]")
+                            console.print("[dim]Waiting up to 120 seconds for login confirmation...[/dim]")
+                            try:
+                                await page.wait_for_selector(", ".join(auth_sel), timeout=120000)
+                                console.print("[green]✓ Wellfound login detected![/green]")
+                            except Exception:
+                                console.print("[red]✗ Wellfound login timed out (120s).[/red]")
+                                continue
+
+                        await browser.persist_session()
+                        await repo.resume_platform(target.key, "wellfound")
+                        console.print("[green]✓ Wellfound session persisted to Postgres and resumed![/green]")
+
+                    elif p == "linkedin":
+                        await page.goto("https://www.linkedin.com/feed/", wait_until="domcontentloaded")
+                        await human_pause(2000, 3000)
+
+                        auth_sel = [
+                            "nav.global-nav",
+                            "img.global-nav__me-photo",
+                            "a[href*='/in/']",
+                            ".feed-identity-module",
+                            "button[aria-label*='Account']",
+                        ]
+                        if await first_visible(page, auth_sel, timeout_ms=3000):
+                            console.print("[green]✓ LinkedIn session already active![/green]")
+                        else:
+                            console.print("[yellow]Please log in to LinkedIn / complete security checkpoint in the open browser...[/yellow]")
+                            console.print("[dim]Waiting up to 120 seconds for login confirmation...[/dim]")
+                            try:
+                                await page.wait_for_selector(", ".join(auth_sel), timeout=120000)
+                                console.print("[green]✓ LinkedIn login detected![/green]")
+                            except Exception:
+                                console.print("[red]✗ LinkedIn login timed out (120s).[/red]")
+                                continue
+
+                        await browser.persist_session()
+                        await repo.resume_platform(target.key, "linkedin")
+                        console.print("[green]✓ LinkedIn session persisted to Postgres and resumed![/green]")
+
+                    elif p == "instahyre":
+                        await page.goto("https://www.instahyre.com/candidate/opportunities/?matching=true", wait_until="domcontentloaded")
+                        await human_pause(2000, 3000)
+
+                        auth_sel = [
+                            "a[href*='/candidate/profile']",
+                            "a[href*='/candidate/opportunities']",
+                            "div.employer-row",
+                            "button:has-text('Logout')",
+                            "#opportunities",
+                        ]
+                        if await first_visible(page, auth_sel, timeout_ms=3000):
+                            console.print("[green]✓ Instahyre session already active![/green]")
+                        else:
+                            console.print("[yellow]Please log in to Instahyre in the open browser...[/yellow]")
+                            email_inp = await first_visible(page, ["input[type='email']", "input[name='email']"], timeout_ms=2000)
+                            pass_inp = await first_visible(page, ["input[type='password']", "input[name='password']"], timeout_ms=2000)
+                            i_email = (settings.instahyre_email or target.email).strip()
+                            i_pass = (settings.instahyre_password or target.password).strip()
+                            if email_inp and pass_inp and i_email and i_pass:
+                                await human_type(email_inp, i_email)
+                                await human_type(pass_inp, i_pass)
+                                submit = await first_visible(page, ["button:has-text('Login')", "button[type='submit']"])
+                                if submit:
+                                    await submit.click()
+
+                            try:
+                                await page.wait_for_selector(", ".join(auth_sel), timeout=120000)
+                                console.print("[green]✓ Instahyre login detected![/green]")
+                            except Exception:
+                                console.print("[red]✗ Instahyre login timed out (120s).[/red]")
+                                continue
+
+                        await browser.persist_session()
+                        await repo.resume_platform(target.key, "instahyre")
+                        console.print("[green]✓ Instahyre session persisted to Postgres and resumed![/green]")
+
                 await browser.persist_session()
-                await repo.resume_platform(target.key, "naukri")
-                console.print(
-                    f"[green]logged in as {target.masked_email}[/green] "
-                    f"(session key {target.session_key})"
-                )
-                await page.close()
+                console.print(f"\n[bold green]✓ All selected platform sessions saved under {target.session_key}![/bold green]")
+                if not page.is_closed():
+                    await page.close()
         finally:
             await close_pool()
 
@@ -315,7 +450,7 @@ def campaign_linkedin_cmd(
     limit: int = typer.Option(15, "--limit", "-l", help="Daily email limit"),
     headed: bool = typer.Option(False, "--headed/--headless", help="Show browser window"),
     dry_run: bool = typer.Option(False, "--dry-run", help="Dry run: hunt and preview matches without sending emails"),
-    config_path: Optional[Path] = typer.Option(None, "--config", help="Path to config.yaml"),
+    config_path: Path | None = typer.Option(None, "--config", help="Path to config.yaml"),
 ) -> None:
     """
     Run the LinkedIn Cold Email Outreach Campaign.
@@ -349,10 +484,10 @@ def campaign_linkedin_cmd(
 # ---------------------------------------------------------------------------
 @app.command(name="refresh-profile")
 def refresh_profile(
-    account: Optional[str] = typer.Option(None, "--account", "-a", help="Which login to use"),
+    account: str | None = typer.Option(None, "--account", "-a", help="Which login to use"),
     force: bool = typer.Option(False, "--force", help="Ignore the min_hours_between guard"),
     headed: bool = typer.Option(False, "--headed/--headless", help="Show the browser window"),
-    config_path: Optional[Path] = typer.Option(None, "--config", help="Path to config.yaml"),
+    config_path: Path | None = typer.Option(None, "--config", help="Path to config.yaml"),
 ) -> None:
     """
     Touch the Naukri profile so recruiter search ranks it as updated today.
@@ -426,7 +561,7 @@ def refresh_profile(
 # ---------------------------------------------------------------------------
 @app.command()
 def accounts(
-    config_path: Optional[Path] = typer.Option(None, "--config", help="Path to config.yaml"),
+    config_path: Path | None = typer.Option(None, "--config", help="Path to config.yaml"),
 ) -> None:
     """Show which logins are wired up, their profiles and today's usage."""
 
@@ -589,7 +724,7 @@ def resolve(
 
 @app.command(name="listen-telegram")
 def listen_telegram(
-    config_path: Optional[Path] = typer.Option(None, "--config", help="Path to config.yaml"),
+    config_path: Path | None = typer.Option(None, "--config", help="Path to config.yaml"),
 ) -> None:
     """Start interactive Telegram bot listener to train your AI directly from your phone."""
 
@@ -614,7 +749,7 @@ def listen_telegram(
 
 @app.command()
 def doctor(
-    config_path: Optional[Path] = typer.Option(None, "--config", help="Path to config.yaml"),
+    config_path: Path | None = typer.Option(None, "--config", help="Path to config.yaml"),
 ) -> None:
     """Validate environment, config and database connectivity without touching Naukri."""
 
@@ -675,7 +810,7 @@ def version() -> None:
 def stats(
     days: int = typer.Option(7, "--days", "-d", help="Look-back window in days (default: 7)."),
     weekly: bool = typer.Option(False, "--weekly", "-w", help="Show weekly aggregation instead of daily."),
-    profile: Optional[str] = typer.Option(None, "--profile", "-p", help="Filter to a specific profile."),
+    profile: str | None = typer.Option(None, "--profile", "-p", help="Filter to a specific profile."),
 ) -> None:
     """
     Show an analytics dashboard of applications and answer KB health.
@@ -690,7 +825,7 @@ def stats(
     _run(_stats(days, weekly, profile))
 
 
-async def _stats(days: int, weekly: bool, profile: Optional[str]) -> None:
+async def _stats(days: int, weekly: bool, profile: str | None) -> None:
     try:
         _ = get_settings()
     except ConfigError as exc:
@@ -838,7 +973,7 @@ async def _stats(days: int, weekly: bool, profile: Optional[str]) -> None:
 def learn(
     unused: bool = typer.Option(False, "--unused", help="Show KB entries with zero hits (dead weight)."),
     fuzzy: bool = typer.Option(False, "--fuzzy", help="Show auto-resolved answers for human verification."),
-    profile: Optional[str] = typer.Option(None, "--profile", "-p", help="Filter to a specific profile."),
+    profile: str | None = typer.Option(None, "--profile", "-p", help="Filter to a specific profile."),
     limit: int = typer.Option(30, "--limit", "-n", help="Max rows to display."),
 ) -> None:
     """
@@ -855,7 +990,7 @@ def learn(
 
 
 async def _learn(
-    unused: bool, fuzzy: bool, profile: Optional[str], limit: int
+    unused: bool, fuzzy: bool, profile: str | None, limit: int
 ) -> None:
     try:
         await get_pool()

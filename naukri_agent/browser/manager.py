@@ -163,11 +163,11 @@ class BrowserManager:
         self._session_trusted = False
 
     # ------------------------------------------------------------- lifecycle
-    async def __aenter__(self) -> "BrowserManager":
+    async def __aenter__(self) -> BrowserManager:
         await self.start()
         return self
 
-    async def __aexit__(self, *_exc: Any) -> None:
+    async def __aexit__(self, *_exc: object) -> None:
         await self.stop()
 
     async def start(self) -> None:

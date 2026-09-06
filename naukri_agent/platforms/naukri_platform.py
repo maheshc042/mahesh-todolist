@@ -3,7 +3,7 @@ Wrapper to make the existing Naukri engine fit the Multi-Platform interface.
 """
 from __future__ import annotations
 
-from typing import Callable
+from collections.abc import Callable
 
 from playwright.async_api import Page
 
@@ -12,8 +12,8 @@ from ..browser.manager import BrowserManager
 from ..config import AgentConfig, JobProfile, NaukriAccount
 from ..core.answers import AnswerEngine
 from ..core.models import ApplyOutcome, FilterDecision, Job
-from ..core.runtime_metrics import RuntimeMetrics
 from ..core.run_policy import RunPolicy
+from ..core.runtime_metrics import RuntimeMetrics
 from ..naukri.apply import ApplyEngine
 from ..naukri.auth import NaukriAuth
 from ..naukri.search import JobSearcher

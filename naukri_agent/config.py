@@ -169,7 +169,7 @@ class Settings(BaseSettings):
         return key
 
     @model_validator(mode="after")
-    def _pool_sizes(self) -> "Settings":
+    def _pool_sizes(self) -> Settings:
         if self.db_pool_max_size < self.db_pool_min_size:
             raise ValueError("DB_POOL_MAX_SIZE must be >= DB_POOL_MIN_SIZE")
         return self
@@ -314,7 +314,7 @@ class BrowserConfig(_Model):
     user_agent: str = ""
 
     @model_validator(mode="after")
-    def _ordered_delays(self) -> "BrowserConfig":
+    def _ordered_delays(self) -> BrowserConfig:
         if self.max_action_delay_ms < self.min_action_delay_ms:
             raise ValueError("browser.max_action_delay_ms must be >= min_action_delay_ms")
         return self
@@ -333,7 +333,7 @@ class RunConfig(_Model):
     run_timeout_minutes: int = Field(default=90, ge=1, le=1_440)
 
     @model_validator(mode="after")
-    def _ordered_delays(self) -> "RunConfig":
+    def _ordered_delays(self) -> RunConfig:
         if self.max_delay_between_applies_s < self.min_delay_between_applies_s:
             raise ValueError("run.max_delay_between_applies_s must be >= min_delay_between_applies_s")
         return self
@@ -352,7 +352,7 @@ class RecommendedConfig(_Model):
     follow_show_more: bool = True
 
     @model_validator(mode="after")
-    def _validate_rounds(self) -> "RecommendedConfig":
+    def _validate_rounds(self) -> RecommendedConfig:
         if self.max_scroll_rounds < self.stall_rounds_before_stop:
             raise ValueError(
                 f"recommended.max_scroll_rounds ({self.max_scroll_rounds}) "
@@ -458,7 +458,7 @@ class ExperienceRange(_Model):
     max_years: float = Field(default=99, ge=0, le=50)
 
     @model_validator(mode="after")
-    def _ordered(self) -> "ExperienceRange":
+    def _ordered(self) -> ExperienceRange:
         if self.max_years < self.min_years:
             raise ValueError("filters.experience.max_years must be >= min_years")
         return self
@@ -493,7 +493,7 @@ class FilterRules(_Model):
         # Every comparison in filters.py is done on a lowercased haystack.
         return [str(item).strip().lower() for item in value if str(item).strip()]
 
-    def relaxed(self) -> "FilterRules":
+    def relaxed(self) -> FilterRules:
         """
         Ruleset for Naukri's recommended feed.
 
@@ -598,7 +598,7 @@ class JobProfile(_Model):
         """`recommended` gets the relaxed ruleset; keyword search gets the full one."""
         return self.filters.relaxed() if source == "recommended" else self.filters
 
-    def to_candidate_profile(self, config: "AgentConfig | None" = None) -> Any:
+    def to_candidate_profile(self, config: AgentConfig | None = None) -> Any:
         """
         Derive CandidateProfile from the active JobProfile without hardcoded defaults.
         Fails with ConfigError if insufficient info exists to build a CandidateProfile.
@@ -716,7 +716,7 @@ class AgentConfig(_Model):
         return _stringify_answers(value)
 
     @model_validator(mode="after")
-    def _unique_names(self) -> "AgentConfig":
+    def _unique_names(self) -> AgentConfig:
         names = [profile.name.strip().lower() for profile in self.profiles]
         duplicates = {name for name in names if names.count(name) > 1}
         if duplicates:
@@ -784,7 +784,7 @@ class AgentConfig(_Model):
 
     # ------------------------------------------------------------------ load
     @classmethod
-    def load(cls, path: Path | str | None = None) -> "AgentConfig":
+    def load(cls, path: Path | str | None = None) -> AgentConfig:
         settings = get_settings()
         target = Path(path) if path else settings.config_path
         if not target.is_absolute():

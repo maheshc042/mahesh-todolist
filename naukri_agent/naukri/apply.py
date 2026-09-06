@@ -8,16 +8,23 @@ from __future__ import annotations
 import asyncio
 import re
 import time
-from typing import Awaitable, Callable
+from collections.abc import Callable
 
-from playwright.async_api import Page, TimeoutError as PWTimeoutError
+from playwright.async_api import Page
+from playwright.async_api import TimeoutError as PWTimeoutError
 
 from ..browser.artifacts import ArtifactStore
-from ..browser.resilience import dismiss_overlays, first_visible, human_pause, retry_async, safe_text
+from ..browser.resilience import (
+    dismiss_overlays,
+    first_visible,
+    human_pause,
+    retry_async,
+    safe_text,
+)
 from ..core.answers import AnswerEngine
 from ..core.models import ApplicationStatus, ApplyOutcome, FilterDecision, Job, SkipReason
-from ..core.runtime_metrics import JobTiming, RuntimeMetrics
 from ..core.run_policy import RunPolicy
+from ..core.runtime_metrics import JobTiming, RuntimeMetrics
 from ..logging_setup import get_logger
 from . import selectors as S
 from .chatbot import ChatbotHandler

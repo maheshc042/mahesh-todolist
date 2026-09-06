@@ -11,11 +11,9 @@ from __future__ import annotations
 
 import asyncio
 import re
-from typing import Any
 
 import httpx
 
-from ..config import get_settings
 from ..db.repository import Repository
 from ..logging_setup import get_logger
 

@@ -8,7 +8,6 @@ Contains:
 - Role classification (AI vs Full Stack).
 """
 import re
-from typing import Any
 
 TRACK_1_AI_URL = (
     "https://www.linkedin.com/search/results/content/?"
@@ -34,8 +33,36 @@ EMAIL_REGEX = re.compile(
 )
 
 EXPERIENCED_REJECT_REGEX = re.compile(
-    r"\b(4\+|5\+|6\+|7\+|8\+|10\+|\b[4-9]\s*\+\s*years?|\b1[0-5]\s*\+\s*years?|senior|lead|principal"
-    r"|(?:engineering|tech|technical|product|project|program|delivery|design)\s+manager|head\s+of)\b",
+    r"\b("
+    r"[4-9]\+|1[0-9]\+|"
+    r"[4-9]\s*\+\s*(?:yrs|years?)|"
+    r"1[0-9]\s*\+\s*(?:yrs|years?)|"
+    r"(?:3\s*[-–—to]+\s*[5-9]|[4-9]\s*[-–—to]+\s*\d+)\s*(?:yrs|years?)|"
+    r"experience\s*:\s*(?:[4-9]|1[0-9])\s*[-–—to+]"
+    r"|\bsenior\b|\bsr\b|\bsr\.\b|\blead\b|\bprincipal\b|\bstaff\b"
+    r"|(?:engineering|tech|technical|product|project|program|delivery|design)\s+manager|head\s+of"
+    r")\b",
+    re.IGNORECASE,
+)
+
+SPAM_OR_UNPAID_REJECT_REGEX = re.compile(
+    r"("
+    r"\bunpaid\b|\bno\s+stipend\b|\bwithout\s+stipend\b|"
+    r"\b(?:intern|internship|interns|trainee|trainees)\b|"
+    r"\bthe\s+entrepreneurship\s+network\b|\bten\b|"
+    r"\bb\.?\s*com\b|\bbcom\b|"
+    r"\b50\+\s*openings\b|\b100\+\s*openings\b|"
+    r"dm\s+on\s+whatsapp|whatsapp\s+group"
+    r")",
+    re.IGNORECASE,
+)
+
+TECH_DISQUALIFY_REGEX = re.compile(
+    r"\b("
+    r"wordpress|wix|shopify|magento|drupal|"
+    r"php|laravel|codeigniter|"
+    r"dot\s*net|\.net|dotnet|c#|c\s*sharp|asp\.net"
+    r")\b",
     re.IGNORECASE,
 )
 
@@ -72,6 +99,20 @@ def is_experience_match(text: str) -> bool:
     return True
 
 
+def is_spam_or_unpaid(text: str) -> bool:
+    """Returns True if the post is an unpaid internship, student program, or generic ad spam."""
+    if not text:
+        return False
+    return bool(SPAM_OR_UNPAID_REJECT_REGEX.search(text))
+
+
+def is_disqualified_tech(text: str) -> bool:
+    """Returns True if the post is primarily focused on disqualified tech stacks (PHP, WordPress, .NET)."""
+    if not text:
+        return False
+    return bool(TECH_DISQUALIFY_REGEX.search(text))
+
+
 def _count_keyword_hits(text_lower: str, keywords: list[str]) -> int:
     """Counts keywords present in the text using word-boundary matching."""
     return sum(
@@ -87,6 +128,10 @@ def classify_role(text: str) -> str | None:
         return None
     text_lower = text.lower()
 
+    # Reject disqualified technologies
+    if is_disqualified_tech(text):
+        return None
+
     ai_score = _count_keyword_hits(text_lower, AI_KEYWORDS)
     fs_score = _count_keyword_hits(text_lower, FS_KEYWORDS)
 
@@ -97,3 +142,4 @@ def classify_role(text: str) -> str | None:
     elif ai_score > 0:
         return "AI / Python Engineer"
     return None
+

@@ -19,7 +19,6 @@ from pathlib import Path
 
 from ..config import AgentConfig
 from ..logging_setup import get_logger
-
 from .gemini_writer import GeminiWriter
 
 log = get_logger(__name__)

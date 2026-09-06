@@ -416,7 +416,7 @@ profiles:
     use_recommended: true
     platform_limits:
       naukri: 35
-      instahyre: 150
+      instahyre: 40
       linkedin: 50
       cutshort: 150
       wellfound: 50
@@ -436,8 +436,8 @@ profiles:
     search_is_fallback_only: true
 
     filters:
-      title_must_include_any: [full stack, fullstack, mern, react, node, javascript, typescript, frontend, backend, web, software engineer, software developer, backend developer, backend engineer, frontend developer, frontend engineer, sde, sde 1, sde 2, sde-1, sde-2, sde i, sde ii, qa, automation, sdet, next]
-      title_must_exclude_any: [lead, principal, staff, architect, manager, trainer, intern, internship, desktop support, it support, sales, bpo, php, wordpress, .net, dotnet, dot net, spring boot, asp.net, c#, c++, golang developer, golang engineer, go developer, go engineer, java, mainframe, sap, salesforce, drupal, magento, engineering manager, project manager, product manager, general manager, solution architect, enterprise architect, tech architect, technical architect, sr. manager, data engineer, data analyst, etl, snowflake, teradata, bi developer, powerbi, tableau, data warehousing, databricks]
+      title_must_include_any: [full stack, fullstack, mern, react, node, javascript, typescript, frontend, backend, web, software engineer, software developer, backend developer, backend engineer, frontend developer, frontend engineer, sde, sde 1, sde 2, sde-1, sde-2, sde i, sde ii, qa, automation, sdet, next, qa, automation, sdet]
+      title_must_exclude_any: [principal, staff, architect, manager, trainer, intern, internship, desktop support, it support, sales, bpo, php, wordpress, .net, dotnet, dot net, spring boot, asp.net, c#, c++, golang developer, golang engineer, go developer, go engineer, java, mainframe, sap, salesforce, drupal, magento, engineering manager, project manager, product manager, general manager, solution architect, enterprise architect, tech architect, technical architect, sr. manager, data engineer, data analyst, etl, snowflake, teradata, bi developer, powerbi, tableau, data warehousing, databricks]
       description_must_exclude_any: [
         "bpo", "commission only", "unpaid", "registration fee", "security deposit",
         "prefers women", "women diversity", "women-only", "women only", "female only", "female diversity", "diversity drive"
@@ -481,7 +481,7 @@ profiles:
     use_recommended: true
     platform_limits:
       naukri: 35
-      instahyre: 150
+      instahyre: 40
       linkedin: 50
       cutshort: 150
       wellfound: 50
@@ -489,18 +489,18 @@ profiles:
     resume_file: "resumes/CV_Mahesh_Chitakoti_2026.pdf"
 
     # Explicit title keywords for scoring (so it doesn't divide by 33)
-    title_keywords: ["ai", "python", "machine learning", "ml", "genai", "llm", "backend", "full stack", "software engineer", "developer", "sde", "chatbot", "rag", "nlp", "agent"]
+    title_keywords: ["ai", "python", "machine learning", "ml", "genai", "llm", "backend", "full stack", "software engineer", "developer", "sde", "chatbot", "rag", "nlp", "agent", "qa", "automation", "sdet", "quality analyst"]
 
     # Condensed to Top 13 so math allows a high score
     core_skills: ["python", "fastapi", "django", "ai", "artificial intelligence", "machine learning", "ml", "generative ai", "genai", "llm", "rag", "langchain", "openai", "chatbot", "nlp"]
-    secondary_skills: ["react", "node", "javascript", "typescript", "frontend", "backend", "api", "rest", "postgresql", "mongodb", "aws", "docker", "kubernetes", "vector database", "pinecone", "chromadb", "embeddings", "semantic retrieval", "computer vision", "agent"]
+    secondary_skills: ["react", "node", "javascript", "typescript", "frontend", "backend", "api", "rest", "postgresql", "mongodb", "aws", "docker", "kubernetes", "vector database", "pinecone", "chromadb", "embeddings", "semantic retrieval", "computer vision", "agent", "qa", "automation", "playwright", "selenium"]
     bonus_skills: ["testing", "pytest", "jest", "git", "github", "jira", "agile", "scrum", "debugging"]
 
     searches: []
     search_is_fallback_only: true
 
     filters:
-      title_must_include_any: [ai, artificial intelligence, machine learning, ml, python, llm, genai, generative ai, nlp, chatbot, prompt, agent, python developer, ai engineer, ml engineer, backend engineer, backend developer, full stack, fullstack, mern, frontend, web developer, sde, sde 1, sde 2, sde-1, sde-2, sde i, sde ii, software engineer, software developer]
+      title_must_include_any: [ai, artificial intelligence, machine learning, ml, python, llm, genai, generative ai, nlp, chatbot, prompt, agent, python developer, ai engineer, ml engineer, backend engineer, backend developer, full stack, fullstack, mern, web developer, sde, sde 1, sde 2, sde-1, sde-2, sde i, sde ii, software engineer, software developer, qa, automation, sdet, quality analyst, test automation]
       title_must_exclude_any: [lead, principal, staff, architect, manager, trainer, intern, internship, desktop support, it support, technical support, sales, bpo, php, wordpress, .net, dotnet, dot net, asp.net, c#, c++, golang developer, golang engineer, go developer, go engineer, java, network, hardware, engineering manager, project manager, product manager, general manager, solution architect, enterprise architect, tech architect, technical architect, sr. manager, data engineer, data analyst, etl, snowflake, teradata, bi developer, powerbi, tableau, data warehousing, databricks, spark developer]
       description_must_exclude_any: [
         "bpo", "commission only", "unpaid", "phd required", "registration fee", "security deposit",

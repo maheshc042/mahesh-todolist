@@ -4,14 +4,12 @@ Wellfound (AngelList) Platform Implementation.
 from __future__ import annotations
 
 import re
-import time
-from typing import Callable
+from collections.abc import Callable
 
 from playwright.async_api import Page
 
 from ..browser.artifacts import ArtifactStore
 from ..browser.resilience import (
-    click_if_present,
     first_visible,
     human_pause,
     human_type,
@@ -21,7 +19,14 @@ from ..browser.resilience import (
 )
 from ..config import JobProfile, NaukriAccount, get_settings
 from ..core.gemini_writer import GeminiWriter
-from ..core.models import ApplicationStatus, ApplyOutcome, FilterDecision, Job, SkipReason, extract_description_metadata
+from ..core.models import (
+    ApplicationStatus,
+    ApplyOutcome,
+    FilterDecision,
+    Job,
+    SkipReason,
+    extract_description_metadata,
+)
 from ..core.run_policy import RunPolicy
 from ..logging_setup import get_logger
 from .base import BaseJobPlatform
@@ -48,18 +53,31 @@ class WellfoundPlatform(BaseJobPlatform):
         await human_pause(1500, 3000)
 
         # Check if already logged in (session restored from DB)
-        if await first_visible(self.page, ["button[aria-label='User Menu']", "a[href*='/profile']", "text=Applied"]):
+        auth_selectors = [
+            "button[aria-label='User Menu']",
+            "a[href*='/profile']",
+            "text=Applied",
+            "div[data-test='JobCard']",
+            "button:has-text('Discover')",
+        ]
+        if await first_visible(self.page, auth_selectors):
             log.info("wellfound.auth.session_reused")
             return True
 
         log.warning("wellfound.auth.manual_login_required")
-        log.warning(
-            "Cloudflare blocks automated logins on Wellfound. Please run the bot in --headed mode, log in manually, and the session will be saved to the database for future headless runs."
-        )
 
-        # Wait up to 60 seconds for the user to log in manually during a headed run
+        # In headless CI mode, fail-fast so the pipeline doesn't freeze
+        is_headless = not getattr(self.page.context, "_headed", False)
+        if is_headless:
+            log.warning(
+                "wellfound.auth.headless_session_missing",
+                msg="No active Wellfound session in Postgres. Run 'python -m naukri_agent login --platform wellfound' locally to save session.",
+            )
+            return False
+
+        # In headed mode, wait up to 60 seconds for the user to solve Cloudflare and log in
         try:
-            await self.page.wait_for_selector("button[aria-label='User Menu'], a[href*='/profile']", timeout=60000)
+            await self.page.wait_for_selector(", ".join(auth_selectors), timeout=60000)
             log.info("wellfound.auth.manual_login_success")
             return True
         except Exception:
@@ -109,6 +127,7 @@ class WellfoundPlatform(BaseJobPlatform):
                         url=url,
                         recommendation_tab="default",
                         recommendation_position=index,
+                        platform="wellfound",
                     )
                 )
             except Exception as exc:
@@ -134,7 +153,7 @@ class WellfoundPlatform(BaseJobPlatform):
         try:
             await retry_async(navigate, attempts=2, label=f"wellfound-open:{job.job_id}")
         except Exception as exc:
-            return ApplyOutcome(ApplicationStatus.FAILED, detail=f"Failed to load: {str(exc)}")
+            return ApplyOutcome(ApplicationStatus.FAILED, detail=f"Failed to load: {exc!s}")
 
         # Check if already applied
         if await first_visible(self.page, ["text=Applied", "button:has-text('Applied')"]):
@@ -208,17 +227,30 @@ class WellfoundPlatform(BaseJobPlatform):
         )
         if textarea:
             log.info("wellfound.apply.generating_pitch")
-            # Reuse Gemini cold email logic to write the Wellfound pitch
-            pitch = self.gemini.generate_email_body(
-                role_name=job.title,
-                job_description=job.description or "",
-                company_name=job.company,
-            )
+            # Try Gemini cold email logic first
+            pitch = ""
+            try:
+                pitch = self.gemini.generate_email_body(
+                    role_name=job.title,
+                    job_description=job.description or "",
+                    company_name=job.company,
+                )
+            except Exception:
+                pitch = ""
 
+            # Deterministic fallback pitch if Gemini is not configured or fails
             if not pitch:
-                return ApplyOutcome(
-                    ApplicationStatus.NEEDS_REVIEW,
-                    detail="Could not generate a verified pitch; application not submitted",
+                settings = get_settings()
+                cand_name = getattr(settings, "applicant_name", "Mahesh Chitakoti")
+                pitch = (
+                    f"Hi Hiring Team,\n\n"
+                    f"I am writing to express my strong interest in the {job.title} role at {job.company}. "
+                    f"With 2.5 years of engineering experience developing resilient backend APIs and AI/Full-Stack services "
+                    f"(Python, FastAPI, React, Node.js, and GenAI/LLM integrations), I have a track record of "
+                    f"shipping clean, production-ready features in fast-paced teams.\n\n"
+                    f"I am an immediate joiner (0-day notice period) based in Bengaluru, open to remote and hybrid opportunities, "
+                    f"and excited to contribute to {job.company}'s engineering goals.\n\n"
+                    f"Best regards,\n{cand_name}"
                 )
 
             await human_type(textarea, pitch)

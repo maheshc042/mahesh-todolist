@@ -12,7 +12,7 @@ from __future__ import annotations
 import hashlib
 import re
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from enum import Enum
 from typing import Any
 
@@ -106,9 +106,10 @@ class Job:
     recommendation_tab: str = "default"
     recommendation_position: int | None = None
     total_jobs_in_tab: int | None = None
-    scraped_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+    scraped_at: datetime = field(default_factory=lambda: datetime.now(UTC))
     form_links: list[str] = field(default_factory=list)
     recruiter_emails: list[str] = field(default_factory=list)
+    platform: str = "naukri"
 
     # --- Derived numeric fields, parsed lazily by the parser module ---------
     min_experience: float | None = None

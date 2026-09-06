@@ -1,10 +1,25 @@
 job_id,reason,detail,company,title,url
-linkedin-4461449188,filter_description,"job lacks any relevant skill or title keyword (python, fastapi, django, ai, artificial intelligence)",Invader Technologies Pvt Ltd,Back End Developer Back End Developer,https://www.linkedin.com/jobs/view/4461449188/
-linkedin-4461458094,filter_title,title lacks any required keyword,Larsen & Toubro-Vyoma,DevOps Engineer DevOps Engineer,https://www.linkedin.com/jobs/view/4461458094/
-linkedin-4462361173,filter_description,"job lacks any relevant skill or title keyword (python, fastapi, django, ai, artificial intelligence)",Interinfotech,Desktop Support Engineer Desktop Support Engineer,https://www.linkedin.com/jobs/view/4462361173/
-linkedin-4461165270,filter_description,"job lacks any relevant skill or title keyword (python, fastapi, django, ai, artificial intelligence)",GrowQ,IT Support Engineer (Level 1) IT Support Engineer (Level 1),https://www.linkedin.com/jobs/view/4461165270/
-linkedin-4463393488,filter_description,"job lacks any relevant skill or title keyword (python, fastapi, django, ai, artificial intelligence)",Summit Consulting Services,Software Development Engineer in Test (Data & Analytics) Software Development Engineer in Test (Data & Analytics),https://www.linkedin.com/jobs/view/4463393488/
-linkedin-4463389389,filter_description,"job lacks any relevant skill or title keyword (python, fastapi, django, ai, artificial intelligence)",Ken42,Salesforce QA Engineer Salesforce QA Engineer,https://www.linkedin.com/jobs/view/4463389389/
-linkedin-4461955635,filter_title,title lacks any required keyword,MindBrain,Senior Java Full Stack Developer with C# (6+ Yrs) Senior Java Full Stack Developer with C# (6+ Yrs) with verification,https://www.linkedin.com/jobs/view/4461955635/
-linkedin-4453537039,filter_description,"job lacks any relevant skill or title keyword (python, fastapi, django, ai, artificial intelligence)",Crossing Hurdles,Senior Golang Engineer | Remote Senior Golang Engineer | Remote,https://www.linkedin.com/jobs/view/4453537039/
-linkedin-4461958483,filter_description,"job lacks any relevant skill or title keyword (python, fastapi, django, ai, artificial intelligence)",Jobgether,Associate Linux Support Engineer Associate Linux Support Engineer,https://www.linkedin.com/jobs/view/4461958483/
+instahyre-h-97df7fc4658a59332108,filter_title,title indicates lead/architect/management role,InMobi,Staff Product Software Engineer,https://www.instahyre.com/candidate/opportunities/
+instahyre-h-866b603e287c889d3075,filter_title,title contains blocked term 'java',NTT Data,Backend Developer (Java),https://www.instahyre.com/candidate/opportunities/
+instahyre-h-d67b6b1b78cb9a173098,filter_title,title indicates lead/architect/management role,Anuvaya Labs,Member of Technical Staff,https://www.instahyre.com/candidate/opportunities/
+instahyre-h-eedaf2aa0906859fe529,filter_title,title contains blocked term 'java',Pratham Software (PSI),Sr. Full - Stack Developer (Java),https://www.instahyre.com/candidate/opportunities/
+instahyre-h-08859765773a9d40d36c,filter_title,title indicates lead/architect/management role,Aye Aye Vacations,Lead Systems Engineer - AI,https://www.instahyre.com/candidate/opportunities/
+instahyre-h-ec9b4d6e7a885a997280,filter_title,title indicates lead/architect/management role,Vishvin Technologies,Solution Architect,https://www.instahyre.com/candidate/opportunities/
+instahyre-h-bd1be745f5170abecf6a,filter_title,title indicates non-developer/unaligned track,Shuru Technologies,Data Engineer,https://www.instahyre.com/candidate/opportunities/
+instahyre-h-e26134907fa666751eb8,filter_title,title indicates non-developer/unaligned track,Forbes Advisor,Data Engineer,https://www.instahyre.com/candidate/opportunities/
+instahyre-h-b39ad4dad44cb602a61f,filter_title,title contains blocked term '.net',Accenture,Fullstack Developer - .NET,https://www.instahyre.com/candidate/opportunities/
+instahyre-h-30f2f838c9c959fb1ef7,filter_title,title indicates non-developer/unaligned track,Meraki Labs,AI Data Engineer,https://www.instahyre.com/candidate/opportunities/
+instahyre-h-a7317d276034b3537491,filter_title,title contains blocked term 'golang developer',StockGro,Golang Developer,https://www.instahyre.com/candidate/opportunities/
+instahyre-h-cef66b9865debcb53873,filter_title,title indicates non-developer/unaligned track,Quince,SDET II (ETL Testing),https://www.instahyre.com/candidate/opportunities/
+instahyre-h-15fc48842c06cc52fbd5,filter_title,title indicates non-developer/unaligned track,ZAGENO,Data Engineer,https://www.instahyre.com/candidate/opportunities/
+instahyre-h-d1381df24b3aaa0b812c,filter_title,title contains blocked term 'java',Mojro,Backend Engineer - Java,https://www.instahyre.com/candidate/opportunities/
+instahyre-h-33ce22adc30b6e108694,filter_title,title indicates non-developer/unaligned track,Dream Cricket,Data Analyst,https://www.instahyre.com/candidate/opportunities/
+instahyre-h-aace7986088bbf0ff735,filter_title,title indicates non-developer/unaligned track,DataNimbus,Senior Data Engineer - Databricks,https://www.instahyre.com/candidate/opportunities/
+instahyre-h-c1b9822167ad750f37b1,filter_title,title indicates non-developer/unaligned track,Thomson Reuters,Data Engineer,https://www.instahyre.com/candidate/opportunities/
+instahyre-h-63f60232bcf353a0f2cc,filter_title,title indicates non-developer/unaligned track,Nineleaps,Data Analyst,https://www.instahyre.com/candidate/opportunities/
+instahyre-h-0f1e88210dbfd0ff3357,filter_title,title indicates lead/architect/management role,Arrowhead,Product Manager,https://www.instahyre.com/candidate/opportunities/
+instahyre-h-c80950ec2d01ab7c14b7,filter_title,title indicates non-developer/unaligned track,Yugabyte,Technical Support Executive,https://www.instahyre.com/candidate/opportunities/
+instahyre-h-022661200196826165e0,filter_title,title indicates non-developer/unaligned track,Yugabyte,Technical Support Engineer,https://www.instahyre.com/candidate/opportunities/
+instahyre-h-4ddac45d864e37a126d0,filter_title,title indicates non-developer/unaligned track,Target in India,Data Engineer,https://www.instahyre.com/candidate/opportunities/
+instahyre-h-94bf8c8ca36a9e2df6a7,filter_title,title indicates non-developer/unaligned track,Arista Networks,Senior Data Engineer,https://www.instahyre.com/candidate/opportunities/
+instahyre-h-387b36f981e44f145f0a,filter_title,title indicates non-developer/unaligned track,Wissen Technology,Data Engineer - Snowflake dbt,https://www.instahyre.com/candidate/opportunities/

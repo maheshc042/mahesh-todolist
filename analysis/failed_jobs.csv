@@ -1,4 +1,24 @@
 job_id,status,company,title,url,detail,reason,attempts
-linkedin-4462352374,failed,VideoDubber.ai,Junior Software Engineer (SDE I) Junior Software Engineer (SDE I),https://www.linkedin.com/jobs/view/4462352374/,Step 5 blocked: Enter a whole number between 0 and 99,,1
-linkedin-4462358515,failed,Talentgigs,Java Software Engineer Java Software Engineer with verification,https://www.linkedin.com/jobs/view/4462358515/,Step 5 blocked: Enter a whole number between 0 and 99,,1
-linkedin-4461413095,failed,NIKSUN,Software Engineer Software Engineer with verification,https://www.linkedin.com/jobs/view/4461413095/,Step 5 blocked: Enter a whole number between 0 and 99,,1
+reco-030926504790,external,Cloudwalk,AML-FT Analyst - Data & AI,https://www.naukri.com/job-listings-030926504790,apply-on-company-site only,external_apply,1
+reco-020926504448,external,Camptra Technologies,Full Stack Developer,https://www.naukri.com/job-listings-020926504448,apply-on-company-site only,external_apply,1
+reco-040926501826,external,Milestone Technologies,Senior AI Solutions Engineer,https://www.naukri.com/job-listings-040926501826,apply-on-company-site only,external_apply,1
+reco-040926501788,external,Codiste,AI Product Engineer,https://www.naukri.com/job-listings-040926501788,apply-on-company-site only,external_apply,1
+reco-030926501349,external,Initcoders,Full Stack Engineer,https://www.naukri.com/job-listings-030926501349,apply-on-company-site only,external_apply,1
+reco-040926502477,external,Dmacq Software,Fullstack MERN Developer,https://www.naukri.com/job-listings-040926502477,apply-on-company-site only,external_apply,1
+reco-050926012473,needs_review,Star Union Dai ichi Life Insurance (SUD Life),Data Scientist - Data AI,https://www.naukri.com/job-listings-050926012473,Unanswered screening question,unanswered_question,1
+reco-030926501777,external,Brigosha Technologies,Full Stack Developer,https://www.naukri.com/job-listings-030926501777,apply-on-company-site only,external_apply,1
+reco-251125908963,skipped,Quantum Phinance,Test Automation Developer,https://www.naukri.com/job-listings-251125908963,title lacks any required keyword,filter_title,1
+reco-030926504833,skipped,Workforce Next,Mobile Developer (React Native / Flutter),https://www.naukri.com/job-listings-030926504833,title lacks any required keyword,filter_title,1
+reco-310826919391,external,Accenture,Application Developer,https://www.naukri.com/job-listings-310826919391,apply-on-company-site only,external_apply,1
+reco-040926501960,skipped,Nile Technologies,Spring Boot Developer,https://www.naukri.com/job-listings-040926501960,title lacks any required keyword,filter_title,1
+reco-040926502448,external,Si2 Tech,AI & DevOps Engineer,https://www.naukri.com/job-listings-040926502448,apply-on-company-site only,external_apply,1
+reco-040926504581,external,GUS EDUCATION INDIA,"Consultant - AI, Automation & Emerging tech",https://www.naukri.com/job-listings-040926504581,apply-on-company-site only,external_apply,1
+reco-020926025295,skipped,Alembic Pharmaceuticals,Flutter Developer,https://www.naukri.com/job-listings-020926025295,title lacks any required keyword,filter_title,1
+reco-020926033842,skipped,Interface Infosoft,Ui Developer with Extjs,https://www.naukri.com/job-listings-020926033842,title lacks any required keyword,filter_title,1
+reco-220726020027,skipped,Karya.cloud,React.js Mobile App Developer,https://www.naukri.com/job-listings-220726020027,title lacks any required keyword,filter_title,1
+reco-040926022878,failed,Radical Minds,Software Engineer (Node.js),https://www.naukri.com/job-listings-040926022878,Chatbot error: could not submit answer for: How many years of experience in backend development with Node.js.,,1
+reco-030926504044,external,Leapswitch,Fullstack Developer,https://www.naukri.com/job-listings-030926504044,apply-on-company-site only,external_apply,1
+reco-010926506089,external,2070 Health,AI Native GTM Associate,https://www.naukri.com/job-listings-010926506089,apply-on-company-site only,external_apply,1
+reco-020926927870,external,Optum,Software Engineer,https://www.naukri.com/job-listings-020926927870,apply-on-company-site only,external_apply,1
+reco-050926008803,skipped,Ushodaya Enterprises,Senior Engineer - UI,https://www.naukri.com/job-listings-050926008803,title lacks any required keyword,filter_title,1
+reco-050626009992,already_applied,TC Global,Fullstack Developer,https://www.naukri.com/job-listings-050626009992,Naukri reports this application already exists,already_applied,1

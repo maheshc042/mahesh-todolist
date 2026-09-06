@@ -1,22 +1,25 @@
 {
   "profile": "AI / Python Engineer",
-  "run_id": 218,
+  "run_id": 223,
   "dry_run": false,
-  "duration_seconds": 258.38,
-  "generated_at": "2026-09-05T05:15:00.568157+00:00",
+  "duration_seconds": 1367.67,
+  "generated_at": "2026-09-06T10:51:01.520636+00:00",
   "plan_stats": {
-    "collected": 14,
-    "rejected": 9,
-    "eligible": 5,
-    "selected": 5,
-    "overflow": 0,
+    "collected": 300,
+    "rejected": 227,
+    "eligible": 73,
+    "selected": 35,
+    "overflow": 38,
     "rejection_reasons": {
-      "filter_description": 7,
-      "filter_title": 2
+      "filter_experience": 35,
+      "filter_title": 180,
+      "filter_freshness": 4,
+      "filter_description": 6,
+      "walkin": 2
     },
-    "top_score": 42.28,
-    "cutoff_score": 36.8
+    "top_score": 84.46,
+    "cutoff_score": 62.76
   },
-  "applied_count": 2,
-  "failed_count": 3
+  "applied_count": 35,
+  "failed_count": 23
 }

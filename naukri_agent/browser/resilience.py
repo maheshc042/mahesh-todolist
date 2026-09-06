@@ -19,9 +19,11 @@ from __future__ import annotations
 
 import asyncio
 import random
-from typing import Awaitable, Callable, Iterable, TypeVar
+from collections.abc import Awaitable, Callable, Iterable
+from typing import TypeVar
 
-from playwright.async_api import Locator, Page, TimeoutError as PWTimeoutError
+from playwright.async_api import Locator, Page
+from playwright.async_api import TimeoutError as PWTimeoutError
 
 from ..logging_setup import get_logger
 

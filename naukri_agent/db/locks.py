@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 import hashlib
+from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
-from typing import AsyncIterator
 
 import asyncpg
 
@@ -12,7 +12,7 @@ import asyncpg
 def advisory_lock_key(namespace: str, account: str) -> int:
     """Return a deterministic signed 64-bit PostgreSQL advisory-lock key."""
     digest = hashlib.blake2b(
-        f"{namespace}:{account}".encode("utf-8"), digest_size=8
+        f"{namespace}:{account}".encode(), digest_size=8
     ).digest()
     return int.from_bytes(digest, byteorder="big", signed=True)
 

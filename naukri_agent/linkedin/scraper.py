@@ -9,14 +9,18 @@ Design Decisions:
 """
 import asyncio
 import os
-import re
 from pathlib import Path
 from typing import Any
 
 from playwright.async_api import BrowserContext, Page, async_playwright
 
 from ..logging_setup import get_logger
-from .analyzer import classify_role, extract_recruiter_emails, is_experience_match
+from .analyzer import (
+    classify_role,
+    extract_recruiter_emails,
+    is_experience_match,
+    is_spam_or_unpaid,
+)
 
 log = get_logger(__name__)
 
@@ -235,11 +239,17 @@ class LinkedInHunter:
                     if not emails:
                         continue
 
+                    if is_spam_or_unpaid(text):
+                        log.debug("linkedin.lead.rejected_spam_or_unpaid", preview=text[:70].replace("\n", " "))
+                        continue
+
                     if not is_experience_match(text):
+                        log.debug("linkedin.lead.rejected_experience", preview=text[:70].replace("\n", " "))
                         continue
 
                     role = classify_role(text)
                     if not role:
+                        log.debug("linkedin.lead.rejected_role_or_tech", preview=text[:70].replace("\n", " "))
                         continue
 
                     post_url = ""

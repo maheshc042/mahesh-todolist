@@ -32,19 +32,17 @@ import asyncio
 import os
 import random
 import time
-from datetime import datetime, timezone
-from pathlib import Path
+from datetime import UTC, datetime
 from typing import Any
 
 from ..browser.artifacts import ArtifactStore
 from ..browser.manager import BrowserManager
 from ..browser.resilience import FatalAgentError, first_visible
-from ..config import AgentConfig, FilterRules, JobProfile, NaukriAccount, Settings, PROJECT_ROOT
+from ..config import PROJECT_ROOT, AgentConfig, JobProfile, NaukriAccount, Settings
 from ..core.answers import AnswerEngine
-from ..core.application_planner import ApplicationPlan, ApplicationPlanner
-from ..core.mailer import ColdEmailer
-from ..core.reporting import ReportExporter
+from ..core.application_planner import ApplicationPlanner
 from ..core.filters import FilterEngine
+from ..core.mailer import ColdEmailer
 from ..core.models import (
     ApplicationStatus,
     ApplyOutcome,
@@ -53,18 +51,15 @@ from ..core.models import (
     RunStatus,
     SkipReason,
 )
-from ..core.ranking import CandidateProfile, RankedJob, RankingWeights
-from ..core.runtime_metrics import RuntimeMetrics
+from ..core.reporting import ReportExporter
 from ..core.run_policy import RunPolicy
+from ..core.runtime_metrics import RuntimeMetrics
 from ..db.repository import Repository
 from ..logging_setup import bind_context, clear_context, get_logger
 from ..naukri import selectors as S
 from ..naukri.apply import ApplyEngine
-from ..naukri.auth import NaukriAuth
 from ..naukri.naukri_api import NaukriApiClient, extract_naukri_token
 from ..naukri.profile import ProfileRefresher
-from ..naukri.resume import ResumeManager
-from ..naukri.search import JobSearcher
 from ..notify.notifier import build_notifier, format_run_summary
 from ..platforms.base import BaseJobPlatform
 from ..platforms.cutshort import CutshortPlatform
@@ -72,8 +67,6 @@ from ..platforms.instahyre import InstahyrePlatform
 from ..platforms.linkedin import LinkedInPlatform
 from ..platforms.naukri_platform import NaukriPlatform
 from ..platforms.wellfound import WellfoundPlatform
-
-
 
 log = get_logger(__name__)
 
@@ -475,7 +468,7 @@ class Orchestrator:
             # Detach popup listeners before the page dies.
             platforms_to_clean = locals().get('executed_platforms') or locals().get('active_platforms') or []
             for platform in platforms_to_clean:
-                if hasattr(platform, "applier") and getattr(platform, "applier") is not None:
+                if hasattr(platform, "applier") and platform.applier is not None:
                     try:
                         platform.applier.close()
                     except Exception:
@@ -621,6 +614,9 @@ class Orchestrator:
                 exclude_job_ids=known,
             )
             if collected_jobs:
+                for j in collected_jobs:
+                    if not getattr(j, "platform", None) or j.platform == "naukri":
+                        j.platform = platform.platform_name
                 self.stats.bump(profile.name, "scraped", len(collected_jobs), platform=platform.platform_name)
 
         if not collected_jobs:
@@ -736,7 +732,7 @@ class Orchestrator:
         # Step 6: Pass Eligible Jobs to ApplyEngine (Live Run)
         applied_outcomes: list[tuple[Job, ApplyOutcome]] = []
         failed_outcomes: list[tuple[Job, ApplyOutcome]] = []
-        filters = FilterEngine(profile.filters_for("recommended"))
+        filters = FilterEngine(profile.filters_for("recommended"), candidate=candidate)
 
         t_apply_loop_0 = time.perf_counter()
         # Iterate through ranked eligible jobs until the target application cap is satisfied
@@ -768,9 +764,35 @@ class Orchestrator:
                     applied_this_profile += 1
                     self.applied_today += 1
                     applied_outcomes.append((job, outcome))
+                    if job.is_walkin:
+                        loc = (job.location or "").lower()
+                        if "bangalore" in loc or "bengaluru" in loc:
+                            self.stats.walkin_alerts.append(
+                                {
+                                    "title": f"Applied: {job.title}",
+                                    "company": job.company,
+                                    "location": job.location,
+                                    "url": job.url,
+                                    "profile": profile.name,
+                                }
+                            )
+                            log.info("job.bangalore_walkin_applied_alert", title=job.title[:70], company=job.company)
                     await self._pace()
                 else:
                     failed_outcomes.append((job, outcome))
+                    if job.is_walkin:
+                        loc = (job.location or "").lower()
+                        if "bangalore" in loc or "bengaluru" in loc:
+                            self.stats.walkin_alerts.append(
+                                {
+                                    "title": f"Notice ({outcome.status.value}): {job.title}",
+                                    "company": job.company,
+                                    "location": job.location,
+                                    "url": job.url,
+                                    "profile": profile.name,
+                                }
+                            )
+                            log.info("job.bangalore_walkin_notice_alert", title=job.title[:70], company=job.company)
         except _CapReached:
             pass
         finally:
@@ -899,7 +921,7 @@ class Orchestrator:
                     "url": job.url,
                     "profile": profile.name,
                     "account": self.account_key,
-                    "at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+                    "at": datetime.now(UTC).isoformat(timespec="seconds"),
                     "form_links": getattr(job, "form_links", []),
                     "recruiter_emails": getattr(job, "recruiter_emails", []),
                 }

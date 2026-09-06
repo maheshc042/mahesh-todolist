@@ -10,11 +10,11 @@ from .wellfound import WellfoundPlatform
 
 __all__ = [
     "BaseJobPlatform",
-    "NaukriPlatform",
-    "InstahyrePlatform",
     "CutshortPlatform",
-    "WellfoundPlatform",
+    "InstahyrePlatform",
     "LinkedInPlatform",
+    "NaukriPlatform",
+    "WellfoundPlatform",
 ]
 
 

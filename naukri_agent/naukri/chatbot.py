@@ -169,14 +169,26 @@ class ChatbotHandler:
                 return texts
         return []
 
+    async def _dismiss_blocking_overlays(self) -> None:
+        try:
+            await self.page.evaluate("""() => {
+                document.querySelectorAll('#splScrn, .circleG, .loader-wrapper, div[class*="splashScreen"], div[class*="backdrop"]:not([class*="drawer"]):not([class*="chatbot"])').forEach(el => el.remove());
+            }""")
+        except Exception:
+            pass
+
     # ------------------------------------------------------------------ write
     async def _answer_text(self, value: str) -> bool:
+        await self._dismiss_blocking_overlays()
         field = await first_visible(self.page, S.CHATBOT_TEXT_INPUT, timeout_ms=4_000)
         if field is None:
             return False
         try:
             self.policy.require_mutation("naukri.screening.answer")
-            await field.click()
+            try:
+                await field.click(force=True, timeout=2_500)
+            except Exception:
+                await field.focus()
             # contenteditable: clear any prefill, then type so React re-renders.
             await self.page.keyboard.press("Control+A")
             await self.page.keyboard.press("Delete")
@@ -191,6 +203,7 @@ class ChatbotHandler:
 
     async def _answer_combobox(self, value: str) -> bool:
         """Handles modern React custom dropdowns and searchable select comboboxes."""
+        await self._dismiss_blocking_overlays()
         val_clean = value.strip().lower()
 
         # Step 1: Ensure options list is expanded if not already visible
@@ -199,7 +212,7 @@ class ChatbotHandler:
             trigger = await first_visible(self.page, S.CHATBOT_COMBOBOX_TRIGGER, timeout_ms=1_500)
             if trigger is not None:
                 try:
-                    await trigger.click(timeout=2_000)
+                    await trigger.click(force=True, timeout=2_000)
                     await human_pause(200, 400)
                 except Exception:
                     pass
@@ -208,7 +221,7 @@ class ChatbotHandler:
         search_box = await first_visible(self.page, S.CHATBOT_SEARCH_INPUT, timeout_ms=800)
         if search_box is not None:
             try:
-                await search_box.click(timeout=1_500)
+                await search_box.click(force=True, timeout=1_500)
                 await search_box.press_sequentially(value, delay=35)
                 await human_pause(200, 400)
             except Exception:
@@ -224,7 +237,7 @@ class ChatbotHandler:
                     text = (await safe_text(locator)).strip().lower()
                     if text and (text == val_clean or val_clean in text or text in val_clean):
                         self.policy.require_mutation("naukri.screening.answer")
-                        await locator.click(timeout=2_500)
+                        await locator.click(force=True, timeout=2_500)
                         await human_pause(200, 500)
                         await self._submit()
                         return True
@@ -234,6 +247,7 @@ class ChatbotHandler:
         return False
 
     async def _answer_option(self, value: str, kind: str) -> bool:
+        await self._dismiss_blocking_overlays()
         if kind == "combobox":
             return await self._answer_combobox(value)
 
@@ -248,7 +262,7 @@ class ChatbotHandler:
                 if text and (text == val_clean or val_clean in text or text in val_clean):
                     try:
                         self.policy.require_mutation("naukri.screening.answer")
-                        await locator.click(timeout=3_000)
+                        await locator.click(force=True, timeout=3_000)
                         await human_pause(200, 500)
                         await self._submit()
                         return True
@@ -268,11 +282,15 @@ class ChatbotHandler:
         return await self._answer_combobox(value)
 
     async def _submit(self) -> bool:
+        await self._dismiss_blocking_overlays()
         for selector in S.CHATBOT_SAVE + S.CHATBOT_SEND:
             try:
                 locator = self.page.locator(selector).first
                 if await locator.count() and await locator.is_visible():
-                    await locator.click(timeout=2_500)
+                    try:
+                        await locator.click(force=True, timeout=2_500)
+                    except Exception:
+                        await locator.evaluate("el => el.click()")
                     return True
             except Exception:
                 continue

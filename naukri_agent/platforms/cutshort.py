@@ -4,8 +4,7 @@ Cutshort Platform Implementation (Direct-Action & Inbox Message Handler).
 from __future__ import annotations
 
 import re
-from pathlib import Path
-from typing import Callable
+from collections.abc import Callable
 
 from playwright.async_api import Page
 
@@ -241,7 +240,56 @@ class CutshortChatbot:
                             answered += 1
                             break
 
-            if form_present or fieldsets:
+            # 1C. Audio Questionnaire Challenge (e.g. "Tell us about a difficult project... Pick from 1 saved audios")
+            audio_btn = await first_visible(
+                self.page,
+                [
+                    "form [role='button']:has-text('Pick from')",
+                    "[role='button']:has-text('Pick from')",
+                    "button:has-text('Pick from')",
+                    "div:has-text('Pick from'):has-text('saved audio')",
+                    "[role='button']:has-text('saved audio')",
+                    "button:has-text('saved audio')",
+                ],
+                timeout_ms=1500,
+            )
+            if audio_btn:
+                try:
+                    await audio_btn.scroll_into_view_if_needed()
+                    await human_pause(400, 700)
+                    try:
+                        await audio_btn.click(force=True, timeout=2000)
+                    except Exception:
+                        await audio_btn.evaluate("el => el.click()")
+                    log.info("cutshort.chatbot.clicked_saved_audio_picker")
+                    await human_pause(1000, 1500)
+
+                    # Check if an audio selection confirmation dialog/modal or list appears
+                    confirm_audio_btn = await first_visible(
+                        self.page,
+                        [
+                            "div[id='modal-root'] button:has-text('Select')",
+                            "div[id='modal-root'] button:has-text('Choose')",
+                            "div[id='modal-root'] button:has-text('Use')",
+                            "div[id='modal-root'] button:has-text('Confirm')",
+                            "button:has-text('Select audio')",
+                            "button:has-text('Use this audio')",
+                            "div[role='dialog'] button:has-text('Confirm')",
+                            "div[role='dialog'] button:has-text('Select')",
+                        ],
+                        timeout_ms=2000,
+                    )
+                    if confirm_audio_btn:
+                        try:
+                            await confirm_audio_btn.click(force=True)
+                        except Exception:
+                            await confirm_audio_btn.evaluate("el => el.click()")
+                        await human_pause(500, 1000)
+                    answered += 1
+                except Exception as exc:
+                    log.warning("cutshort.chatbot.audio_picker_failed", error=str(exc))
+
+            if form_present or fieldsets or audio_btn:
                 submit_btn = await first_visible(
                     self.page,
                     [
@@ -603,11 +651,139 @@ class CutshortPlatform(BaseJobPlatform):
                         description=desc,
                         recommendation_tab="default",
                         recommendation_position=len(jobs) + 1,
+                        platform="cutshort",
                     )
                 )
             except Exception as exc:
                 log.debug("cutshort.fetch.parse_error", error=str(exc))
                 continue
+
+        # Stage 2: Expand to active platform feed if recommended pool yields fewer than target applies
+        target_applies = profile.platform_limits.get(self.platform_name, 150)
+        min_needed_jobs = min(target_applies, 50)
+        if len(jobs) < min_needed_jobs:
+            log.info(
+                "cutshort.fetch.stage2_expand_active_jobs",
+                current_count=len(jobs),
+                target_needed=min_needed_jobs,
+            )
+            try:
+                # Look for recommendation switch: input[role='switch'] or label containing the switch
+                switch_el = await first_visible(
+                    self.page,
+                    [
+                        "input[role='switch']",
+                        "label:has(input[role='switch'])",
+                        "div:has-text('Turn it OFF to view all jobs') input[role='switch']",
+                    ],
+                    timeout_ms=3000,
+                )
+                if switch_el:
+                    try:
+                        is_checked = await switch_el.is_checked()
+                    except Exception:
+                        is_checked = True
+                    if is_checked:
+                        await switch_el.scroll_into_view_if_needed()
+                        await human_pause(400, 800)
+                        try:
+                            await switch_el.click(force=True)
+                        except Exception:
+                            await switch_el.evaluate("el => el.click()")
+                        log.info("cutshort.fetch.turned_off_recommendation_switch")
+                        await human_pause(2000, 3500)
+
+                        # Optionally select recently active filter if visible
+                        activity_filter = await first_visible(
+                            self.page,
+                            ["div[data-intercom-target='hiringActivityOnJob-filter']"],
+                            timeout_ms=2000,
+                        )
+                        if activity_filter:
+                            try:
+                                await activity_filter.click()
+                                await human_pause(400, 800)
+                                active_opt = await first_visible(
+                                    self.page,
+                                    [
+                                        "div:has-text('Active in last 15 days')",
+                                        "div:has-text('Active in last 1-2 weeks')",
+                                        "div:has-text('Active in last 7 days')",
+                                        "div:has-text('Active recently')",
+                                        "input[value*='15']",
+                                    ],
+                                    timeout_ms=1500,
+                                )
+                                if active_opt:
+                                    await active_opt.click()
+                                    await human_pause(500, 1000)
+                                await self.page.keyboard.press("Escape")
+                            except Exception as exc:
+                                log.debug("cutshort.fetch.activity_filter_error", error=str(exc))
+
+                        # Scroll to load expanded feed
+                        for _ in range(6):
+                            anchors_now = await self.page.locator(job_link_sel).all()
+                            if anchors_now:
+                                try:
+                                    await anchors_now[-1].scroll_into_view_if_needed(timeout=1500)
+                                except Exception:
+                                    pass
+                            await scroll_page(self.page, steps=3, delay_s=0.5)
+                            await human_pause(600, 1200)
+
+                        # Collect jobs from expanded feed
+                        expanded_anchors = await self.page.locator(job_link_sel).all()
+                        log.info("cutshort.fetch.expanded_cards_found", count=len(expanded_anchors))
+                        for anchor in expanded_anchors:
+                            try:
+                                url = (await anchor.get_attribute("href")) or ""
+                                if "/job/" not in url:
+                                    continue
+                                if url.startswith("/"):
+                                    url = f"https://cutshort.io{url}"
+                                if url.rstrip("/") in seen_urls:
+                                    continue
+
+                                title = (await safe_text(anchor)).strip()
+                                if not title:
+                                    continue
+                                seen_urls.add(url.rstrip("/"))
+
+                                company = ""
+                                desc = ""
+                                card = anchor.locator(
+                                    "xpath=ancestor::div[descendant::a[contains(@href,'/company/')]][1]"
+                                ).first
+                                if await card.count() > 0:
+                                    company = (await safe_text(card.locator("a[href*='/company/']").first)).strip()
+                                    prose_el = card.locator("div.prose").first
+                                    if await prose_el.count() > 0:
+                                        desc = (await safe_text(prose_el)).strip()
+
+                                match = re.search(r"-([a-zA-Z0-9]+)$", url)
+                                job_id = f"cutshort-{match.group(1)}" if match else f"cutshort-{Job.stable_id(url, title, company)}"
+
+                                if job_id in exclude_job_ids:
+                                    continue
+
+                                jobs.append(
+                                    Job(
+                                        job_id=job_id,
+                                        title=title,
+                                        company=company,
+                                        url=url,
+                                        description=desc,
+                                        recommendation_tab="active_feed",
+                                        recommendation_position=len(jobs) + 1,
+                                        platform="cutshort",
+                                    )
+                                )
+                            except Exception as exc:
+                                log.debug("cutshort.fetch.expanded_parse_error", error=str(exc))
+                                continue
+            except Exception as exc:
+                log.warning("cutshort.fetch.stage2_expand_failed", error=str(exc))
 
         log.info("cutshort.fetch.done", count=len(jobs))
         return jobs

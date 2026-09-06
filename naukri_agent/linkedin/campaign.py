@@ -11,17 +11,17 @@ from __future__ import annotations
 import asyncio
 import os
 from pathlib import Path
+
 from dotenv import load_dotenv
 
 load_dotenv()
 
-from ..config import AgentConfig, Settings, get_settings, PROJECT_ROOT
+from ..config import AgentConfig, get_settings
 from ..core.mailer import ColdEmailer
 from ..core.run_policy import RunPolicy
 from ..db.repository import Repository
 from ..logging_setup import get_logger
 from ..notify.notifier import build_notifier
-from .analyzer import classify_role, is_experience_match
 from .scraper import CookieExpiredError, LinkedInHunter
 
 log = get_logger(__name__)
@@ -40,6 +40,7 @@ SEARCH_KEYWORDS = [
 ]
 
 import urllib.parse
+
 SEARCH_URLS = [
     f"https://www.linkedin.com/search/results/content/?keywords={urllib.parse.quote(kw)}&origin=GLOBAL_SEARCH_HEADER&sortBy=%5B%22relevance%22%5D&datePosted=%5B%22past-24h%22%5D"
     for kw in SEARCH_KEYWORDS

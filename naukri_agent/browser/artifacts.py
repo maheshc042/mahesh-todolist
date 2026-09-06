@@ -11,7 +11,7 @@ trivially greppable and easy to prune with a cron/`find -mtime`.
 from __future__ import annotations
 
 import re
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 from playwright.async_api import Page
@@ -29,12 +29,12 @@ def _safe(part: str, limit: int = 48) -> str:
 
 class ArtifactStore:
     def __init__(self, base_dir: Path, run_id: int | str = "adhoc") -> None:
-        day = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        day = datetime.now(UTC).strftime("%Y-%m-%d")
         self.dir = Path(base_dir) / day / f"run-{run_id}"
         self.dir.mkdir(parents=True, exist_ok=True)
 
     def _path(self, label: str, profile: str, job_id: str, ext: str) -> Path:
-        stamp = datetime.now(timezone.utc).strftime("%H%M%S")
+        stamp = datetime.now(UTC).strftime("%H%M%S")
         name = f"{stamp}_{_safe(profile)}_{_safe(job_id)}_{_safe(label)}.{ext}"
         return self.dir / name
 

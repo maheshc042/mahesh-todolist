@@ -26,11 +26,11 @@ from __future__ import annotations
 
 import time
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 from ..config import FilterRules
-from .models import FilterDecision, Job, SkipReason
+from .models import Job, SkipReason
 from .ranking import CandidateProfile, HardFilter, RankedJob, RankingEngine, RankingWeights
 
 
@@ -80,7 +80,7 @@ class ApplicationPlan:
     overflow_jobs: list[RankedJob]
     rejected_jobs: list[RejectedJobInfo]
     stats: ApplicationPlanStats
-    generated_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+    generated_at: datetime = field(default_factory=lambda: datetime.now(UTC))
 
     @property
     def eligible_jobs(self) -> list[RankedJob]:

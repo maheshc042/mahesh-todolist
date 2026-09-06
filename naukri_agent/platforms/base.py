@@ -4,7 +4,7 @@ Base interface for all Job Platforms.
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from typing import Callable
+from collections.abc import Callable
 
 from playwright.async_api import Page
 
@@ -27,7 +27,6 @@ class BaseJobPlatform(ABC):
     @abstractmethod
     def platform_name(self) -> str:
         """Returns the identifier for the database (e.g., 'naukri', 'instahyre')."""
-        pass
 
     @abstractmethod
     async def ensure_logged_in(self) -> bool:
@@ -35,7 +34,6 @@ class BaseJobPlatform(ABC):
         Authenticate the session. 
         Returns True if logged in successfully, raises FatalAgentError if blocked.
         """
-        pass
 
     @abstractmethod
     async def fetch_jobs(self, profile: JobProfile, exclude_job_ids: set[str]) -> list[Job]:
@@ -43,7 +41,6 @@ class BaseJobPlatform(ABC):
         Scrape the platform's feed/search and return a list of standard Job objects.
         Should skip jobs present in `exclude_job_ids`.
         """
-        pass
 
     @abstractmethod
     async def apply_to_job(
@@ -56,12 +53,10 @@ class BaseJobPlatform(ABC):
         Execute the apply flow for a single job.
         Must handle its own UI elements, Chatbots, or popup logic.
         """
-        pass
 
     async def handle_messages(self) -> None:
         """
         Optional post-apply hook to handle asynchronous platform messages/questionnaires.
         Does nothing by default. Platforms like Cutshort will override this.
         """
-        pass
 

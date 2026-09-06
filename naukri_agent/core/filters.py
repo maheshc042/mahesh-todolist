@@ -22,6 +22,7 @@ Design decisions:
 from __future__ import annotations
 
 import re
+from typing import Any
 
 from ..config import FilterRules
 from ..core.models import FilterDecision, Job, SkipReason
@@ -53,7 +54,7 @@ def _contains_any(haystack: str, needles: list[str]) -> str | None:
 DEDICATED_AI_KEYWORDS = (
     "machine learning", "ml engineer", "ml developer", "data scientist",
     "deep learning", "nlp engineer", "computer vision", "ai engineer",
-    "ai developer", "ai/ml", "ai ml", "artificial intelligence engineer",
+    "ai developer", "ai/ml", "ai ml", "artificial intelligence engineer" ,"chatbot engineer"
 )
 
 
@@ -64,9 +65,8 @@ def experience_matches(
     is_dedicated_ai: bool = False,
 ) -> bool:
     """Centralized experience window evaluation (P1-1)."""
-    if is_dedicated_ai:
-        if job_min is not None and job_min > 2.0:
-            return False
+    if is_dedicated_ai and job_min is not None and job_min > 2.0:
+        return False
     if job_min is not None:
         if job_min > 3.5:
             return False
@@ -77,16 +77,53 @@ def experience_matches(
             return False
         if job_max > 6.0:
             return False
-    if job_min is not None and job_max is not None:
-        if (job_max - job_min) >= 5.0 and job_min >= 2.0:
-            return False
-    return True
+    return not (job_min is not None and job_max is not None and (job_max - job_min) >= 5.0 and job_min >= 2.0)
+
+
+TECH_ALIASES = (
+    (r"\bfast\s*api\b", "fastapi"),
+    (r"\bnode\s*js\b", "nodejs"),
+    (r"\breact\s*js\b", "react"),
+    (r"\bnext\s*js\b", "nextjs"),
+    (r"\bvue\s*js\b", "vue"),
+    (r"\brest\s*api\b", "restapi"),
+    (r"\bllm\s*ops\b", "llmops"),
+    (r"\bgen\s*ai\b", "genai"),
+)
+
+
+def _normalize_tech_text(text: str) -> str:
+    """Normalize technology variations, hyphens, and aliases."""
+    if not text:
+        return ""
+    norm = text.lower()
+    norm = re.sub(r"\bdot[\s.-]?net\b|(?<!\w)\.net\b", "dotnet", norm)
+    for pattern, replacement in TECH_ALIASES:
+        norm = re.sub(pattern, replacement, norm)
+    norm = norm.replace("-", " ")
+    return " ".join(norm.split())
+
+
+def _build_searchable_haystack(job: Job) -> str:
+    """Construct one unified normalized searchable text for the Job."""
+    raw_text = f"{job.title} {job.description} {' '.join(job.tags or [])} {job.company} {job.location}"
+    return _normalize_tech_text(raw_text)
+
+
+def _exact_word_match(word: str, text: str) -> bool:
+    """Exact word boundary match after tech normalization."""
+    norm_word = _normalize_tech_text(word)
+    if not norm_word:
+        return False
+    pattern = r"\b" + re.escape(norm_word) + r"\b"
+    return bool(re.search(pattern, text))
 
 
 class FilterEngine:
-    def __init__(self, rules: FilterRules) -> None:
+    def __init__(self, rules: FilterRules, candidate: Any | None = None) -> None:
         self.rules = rules
-        # Pre-normalize rule lists for zero-overhead evaluation (P2-1)
+        self.candidate = candidate
+        # Pre-normalize rule lists for zero-overhead evaluation
         self._norm_blocked_companies = [c.lower() for c in (rules.blocked_companies or [])]
         self._norm_blocked_locations = [l.lower() for l in (rules.blocked_locations or [])]
         self._norm_allowed_locations = [l.lower() for l in (rules.allowed_locations or [])]
@@ -98,15 +135,8 @@ class FilterEngine:
         title = job.title.lower()
         company = job.company.lower()
         location = (job.location or "").lower()
-        if rules.title_must_include_any:
-            if _contains_any(title, rules.title_must_include_any) is None:
-                # Check card tags/snippet so generic titles with matched core skills pass
-                card_text = f"{title} {' '.join(job.tags or [])} {job.description or ''}".lower()
-                if _contains_any(card_text, rules.title_must_include_any) is None:
-                    return FilterDecision(
-                        False, SkipReason.FILTER_TITLE, "title lacks any required keyword"
-                    )
 
+        # 1. Configured title blocklist (with tech normalization)
         if rules.title_must_exclude_any:
             hit = _contains_any(title, rules.title_must_exclude_any)
             if hit:
@@ -114,6 +144,35 @@ class FilterEngine:
                     False, SkipReason.FILTER_TITLE, f"title contains blocked term '{hit}'"
                 )
 
+        # 2. Dual-Gate Role Matching (Title OR Core Skills):
+        has_title_match = bool(rules.title_must_include_any and _contains_any(title, rules.title_must_include_any))
+        has_skill_match = False
+        if self.candidate:
+            haystack = _build_searchable_haystack(job)
+            core_skills = getattr(self.candidate, "core_skills", [])
+            sec_skills = getattr(self.candidate, "secondary_skills", [])
+            matched_core = [
+                s for s in core_skills
+                if _exact_word_match(s, haystack) or _normalize_tech_text(s) in haystack
+            ]
+            matched_sec = [
+                s for s in sec_skills
+                if _exact_word_match(s, haystack) or _normalize_tech_text(s) in haystack
+            ]
+            if len(matched_core) >= 2 or (len(matched_core) >= 1 and len(matched_sec) >= 1):
+                has_skill_match = True
+        else:
+            # Fallback when candidate profile is not provided
+            card_text = f"{title} {' '.join(job.tags or [])} {job.description or ''}".lower()
+            if _contains_any(card_text, rules.title_must_include_any):
+                has_skill_match = True
+
+        if rules.title_must_include_any and not has_title_match and not has_skill_match:
+            return FilterDecision(
+                False, SkipReason.FILTER_TITLE, "title lacks required keywords and lacks matching core skills"
+            )
+
+        # 3. Blocked companies
         if self._norm_blocked_companies:
             hit = _contains_any(company, self._norm_blocked_companies)
             if hit:
@@ -121,6 +180,7 @@ class FilterEngine:
                     False, SkipReason.FILTER_COMPANY, f"blocked company '{hit}'"
                 )
 
+        # 4. Blocked locations
         if self._norm_blocked_locations:
             hit = _contains_any(location, self._norm_blocked_locations)
             if hit:
@@ -128,24 +188,23 @@ class FilterEngine:
                     False, SkipReason.FILTER_LOCATION, f"blocked location '{hit}'"
                 )
 
+        # 5. Allowed locations & remote check
         if self._norm_allowed_locations:
-            # Expanded remote keyword detection (P1-2)
-            haystack = f"{title} {location} {' '.join(job.tags)}".lower()
+            haystack = f"{title} {location} {' '.join(job.tags or [])}".lower()
             remote_ok = any(kw in haystack for kw in REMOTE_KEYWORDS)
             if _contains_any(location, self._norm_allowed_locations) is None and not remote_ok:
                 return FilterDecision(
                     False, SkipReason.FILTER_LOCATION, f"location '{job.location}' not allowed"
                 )
 
+        # 6. Walk-in check (Bangalore/Bengaluru is allowed to apply and alert)
         if rules.skip_walkin and job.is_walkin:
             if "bengaluru" in location or "bangalore" in location:
-                return FilterDecision(False, SkipReason.BANGALORE_WALKIN_ALERT, f"Bangalore walk-in drive at {job.company}")
-            return FilterDecision(False, SkipReason.WALKIN, "walk-in drive")
+                pass
+            else:
+                return FilterDecision(False, SkipReason.WALKIN, f"walk-in drive outside Bangalore ({job.location})")
 
-        # Dedicated AI / ML Recruiter Reality Gate:
-        # Candidate has 6 months hands-on AI/ML experience. A recruiter screening for a
-        # 3+ year dedicated ML/AI Engineer role will reject the profile immediately.
-        # Allow entry/junior AI roles (min_exp <= 2.0y).
+        # 7. Dedicated AI / ML Recruiter Reality Gate
         is_dedicated_ai = any(term in title for term in DEDICATED_AI_KEYWORDS)
         if is_dedicated_ai and job.min_experience is not None and job.min_experience > 2.0:
             return FilterDecision(
@@ -154,7 +213,7 @@ class FilterEngine:
                 f"dedicated AI/ML role requires {job.min_experience}y > candidate's 6m AI experience (recruiter will reject)",
             )
 
-        # --- numeric rules: only applied when data is disclosed -------
+        # 8. Numeric experience bounds
         exp = rules.experience
         if job.min_experience is not None:
             if job.min_experience > 3.5:
@@ -189,28 +248,27 @@ class FilterEngine:
                     f"spread {job.min_experience}-{job.max_experience}y >= 5y (broad senior requisition)",
                 )
 
-        if rules.min_salary_lpa is not None and job.min_salary_lpa is not None:
-            if job.min_salary_lpa < rules.min_salary_lpa:
-                return FilterDecision(
-                    False,
-                    SkipReason.FILTER_SALARY,
-                    f"{job.min_salary_lpa} LPA < min {rules.min_salary_lpa} LPA",
-                )
+        # 9. Salary, freshness, rating
+        if rules.min_salary_lpa is not None and job.min_salary_lpa is not None and job.min_salary_lpa < rules.min_salary_lpa:
+            return FilterDecision(
+                False,
+                SkipReason.FILTER_SALARY,
+                f"{job.min_salary_lpa} LPA < min {rules.min_salary_lpa} LPA",
+            )
 
-        if rules.max_posted_days is not None and job.posted_days_ago is not None:
-            if job.posted_days_ago > rules.max_posted_days:
-                return FilterDecision(
-                    False,
-                    SkipReason.FILTER_FRESHNESS,
-                    f"posted {job.posted_days_ago}d ago > {rules.max_posted_days}d",
-                )
+        if rules.max_posted_days is not None and job.posted_days_ago is not None and job.posted_days_ago > rules.max_posted_days:
+            return FilterDecision(
+                False,
+                SkipReason.FILTER_FRESHNESS,
+                f"posted {job.posted_days_ago}d ago > {rules.max_posted_days}d",
+            )
 
-        if rules.min_rating is not None and job.rating is not None:
-            if job.rating < rules.min_rating:
-                return FilterDecision(
-                    False, SkipReason.FILTER_RATING, f"rating {job.rating} < {rules.min_rating}"
-                )
+        if rules.min_rating is not None and job.rating is not None and job.rating < rules.min_rating:
+            return FilterDecision(
+                False, SkipReason.FILTER_RATING, f"rating {job.rating} < {rules.min_rating}"
+            )
 
+        # 10. Description snippet & tags blocklist (pre-navigation)
         if rules.description_must_exclude_any and job.description:
             hit = _contains_any(job.description.lower(), rules.description_must_exclude_any)
             if hit:
@@ -235,12 +293,11 @@ class FilterEngine:
                     False, SkipReason.FILTER_DESCRIPTION, f"JD contains blocked term '{hit}'"
                 )
 
-        if rules.description_must_include_any:
-            if _contains_any(description, rules.description_must_include_any) is None:
-                return FilterDecision(
-                    False,
-                    SkipReason.FILTER_DESCRIPTION,
-                    "JD lacks any required keyword",
-                )
+        if rules.description_must_include_any and _contains_any(description, rules.description_must_include_any) is None:
+            return FilterDecision(
+                False,
+                SkipReason.FILTER_DESCRIPTION,
+                "JD lacks any required keyword",
+            )
 
         return FilterDecision(True)

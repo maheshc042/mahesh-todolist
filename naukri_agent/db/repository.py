@@ -12,7 +12,7 @@ from __future__ import annotations
 import asyncio
 import json
 import socket
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from difflib import SequenceMatcher
 from typing import Any
 
@@ -74,7 +74,7 @@ class Repository:
                 await asyncio.sleep(0.5 * attempt)
 
     @classmethod
-    async def create(cls) -> "Repository":
+    async def create(cls) -> Repository:
         from ..config import get_settings
 
         settings = get_settings()
@@ -276,9 +276,10 @@ class Repository:
             if not j_company or not j_title:
                 return False
 
-            for c_company, c_title, platform in recent:
-                if platform == getattr(job, "platform", "naukri"):
-                    continue # intra-platform handled by known_job_ids exactly
+            job_platform = (getattr(job, "platform", None) or "naukri").lower()
+            for c_company, c_title, prev_platform in recent:
+                if str(prev_platform or "").lower() == job_platform:
+                    continue  # intra-platform handled by known_job_ids exactly
                 # Fuzzy match: same company (high similarity) and similar title
                 comp_ratio = SequenceMatcher(None, j_company, c_company).ratio()
                 title_ratio = SequenceMatcher(None, j_title, c_title).ratio()
@@ -922,7 +923,7 @@ class Repository:
             """
         )
         data = dict(row or {})
-        data["fetched_at"] = datetime.now(timezone.utc).isoformat()
+        data["fetched_at"] = datetime.now(UTC).isoformat()
         return data
 
     async def prune_stale_data(self, keep_days: int = 30) -> dict[str, int]:

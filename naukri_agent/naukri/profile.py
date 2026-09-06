@@ -45,7 +45,7 @@ Design decisions
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 from playwright.async_api import Page
@@ -89,7 +89,7 @@ class RefreshResult:
             "after": self.after[:280],
             "last_updated": self.last_updated[:120],
             "attempted": self.attempted,
-            "at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+            "at": datetime.now(UTC).isoformat(timespec="seconds"),
         }
 
 
@@ -233,7 +233,7 @@ class ProfileRefresher:
         lowered = text.lower()
         if "today" in lowered or "just now" in lowered or "minute" in lowered:
             return True
-        now = datetime.now(timezone.utc).astimezone()
+        now = datetime.now(UTC).astimezone()
         # "31 Jul, 2026" / "31 July 2026"
         return f"{now.day} {now.strftime('%b').lower()}" in lowered
 

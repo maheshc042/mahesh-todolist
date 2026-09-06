@@ -33,7 +33,7 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import httpx
 
@@ -67,7 +67,7 @@ class MatchScoreResult:
     keyskills_score: int       # 0–100; 0 means no keyword overlap at all
     experience_match: bool     # True if the job's exp range includes the profile's years
     overall_score: int         # 0–100 composite score
-    fetched_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+    fetched_at: datetime = field(default_factory=lambda: datetime.now(UTC))
 
     @property
     def is_worth_applying(self) -> bool:
@@ -104,7 +104,7 @@ class NaukriApiClient:
         self._semaphore = asyncio.Semaphore(max_concurrent)
         self._client: httpx.AsyncClient | None = None
 
-    async def __aenter__(self) -> "NaukriApiClient":
+    async def __aenter__(self) -> NaukriApiClient:
         self._client = httpx.AsyncClient(
             headers={
                 **_COMMON_HEADERS,

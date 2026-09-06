@@ -5,7 +5,7 @@ from __future__ import annotations
 
 import csv
 import json
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -20,7 +20,7 @@ RANKED_JOBS_CSV_HEADER = ["rank", "score", "job_id", "tab", "position", "company
 OUTCOME_JOBS_CSV_HEADER = ["job_id", "status", "company", "title", "url", "detail", "reason", "attempts"]
 
 def _now_utc() -> datetime:
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 class ReportExporter:
     def __init__(self, output_dir: Path, run_id: str = "") -> None:
