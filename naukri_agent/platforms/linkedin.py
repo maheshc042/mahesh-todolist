@@ -607,12 +607,44 @@ class LinkedInPlatform(BaseJobPlatform):
                 await submit_btn.click(force=True)
                 await human_pause(2500, 4000)
 
+                # Check for explicit submission confirmation
+                confirmation = await first_visible(
+                    self.page,
+                    [
+                        "div[data-test-modal]:has-text('Application sent')",
+                        "div[role='dialog']:has-text('Application sent')",
+                        "h3:has-text('Application sent')",
+                        "h2:has-text('Application sent')",
+                        "span:has-text('Application sent')",
+                        "div:has-text('Your application was sent')",
+                        "button:has-text('Done')",
+                        "button[aria-label='Done']",
+                    ],
+                    timeout_ms=5000,
+                )
+
+                # Click Done/Dismiss if present
                 await click_if_present(
                     self.page,
-                    ["button[aria-label='Dismiss']", "button:has-text('Done')"],
+                    ["button:has-text('Done')", "button[aria-label='Done']", "button[aria-label='Dismiss']"],
                 )
-                log.info("linkedin.apply.submitted_successfully", job_id=job.job_id)
-                return ApplyOutcome(status=ApplicationStatus.APPLIED, detail="Submitted via LinkedIn Easy Apply")
+                await human_pause(1000, 2000)
+
+                modal_still_open = await first_visible(self.page, modal_selectors, timeout_ms=1000)
+                if confirmation or not modal_still_open:
+                    log.info("linkedin.apply.submitted_successfully", job_id=job.job_id)
+                    return ApplyOutcome(
+                        status=ApplicationStatus.APPLIED,
+                        detail="Submitted via LinkedIn Easy Apply",
+                        confirmation_type="dom_marker",
+                        confirmation_evidence="LinkedIn post-submit confirmation or modal completion observed",
+                    )
+
+                error_el = await first_visible(modal, [".artdeco-inline-feedback--error", "p.artdeco-inline-feedback", "[data-test-form-builder-error]"], timeout_ms=1000)
+                err_txt = (await safe_text(error_el)).strip() if error_el else "Submission unconfirmed; modal remained open"
+                log.warning("linkedin.apply.submit_unconfirmed", job_id=job.job_id, error=err_txt)
+                await self._dismiss_modal()
+                return ApplyOutcome(status=ApplicationStatus.FAILED, detail=f"Submission failed: {err_txt}")
 
             # Check Next / Review button
             action_btn = await first_visible(

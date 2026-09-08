@@ -215,35 +215,27 @@ class ApplyEngine:
 
     async def _wait_for_post_apply_event(self) -> str:
         extended_success = S.APPLY_SUCCESS + [
-            ".apply-message",
-            ".msgBox",
-            "div[class*='apply-message']",
-            "div[class*='msg-box']",
             "div:has-text('Application sent')",
             "div:has-text('Successfully applied')",
-            "div.acp-container",
-            "div.acp-header-container",
-            "img[alt='success-icon']",
-            "div.job-title-text",
-            "div:has-text('Applied to')",
+            "div.acp-header-container:has-text('Applied to')",
         ]
         for _ in range(75):  # ~11.25s resilient SLA poll for enterprise network latency
             if self._popup_opened:
                 return "popup"
             try:
                 title = await self.page.title()
-                if "Apply Confirmation" in title:
+                if "Apply Confirmation" in title or "/apply/confirmation" in self.page.url:
                     return "success"
             except Exception:
                 pass
-            if await self._fast_check(extended_success):
-                return "success"
             if await self._fast_check(S.CHATBOT_DRAWER):
                 return "chatbot"
             if await self._fast_check(S.APPLY_ERROR_TOAST):
                 return "toast"
             if await self._fast_check(S.JD_ALREADY_APPLIED):
                 return "already_applied"
+            if await self._fast_check(extended_success):
+                return "success"
             await asyncio.sleep(0.15)
         return "timeout"
 
@@ -297,13 +289,22 @@ class ApplyEngine:
         if event_type == "popup" or self._popup_opened:
             return ApplyOutcome(status=ApplicationStatus.EXTERNAL, reason=SkipReason.EXTERNAL_APPLY, detail="Third-party tab opened", attempts=attempts)
 
-        # Instant check for success banner or already applied status
-        if event_type in ("success", "already_applied") or await self._fast_check(S.APPLY_SUCCESS):
+        if event_type == "already_applied" or await self._fast_check(S.JD_ALREADY_APPLIED):
+            return ApplyOutcome(
+                status=ApplicationStatus.ALREADY_APPLIED,
+                reason=SkipReason.ALREADY_APPLIED,
+                detail="Already applied marker observed on page",
+                attempts=attempts,
+            )
+
+        # Instant check for genuine success banner
+        if event_type == "success" or await self._fast_check(S.APPLY_SUCCESS):
             return ApplyOutcome(
                 status=ApplicationStatus.APPLIED,
+                detail="Naukri submission confirmation observed",
                 attempts=attempts,
                 confirmation_type=event_type if event_type != "timeout" else "dom_marker",
-                confirmation_evidence="Naukri post-apply marker observed",
+                confirmation_evidence="Naukri ACP confirmation or success marker observed",
             )
 
         chatbot = ChatbotHandler(
@@ -330,9 +331,16 @@ class ApplyEngine:
                 shot = await self.artifacts.capture_failure(self.page, "apply-rejected", profile, job.job_id)
                 return ApplyOutcome(status=ApplicationStatus.FAILED, detail=f"Naukri rejection: {toast[:100]}", screenshot_path=shot, questions_answered=result.answered, attempts=attempts)
 
-            confirmed = result.completed or await self._fast_check(
-                S.APPLY_SUCCESS + S.JD_ALREADY_APPLIED
-            )
+            if await self._fast_check(S.JD_ALREADY_APPLIED):
+                return ApplyOutcome(
+                    status=ApplicationStatus.ALREADY_APPLIED,
+                    reason=SkipReason.ALREADY_APPLIED,
+                    detail="Already applied marker observed after screening",
+                    questions_answered=result.answered,
+                    attempts=attempts,
+                )
+
+            confirmed = result.completed or await self._fast_check(S.APPLY_SUCCESS)
             if confirmed:
                 return ApplyOutcome(
                     status=ApplicationStatus.APPLIED,
@@ -367,20 +375,29 @@ class ApplyEngine:
         is_success = False
         try:
             cur_title = await self.page.title()
-            if "Apply Confirmation" in cur_title or "Applied" in cur_title:
+            if "Apply Confirmation" in cur_title or "/apply/confirmation" in self.page.url:
                 is_success = True
         except Exception:
             pass
         if not is_success:
-            is_success = await first_visible(self.page, S.JD_ALREADY_APPLIED + S.APPLY_SUCCESS, timeout_ms=3_000) is not None
+            is_success = await first_visible(self.page, S.APPLY_SUCCESS, timeout_ms=3_000) is not None
         jt.verify_s += time.perf_counter() - t_ver_0
 
         if is_success:
             return ApplyOutcome(
                 status=ApplicationStatus.APPLIED,
+                detail="Naukri submission confirmation observed",
                 attempts=attempts,
                 confirmation_type="dom_marker",
-                confirmation_evidence="Naukri success, ACP confirmation, or already-applied marker observed after submission",
+                confirmation_evidence="Naukri success or ACP confirmation marker observed after submission",
+            )
+
+        if await first_visible(self.page, S.JD_ALREADY_APPLIED, timeout_ms=1_000) is not None:
+            return ApplyOutcome(
+                status=ApplicationStatus.ALREADY_APPLIED,
+                reason=SkipReason.ALREADY_APPLIED,
+                detail="Already applied marker observed after submission check",
+                attempts=attempts,
             )
 
         shot = await self.artifacts.capture_failure(self.page, "no-confirmation", profile, job.job_id)

@@ -31,9 +31,13 @@ REMOTE_KEYWORDS = ("remote", "work from home", "wfh", "hybrid remote")
 
 
 def _normalise_str(text: str) -> str:
-    """Normalize string and unify tech synonyms like Dot Net / .NET / dot.net -> dotnet."""
+    """Normalize string and unify tech synonyms like Dot Net / .NET / dot.net -> dotnet, reactjs -> react, nodejs -> node."""
     low = (text or "").lower()
-    return re.sub(r"\bdot[\s.-]?net\b|(?<!\w)\.net\b", "dotnet", low)
+    low = re.sub(r"\bdot[\s.-]?net\b|(?<!\w)\.net\b", "dotnet", low)
+    low = re.sub(r"\breact[\s.-]?js\b", "react", low)
+    low = re.sub(r"\bnode[\s.-]?js\b", "node", low)
+    low = re.sub(r"\bnext[\s.-]?js\b", "next", low)
+    return low
 
 
 def _contains_any(haystack: str, needles: list[str]) -> str | None:
@@ -142,60 +146,54 @@ class FilterEngine:
                 False, SkipReason.EXTERNAL_APPLY, "apply-on-company-site only (require_easy_apply=True)"
             )
 
-        # 1. Configured title blocklist (with tech normalization & adjacent tech exception)
+        # 1. Configured title blocklist (Strict: Zero exceptions for blocked stacks)
         if rules.title_must_exclude_any:
             hit = _contains_any(title, rules.title_must_exclude_any)
             if hit:
-                # Adjacent Tech Exception: If the blocked term is an adjacent tech (e.g. java, spring boot, php, .net, go)
-                # but the title or card ALSO explicitly contains one of our primary core tech keywords
-                # (e.g. react, node, python, full stack, mern, frontend, typescript, javascript), allow it as an adjacent hybrid role!
-                adjacent_tech_terms = {
-                    "java", "spring boot", ".net", "dotnet", "dot net", "asp.net", "c#", "c++",
-                    "php", "wordpress", "golang developer", "golang engineer", "go developer", "go engineer"
-                }
-                is_adjacent_tech = hit.lower() in adjacent_tech_terms
-                has_core_override = False
-                if is_adjacent_tech and self.candidate:
-                    haystack = f"{title} {' '.join(job.tags or [])}".lower()
-                    has_core_override = any(
-                        s in haystack for s in (
-                            "react", "node", "python", "full stack", "fullstack",
-                            "mern", "frontend", "typescript", "javascript",
-                        )
-                    )
+                return FilterDecision(
+                    False, SkipReason.FILTER_TITLE, f"title contains blocked term '{hit}'"
+                )
 
-                if not has_core_override:
-                    return FilterDecision(
-                        False, SkipReason.FILTER_TITLE, f"title contains blocked term '{hit}'"
-                    )
+        # 2. Mandatory Title Role Matching
+        if rules.title_must_include_any:
+            matched_title_term = _contains_any(title, rules.title_must_include_any)
+            if not matched_title_term:
+                return FilterDecision(
+                    False,
+                    SkipReason.FILTER_TITLE,
+                    f"title '{job.title}' lacks required role keywords from title_must_include_any",
+                )
 
-        # 2. Dual-Gate Role Matching (Title OR Core Skills):
-        has_title_match = bool(rules.title_must_include_any and _contains_any(title, rules.title_must_include_any))
-        has_skill_match = False
+        # 2.1 For broad engineering titles, verify matching core tech stack
         if self.candidate:
-            haystack = _build_searchable_haystack(job)
-            core_skills = getattr(self.candidate, "core_skills", [])
-            sec_skills = getattr(self.candidate, "secondary_skills", [])
-            matched_core = [
-                s for s in core_skills
-                if _exact_word_match(s, haystack) or _normalize_tech_text(s) in haystack
-            ]
-            matched_sec = [
-                s for s in sec_skills
-                if _exact_word_match(s, haystack) or _normalize_tech_text(s) in haystack
-            ]
-            if len(matched_core) >= 2 or (len(matched_core) >= 1 and len(matched_sec) >= 1):
-                has_skill_match = True
-        else:
-            # Fallback when candidate profile is not provided
-            card_text = f"{title} {' '.join(job.tags or [])} {job.description or ''}".lower()
-            if _contains_any(card_text, rules.title_must_include_any):
-                has_skill_match = True
-
-        if rules.title_must_include_any and not has_title_match and not has_skill_match:
-            return FilterDecision(
-                False, SkipReason.FILTER_TITLE, "title lacks required keywords and lacks matching core skills"
+            broad_generic_titles = {
+                "software engineer", "software developer", "sde", "sde 1", "sde 2",
+                "sde-1", "sde-2", "sde i", "sde ii", "developer", "engineer", "programmer",
+                "member of technical staff", "associate software engineer",
+            }
+            is_broad_title = any(
+                _contains_any(title, [bt]) for bt in broad_generic_titles
             )
+            specialized_tech_in_title = any(
+                s in title for s in (
+                    "react", "node", "python", "mern", "frontend", "backend", "full stack",
+                    "fullstack", "ai", "ml", "fastapi", "django", "llm", "genai", "qa",
+                    "automation", "sdet", "devops", "cloud", "database", "sql",
+                )
+            )
+            if is_broad_title and not specialized_tech_in_title:
+                haystack = _build_searchable_haystack(job)
+                core_skills = getattr(self.candidate, "core_skills", [])
+                has_core_match = any(
+                    _exact_word_match(s, haystack) or _normalize_tech_text(s) in haystack
+                    for s in core_skills
+                )
+                if not has_core_match:
+                    return FilterDecision(
+                        False,
+                        SkipReason.FILTER_TITLE,
+                        f"generic title '{job.title}' lacks matching candidate core skills in listing tags",
+                    )
 
         # 3. Blocked companies
         if self._norm_blocked_companies:

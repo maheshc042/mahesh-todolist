@@ -269,22 +269,24 @@ APPLY_SUCCESS = [
     "div.acp-header-container",
     "img[alt='success-icon']",
     "div.applied-job-content",
-    "div.job-title-text:has-text('Applied to')",
-    "div.job-title-text",
-    "span.job-title",
-    "div:has-text('Applied to')",
+    "div.acp-header-container:has-text('Applied to')",
+    "div.acp-header-container:has-text('Application sent')",
+    "div.acp-header-container:has-text('Successfully applied')",
     "div.acp-header-container img[src*='check_circle']",
-    # Legacy and in-page confirmation banners
-    "div.apply-message",
+    # Specific confirmation banners with positive confirmation text
+    "div.apply-message:has-text('successfully applied')",
+    "div.apply-message:has-text('Application sent')",
     "span:has-text('You have successfully applied')",
-    "div:has-text('successfully applied')",
+    "div:has-text('You have successfully applied')",
     "div:has-text('Application sent')",
+    "div:has-text('Applied successfully')",
     "div:has-text('Applied on')",
     "span#already-applied",
-    "div.styles_apply-message__2Sd0v",
+    "div.styles_apply-message__2Sd0v:has-text('applied')",
+    # Apply button transitioned to applied state
+    "button#apply-button[disabled]:has-text('Applied')",
     "button#apply-button:has-text('Applied')",
     "button[disabled]:has-text('Applied')",
-    "button:has-text('Applied')",
 ]
 
 APPLY_ERROR_TOAST = [

@@ -1146,11 +1146,30 @@ class CutshortPlatform(BaseJobPlatform):
             pass
         await human_pause(400, 800)
 
+    def _is_stale_thread(self, text: str, max_age_days: int = 5) -> bool:
+        """
+        Returns True if thread relative timestamp indicates it is older than max_age_days
+        (e.g., '2 weeks ago', '1 month ago', or '6 days ago').
+        Fresh threads ('seconds ago', 'minutes ago', 'hours ago', '<= 5 days ago') return False.
+        """
+        match = re.search(r"\b(\d+)\s+(second|minute|hour|day|week|month)s?\s+ago\b", text, flags=re.IGNORECASE)
+        if not match:
+            return False
+        amount, unit = int(match.group(1)), match.group(2).lower()
+        if unit in ("second", "minute", "hour"):
+            return False
+        if unit == "day":
+            return amount > max_age_days
+        if unit in ("week", "month"):
+            return True
+        return False
+
     async def _process_questionnaire_rows(self, processed: set[str]) -> None:
-        """Opens every [Questionnaire] row under the Pending (#tabpanel-awaiting) tab."""
-        for _round in range(30):  # hard cap — one round per remaining row
-            # Scoped to the verified tab panel; falls back to any role=button
-            # tagged [Questionnaire] if Cutshort renames the panel id.
+        """Opens every fresh [Questionnaire] row under the Pending (#tabpanel-awaiting) tab."""
+        cfg = AgentConfig.load()
+        max_rounds = max([p.platform_limits.get("cutshort", 150) for p in cfg.profiles if p.enabled] or [150])
+
+        for _round in range(max_rounds):  # Dynamic cap matching Cutshort limit
             rows = self.page.locator("#tabpanel-awaiting div[role='button']")
             if await rows.count() == 0:
                 rows = self.page.locator("div[role='button']").filter(has_text="[Questionnaire]")
@@ -1168,9 +1187,17 @@ class CutshortPlatform(BaseJobPlatform):
                 txt = (await safe_text(row)).strip()
                 clean_txt = re.sub(r"\b\d+\s+(?:seconds?|minutes?|hours?|days?|weeks?|months?)\s+ago\b", "", txt, flags=re.IGNORECASE)
                 key = " ".join(clean_txt.split())[:160]
-                if key and key not in processed:
-                    target = row
-                    break
+                if not key or key in processed:
+                    continue
+
+                # Freshness Guard: Skip stale questionnaires from weeks/months ago
+                if self._is_stale_thread(txt, max_age_days=5):
+                    log.info("cutshort.messages.skip_stale_questionnaire", item=key[:60], age=">5 days old")
+                    processed.add(key)
+                    continue
+
+                target = row
+                break
 
             if target is None:
                 try:
@@ -1186,9 +1213,16 @@ class CutshortPlatform(BaseJobPlatform):
                         txt = (await safe_text(row)).strip()
                         clean_txt = re.sub(r"\b\d+\s+(?:seconds?|minutes?|hours?|days?|weeks?|months?)\s+ago\b", "", txt, flags=re.IGNORECASE)
                         key = " ".join(clean_txt.split())[:160]
-                        if key and key not in processed:
-                            target = row
-                            break
+                        if not key or key in processed:
+                            continue
+
+                        if self._is_stale_thread(txt, max_age_days=5):
+                            log.info("cutshort.messages.skip_stale_questionnaire", item=key[:60], age=">5 days old")
+                            processed.add(key)
+                            continue
+
+                        target = row
+                        break
                 except Exception:
                     pass
 
@@ -1217,16 +1251,15 @@ class CutshortPlatform(BaseJobPlatform):
                     await self._close_chat_overlay()
 
     async def _process_inbox_threads(self, processed: set[str]) -> None:
-        """Opens every conversation thread in the (unfiltered) inbox list.
+        """Opens every fresh conversation thread in the (unfiltered) inbox list."""
+        cfg = AgentConfig.load()
+        max_rounds = max([p.platform_limits.get("cutshort", 150) for p in cfg.profiles if p.enabled] or [150])
 
-        Deliberately avoids 'a[href*=candidate-conversations]' — that matches
-        the sidebar Messages nav link, which just reloads the page.
-        """
         thread_selector = (
             "div[class*='onversation'], div[class*='hread'], li[class*='hread'], "
             "div[class*='hat-item'], a[class*='onversation']"
         )
-        for _round in range(30):
+        for _round in range(max_rounds):
             candidates = []
             for el in await self.page.locator(thread_selector).all():
                 try:
@@ -1239,8 +1272,16 @@ class CutshortPlatform(BaseJobPlatform):
                     continue
                 clean_txt = re.sub(r"\b\d+\s+(?:seconds?|minutes?|hours?|days?|weeks?|months?)\s+ago\b", "", txt, flags=re.IGNORECASE)
                 key = clean_txt[:160]
-                if key not in processed:
-                    candidates.append((el, key))
+                if not key or key in processed:
+                    continue
+
+                # Freshness Guard: Skip stale threads from weeks/months ago
+                if self._is_stale_thread(txt, max_age_days=5):
+                    log.debug("cutshort.messages.skip_stale_inbox_thread", thread=key[:60])
+                    processed.add(key)
+                    continue
+
+                candidates.append((el, key))
 
             if not candidates:
                 break
