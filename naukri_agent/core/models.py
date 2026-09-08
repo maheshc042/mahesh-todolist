@@ -102,6 +102,7 @@ class Job:
     tags: list[str] = field(default_factory=list)
     description: str = ""
     is_walkin: bool = False
+    is_external: bool = False
     source_keyword: str = ""
     recommendation_tab: str = "default"
     recommendation_position: int | None = None

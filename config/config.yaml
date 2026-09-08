@@ -137,8 +137,15 @@ answers:
   experience in typescript: "2"
   experience in full stack: "2.5"
   experience in aws: "2.5"
+  experience in cloud: "2.5"
   experience in testing: "2.5"
   experience in software testing: "2.5"
+  experience in sql: "2.5"
+  experience in postgresql: "2.5"
+  experience in database: "2.5"
+  experience in devops: "2"
+  experience in docker: "2"
+  experience in ci/cd: "2"
 
   # AI / Python is the newer track: 6 months hands-on.
   experience in ai: "2"
@@ -425,7 +432,7 @@ profiles:
 
     # Primary skills required: AT LEAST ONE of core_skills MUST match in every job
     # Explicit title keywords for scoring (so it doesn't divide by 50)
-    title_keywords: ["full stack", "mern", "react", "node", "frontend", "backend", "software engineer", "developer", "web", "qa", "automation", "sdet", "next"]
+    title_keywords: ["full stack", "mern", "react", "node", "frontend", "backend", "software engineer", "developer", "web", "qa", "automation", "sdet", "next", "cloud engineer", "devops", "platform engineer", "database developer", "sql developer"]
 
     # Condensed to Top 14 so math allows a high score
     core_skills: ["react", "node", "javascript", "typescript", "python", "fastapi", "django", "frontend", "backend", "full stack", "mern", "ui", "aws", "docker", "nextjs"]
@@ -436,8 +443,8 @@ profiles:
     search_is_fallback_only: true
 
     filters:
-      title_must_include_any: [full stack, fullstack, mern, react, node, javascript, typescript, frontend, backend, web, software engineer, software developer, backend developer, backend engineer, frontend developer, frontend engineer, sde, sde 1, sde 2, sde-1, sde-2, sde i, sde ii, qa, automation, sdet, next, qa, automation, sdet]
-      title_must_exclude_any: [principal, staff, architect, manager, trainer, intern, internship, desktop support, it support, sales, bpo, php, wordpress, .net, dotnet, dot net, spring boot, asp.net, c#, c++, golang developer, golang engineer, go developer, go engineer, java, mainframe, sap, salesforce, drupal, magento, engineering manager, project manager, product manager, general manager, solution architect, enterprise architect, tech architect, technical architect, sr. manager, data engineer, data analyst, etl, snowflake, teradata, bi developer, powerbi, tableau, data warehousing, databricks]
+      title_must_include_any: [full stack, fullstack, mern, react, node, javascript, typescript, frontend, backend, web, software engineer, software developer, backend developer, backend engineer, frontend developer, frontend engineer, sde, sde 1, sde 2, sde-1, sde-2, sde i, sde ii, qa, automation, sdet, next, cloud engineer, devops, devops engineer, platform engineer, database developer, sql developer]
+      title_must_exclude_any: [principal, staff, architect, manager, trainer, intern, internship, desktop support, it support, sales, bpo, php, wordpress, .net, dotnet, dot net, spring boot, asp.net, c#, c++, golang developer, golang engineer, go developer, go engineer, java, mainframe, sap, salesforce, drupal, magento, engineering manager, project manager, product manager, general manager, solution architect, enterprise architect, tech architect, technical architect, sr. manager, data engineer, data analyst, etl, snowflake, teradata, bi developer, powerbi, tableau, data warehousing, databricks, dba, database administrator, oracle dba]
       description_must_exclude_any: [
         "bpo", "commission only", "unpaid", "registration fee", "security deposit",
         "prefers women", "women diversity", "women-only", "women only", "female only", "female diversity", "diversity drive"
@@ -489,7 +496,7 @@ profiles:
     resume_file: "resumes/CV_Mahesh_Chitakoti_2026.pdf"
 
     # Explicit title keywords for scoring (so it doesn't divide by 33)
-    title_keywords: ["ai", "python", "machine learning", "ml", "genai", "llm", "backend", "full stack", "software engineer", "developer", "sde", "chatbot", "rag", "nlp", "agent", "qa", "automation", "sdet", "quality analyst"]
+    title_keywords: ["ai", "python", "machine learning", "ml", "genai", "llm", "backend", "full stack", "software engineer", "developer", "sde", "chatbot", "rag", "nlp", "agent", "qa", "automation", "sdet", "quality analyst", "cloud engineer", "devops", "mlops", "platform engineer", "database developer", "sql developer"]
 
     # Condensed to Top 13 so math allows a high score
     core_skills: ["python", "fastapi", "django", "ai", "artificial intelligence", "machine learning", "ml", "generative ai", "genai", "llm", "rag", "langchain", "openai", "chatbot", "nlp"]
@@ -500,8 +507,8 @@ profiles:
     search_is_fallback_only: true
 
     filters:
-      title_must_include_any: [ai, artificial intelligence, machine learning, ml, python, llm, genai, generative ai, nlp, chatbot, prompt, agent, python developer, ai engineer, ml engineer, backend engineer, backend developer, full stack, fullstack, mern, web developer, sde, sde 1, sde 2, sde-1, sde-2, sde i, sde ii, software engineer, software developer, qa, automation, sdet, quality analyst, test automation]
-      title_must_exclude_any: [lead, principal, staff, architect, manager, trainer, intern, internship, desktop support, it support, technical support, sales, bpo, php, wordpress, .net, dotnet, dot net, asp.net, c#, c++, golang developer, golang engineer, go developer, go engineer, java, network, hardware, engineering manager, project manager, product manager, general manager, solution architect, enterprise architect, tech architect, technical architect, sr. manager, data engineer, data analyst, etl, snowflake, teradata, bi developer, powerbi, tableau, data warehousing, databricks, spark developer]
+      title_must_include_any: [ai, artificial intelligence, machine learning, ml, python, llm, genai, generative ai, nlp, chatbot, prompt, agent, python developer, ai engineer, ml engineer, backend engineer, backend developer, full stack, fullstack, mern, web developer, sde, sde 1, sde 2, sde-1, sde-2, sde i, sde ii, software engineer, software developer, qa, automation, sdet, quality analyst, test automation, cloud engineer, devops, devops engineer, mlops, mlops engineer, platform engineer, database developer, sql developer]
+      title_must_exclude_any: [lead, principal, staff, architect, manager, trainer, intern, internship, desktop support, it support, technical support, sales, bpo, php, wordpress, .net, dotnet, dot net, asp.net, c#, c++, golang developer, golang engineer, go developer, go engineer, java, network, hardware, engineering manager, project manager, product manager, general manager, solution architect, enterprise architect, tech architect, technical architect, sr. manager, data engineer, data analyst, etl, snowflake, teradata, bi developer, powerbi, tableau, data warehousing, databricks, spark developer, dba, database administrator, oracle dba]
       description_must_exclude_any: [
         "bpo", "commission only", "unpaid", "phd required", "registration fee", "security deposit",
         "prefers women", "women diversity", "women-only", "women only", "female only", "female diversity", "diversity drive"

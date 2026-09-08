@@ -26,6 +26,7 @@ Design decisions:
 from __future__ import annotations
 
 import asyncio
+import re
 
 from playwright.async_api import Page
 
@@ -201,6 +202,42 @@ class ChatbotHandler:
             log.warning("chatbot.text_answer_failed", error=str(exc)[:200])
             return False
 
+    @staticmethod
+    def _match_numeric_option_idx(val_clean: str, option_texts: list[str]) -> int | None:
+        """Find index of best matching numeric option for experience or salary values."""
+        num_match = re.search(r"(\d+(?:\.\d+)?)", val_clean)
+        if not num_match:
+            return None
+        val = float(num_match.group(1))
+
+        # Pass 1: Range bounds check (e.g. '2-3 years' or '2 to 4 years')
+        for idx, opt in enumerate(option_texts):
+            opt_low = opt.lower()
+            numbers = [float(n) for n in re.findall(r"(\d+(?:\.\d+)?)", opt_low)]
+            if len(numbers) >= 2:
+                if min(numbers) <= val <= max(numbers):
+                    return idx
+            elif len(numbers) == 1:
+                n = numbers[0]
+                if ("<" in opt_low or "under" in opt_low or "less than" in opt_low) and val <= n:
+                    return idx
+                if (">" in opt_low or "+" in opt_low or "more than" in opt_low) and val >= n:
+                    return idx
+
+        # Pass 2: Nearest single number (e.g. '2 years' vs '3 years')
+        closest_idx = None
+        min_diff = float("inf")
+        for idx, opt in enumerate(option_texts):
+            opt_low = opt.lower()
+            numbers = [float(n) for n in re.findall(r"(\d+(?:\.\d+)?)", opt_low)]
+            if len(numbers) == 1:
+                diff = abs(numbers[0] - val)
+                if diff < min_diff and diff <= 1.0:
+                    min_diff = diff
+                    closest_idx = idx
+
+        return closest_idx
+
     async def _answer_combobox(self, value: str) -> bool:
         """Handles modern React custom dropdowns and searchable select comboboxes."""
         await self._dismiss_blocking_overlays()
@@ -227,7 +264,7 @@ class ChatbotHandler:
             except Exception:
                 pass
 
-        # Step 3: Find matching option locator
+        # Step 3: Find matching option locator (exact text match first)
         for selector in S.CHATBOT_DROPDOWN_OPTIONS:
             locators = await self.page.locator(selector).all()
             for locator in locators:
@@ -243,6 +280,31 @@ class ChatbotHandler:
                         return True
                 except Exception:
                     continue
+
+        # Step 4: Fallback to numeric range match for experience/salary dropdowns
+        for selector in S.CHATBOT_DROPDOWN_OPTIONS:
+            locators = await self.page.locator(selector).all()
+            texts: list[str] = []
+            vis_locators = []
+            for locator in locators:
+                try:
+                    if await locator.is_visible():
+                        t = (await safe_text(locator)).strip()
+                        if t:
+                            texts.append(t)
+                            vis_locators.append(locator)
+                except Exception:
+                    pass
+            num_idx = self._match_numeric_option_idx(val_clean, texts)
+            if num_idx is not None and num_idx < len(vis_locators):
+                try:
+                    self.policy.require_mutation("naukri.screening.answer")
+                    await vis_locators[num_idx].click(force=True, timeout=2_500)
+                    await human_pause(200, 500)
+                    await self._submit()
+                    return True
+                except Exception:
+                    pass
 
         return False
 
@@ -268,6 +330,31 @@ class ChatbotHandler:
                         return True
                     except Exception:
                         continue
+
+        # Numeric range fallback for radio / chip options (e.g. experience chips '2-3 years')
+        texts = []
+        vis_locators = []
+        for selector in selectors:
+            for locator in await self.page.locator(selector).all():
+                try:
+                    if await locator.is_visible():
+                        t = (await safe_text(locator)).strip()
+                        if t:
+                            texts.append(t)
+                            vis_locators.append(locator)
+                except Exception:
+                    pass
+        num_idx = self._match_numeric_option_idx(val_clean, texts)
+        if num_idx is not None and num_idx < len(vis_locators):
+            try:
+                self.policy.require_mutation("naukri.screening.answer")
+                await vis_locators[num_idx].click(force=True, timeout=3_000)
+                await human_pause(200, 500)
+                await self._submit()
+                return True
+            except Exception:
+                pass
+
         # dropdown fallback
         dropdown = await first_visible(self.page, S.CHATBOT_DROPDOWN, timeout_ms=800)
         if dropdown is not None:

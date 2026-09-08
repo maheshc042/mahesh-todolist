@@ -136,13 +136,38 @@ class FilterEngine:
         company = job.company.lower()
         location = (job.location or "").lower()
 
-        # 1. Configured title blocklist (with tech normalization)
+        # 0. Check Easy Apply requirement (Card Pre-filter)
+        if rules.require_easy_apply and getattr(job, "is_external", False):
+            return FilterDecision(
+                False, SkipReason.EXTERNAL_APPLY, "apply-on-company-site only (require_easy_apply=True)"
+            )
+
+        # 1. Configured title blocklist (with tech normalization & adjacent tech exception)
         if rules.title_must_exclude_any:
             hit = _contains_any(title, rules.title_must_exclude_any)
             if hit:
-                return FilterDecision(
-                    False, SkipReason.FILTER_TITLE, f"title contains blocked term '{hit}'"
-                )
+                # Adjacent Tech Exception: If the blocked term is an adjacent tech (e.g. java, spring boot, php, .net, go)
+                # but the title or card ALSO explicitly contains one of our primary core tech keywords
+                # (e.g. react, node, python, full stack, mern, frontend, typescript, javascript), allow it as an adjacent hybrid role!
+                adjacent_tech_terms = {
+                    "java", "spring boot", ".net", "dotnet", "dot net", "asp.net", "c#", "c++",
+                    "php", "wordpress", "golang developer", "golang engineer", "go developer", "go engineer"
+                }
+                is_adjacent_tech = hit.lower() in adjacent_tech_terms
+                has_core_override = False
+                if is_adjacent_tech and self.candidate:
+                    haystack = f"{title} {' '.join(job.tags or [])}".lower()
+                    has_core_override = any(
+                        s in haystack for s in (
+                            "react", "node", "python", "full stack", "fullstack",
+                            "mern", "frontend", "typescript", "javascript",
+                        )
+                    )
+
+                if not has_core_override:
+                    return FilterDecision(
+                        False, SkipReason.FILTER_TITLE, f"title contains blocked term '{hit}'"
+                    )
 
         # 2. Dual-Gate Role Matching (Title OR Core Skills):
         has_title_match = bool(rules.title_must_include_any and _contains_any(title, rules.title_must_include_any))

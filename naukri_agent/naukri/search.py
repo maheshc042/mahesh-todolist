@@ -820,6 +820,16 @@ class JobSearcher:
                 if div_term in card_full_text:
                     tags.append(div_term)
 
+            is_ext = any(
+                term in card_full_text
+                for term in (
+                    "apply on company site",
+                    "company site",
+                    "redirected to company site",
+                    "apply via company website",
+                )
+            )
+
             min_exp, max_exp = parse_experience(experience_text)
             min_sal, max_sal = parse_salary_lpa(salary_text)
 
@@ -837,6 +847,7 @@ class JobSearcher:
                 tags=tags,
                 description=description,
                 is_walkin="walk-in" in haystack or "walkin" in haystack,
+                is_external=is_ext,
                 source_keyword=keyword,
                 recommendation_tab=tab_enum.value,
                 recommendation_position=position,
