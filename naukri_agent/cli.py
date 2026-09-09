@@ -131,6 +131,9 @@ def run(
     profile: list[str] | None = typer.Option(
         None, "--profile", "-p", help="Only these profile names (repeatable)"
     ),
+    platform: str | None = typer.Option(
+        None, "--platform", "-plat", help="Only run this platform: linkedin, naukri, cutshort, instahyre, wellfound"
+    ),
     dry_run: bool = typer.Option(
         False, "--dry-run", help="Do everything except submitting an application"
     ),
@@ -165,6 +168,7 @@ def run(
                     settings,
                     mode="manual",
                     only_profiles=list(profile) if profile else None,
+                    only_platform=platform,
                     dry_run=dry_run,
                     account=key,
                 )

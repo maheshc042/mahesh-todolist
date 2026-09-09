@@ -1138,3 +1138,8 @@ class Repository:
             snippet[:500],
             post_url[:1000],
         )
+
+    async def close(self) -> None:
+        """Closes the underlying asyncpg connection pool."""
+        from .pool import close_pool
+        await close_pool()

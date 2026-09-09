@@ -706,9 +706,14 @@ class AgentConfig(_Model):
     experience: ExperienceConfig = Field(default_factory=ExperienceConfig)
     profiles: list[JobProfile] = Field(default_factory=list)
 
-    # User Identity
-    applicant_name: str = "Applicant"
-    applicant_location: str = "India"
+    # User Identity & Contacts
+    applicant_name: str = "Mahesh Chitakoti"
+    applicant_location: str = "Bengaluru, Karnataka, India"
+    applicant_email: str = "maheshchitkoti@gmail.com"
+    applicant_phone: str = "9481777227"
+    applicant_linkedin: str = "https://www.linkedin.com/in/maheshchitakoti"
+    applicant_github: str = "https://github.com/maheshchitakoti"
+    applicant_portfolio: str = "https://github.com/maheshchitakoti"
 
     @field_validator("answers", mode="before")
     @classmethod

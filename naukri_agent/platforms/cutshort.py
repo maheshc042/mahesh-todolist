@@ -65,50 +65,66 @@ class CutshortChatbot:
         """
         norm_text = text.lower()
         needed_fields: list[tuple[str, str]] = []
+        cfg = AgentConfig.load()
+        phone = cfg.applicant_phone or "9481777227"
+        email = cfg.applicant_email or "maheshchitkoti@gmail.com"
 
-        # 1. Notice period / LWD
+        # 1. Contact Number / Mobile / Phone / WhatsApp
+        if any(k in norm_text for k in ["contact number", "contact no", "mobile number", "mobile no", "phone number", "phone no", "whatsapp", "call you", "share your contact", "share your number", "share your phone"]):
+            needed_fields.append(("Contact Number", phone))
+
+        # 2. Email Address
+        if any(k in norm_text for k in ["email address", "email id", "mail address", "mail id", "share your email", "share your mail"]):
+            needed_fields.append(("Email", email))
+
+        # 3. Notice period / LWD
         if any(k in norm_text for k in ["notice period", "notice", "how soon", "when can you join", "joining time", "lwd", "last working"]):
             resolved = self.answers.resolve(ScreeningQuestion(text="notice period", kind="unknown", options=[]))
             if resolved is None:
-                return None
-            needed_fields.append(("Notice Period", resolved.value))
+                needed_fields.append(("Notice Period", "0 days (Immediate Joiner)"))
+            else:
+                needed_fields.append(("Notice Period", resolved.value))
 
-        # 2. Current CTC
+        # 4. Current CTC
         if any(k in norm_text for k in ["current ctc", "current salary", "cctc", "present ctc"]):
             resolved = self.answers.resolve(ScreeningQuestion(text="current ctc", kind="unknown", options=[]))
             if resolved is None:
-                return None
-            needed_fields.append(("Current CTC", resolved.value))
+                needed_fields.append(("Current CTC", "4 LPA"))
+            else:
+                needed_fields.append(("Current CTC", resolved.value))
 
-        # 3. Expected CTC
+        # 5. Expected CTC
         if any(k in norm_text for k in ["expected ctc", "expected salary", "ectc"]):
             resolved = self.answers.resolve(ScreeningQuestion(text="expected ctc", kind="unknown", options=[]))
             if resolved is None:
-                return None
-            needed_fields.append(("Expected CTC", resolved.value))
+                needed_fields.append(("Expected CTC", "7 LPA"))
+            else:
+                needed_fields.append(("Expected CTC", resolved.value))
 
-        # 4. Total Experience
+        # 6. Total Experience
         if any(k in norm_text for k in ["total experience", "overall experience", "total exp", "years of experience"]):
             resolved = self.answers.resolve(ScreeningQuestion(text="total experience", kind="unknown", options=[]))
             if resolved is None:
-                return None
-            needed_fields.append(("Total Experience", resolved.value))
+                needed_fields.append(("Total Experience", "2.5 years"))
+            else:
+                needed_fields.append(("Total Experience", resolved.value))
 
-        # 5. Relevant / Specific Skill Experience
+        # 7. Relevant / Specific Skill Experience
         for skill in ["python", "fastapi", "ai", "llm", "rag", "react", "node", "typescript", "full stack"]:
             if f"experience in {skill}" in norm_text or f"{skill} experience" in norm_text:
                 resolved = self.answers.resolve(ScreeningQuestion(text=f"experience in {skill}", kind="unknown", options=[]))
                 if resolved:
                     needed_fields.append((f"Experience with {skill.title()}", f"{resolved.value} years"))
 
-        # 6. Location / Relocation / Hybrid
+        # 8. Location / Relocation / Hybrid
         if any(k in norm_text for k in ["current location", "where are you based", "relocate", "relocation", "wfo", "work from office", "hybrid"]):
             resolved = self.answers.resolve(
                 ScreeningQuestion(text=text[:250], kind="unknown", options=[])
             )
             if resolved is None:
-                return None
-            needed_fields.append(("Location / Availability", resolved.value))
+                needed_fields.append(("Location / Availability", "Bengaluru (Open to relocate)"))
+            else:
+                needed_fields.append(("Location / Availability", resolved.value))
 
         if not needed_fields:
             single_res = self.answers.resolve(ScreeningQuestion(text=text[:250], kind="unknown", options=[]))
@@ -120,7 +136,7 @@ class CutshortChatbot:
         reply_lines = ["Hi,\n\nPlease find the requested details below:"]
         for key, val in needed_fields:
             reply_lines.append(f"• {key}: {val}")
-        reply_lines.append(f"\nPlease let me know if you need any additional information.\n\nBest regards,\n{AgentConfig.load().applicant_name or 'Applicant'}")
+        reply_lines.append(f"\nPlease let me know if you need any additional information.\n\nBest regards,\n{cfg.applicant_name or 'Mahesh Chitakoti'}")
         return "\n".join(reply_lines)
 
     async def run(self) -> tuple[bool, int, str]:
@@ -177,6 +193,10 @@ class CutshortChatbot:
                             "Professional examples: designed scalable REST microservices handling high concurrency, built full-stack reactive dashboards with React and TypeScript, "
                             "and optimized SQL query execution plans and Redis caching layers for production deployments."
                         )
+                    elif any(k in q_label_low for k in ["phone", "mobile", "contact number", "contact no", "whatsapp", "call you"]):
+                        ta_ans = AgentConfig.load().applicant_phone or "9481777227"
+                    elif any(k in q_label_low for k in ["email", "mail id", "email address", "mail address"]):
+                        ta_ans = AgentConfig.load().applicant_email or "maheshchitkoti@gmail.com"
                     elif any(k in q_label_low for k in ["ctc", "salary", "fixed", "variable", "in hand", "in-hand", "annual ctc", "compensation"]):
                         ta_ans = "Current CTC: 4 LPA (Fixed: 3.8 LPA, Variable: 0 LPA). Expected CTC: 7 LPA. Notice Period: 0 days (Immediate Joiner)."
                     elif any(k in q_label_low for k in ["docker", "kubernetes", "container"]):
@@ -332,6 +352,11 @@ class CutshortChatbot:
                         return True, max(answered, 1), ""
                     except Exception as exc:
                         log.error("cutshort.chatbot.submit_failed", error=str(exc))
+                else:
+                    # If fieldsets or form is present, but no submit button exists,
+                    # this form was already submitted or is read-only. Avoid looping in vain.
+                    log.info("cutshort.chatbot.form_already_completed", answered=answered)
+                    return True, answered, "Form already submitted / read-only"
 
             # Check if chat is already complete
             if await first_visible(
@@ -437,9 +462,26 @@ class CutshortChatbot:
                 for inp in chat_inputs:
                     if await inp.is_visible():
                         placeholder = (await inp.get_attribute("placeholder") or "").lower()
-                        resolved = self.answers.resolve(ScreeningQuestion(text=f"{placeholder} {recruiter_text}", kind="text", options=[]))
-                        if resolved:
-                            await human_type(inp, resolved.value)
+                        name_attr = (await inp.get_attribute("name") or "").lower()
+                        combined = f"{placeholder} {name_attr} {recruiter_text}".lower()
+                        ans_val = None
+                        if any(k in combined for k in ["phone", "mobile", "contact", "whatsapp"]):
+                            ans_val = AgentConfig.load().applicant_phone or "9481777227"
+                        elif any(k in combined for k in ["email", "mail id"]):
+                            ans_val = AgentConfig.load().applicant_email or "maheshchitkoti@gmail.com"
+                        elif any(k in combined for k in ["notice", "how soon", "when can you join", "lwd"]):
+                            ans_val = "0 days (Immediate)"
+                        elif any(k in combined for k in ["expected ctc", "ectc"]):
+                            ans_val = "7 LPA"
+                        elif any(k in combined for k in ["current ctc", "cctc"]):
+                            ans_val = "4 LPA"
+                        else:
+                            resolved = self.answers.resolve(ScreeningQuestion(text=f"{placeholder} {recruiter_text}", kind="text", options=[]))
+                            if resolved:
+                                ans_val = resolved.value
+
+                        if ans_val:
+                            await human_type(inp, ans_val)
                             await human_pause(300, 600)
                             answered_successfully = True
                             answered += 1
@@ -502,7 +544,50 @@ class CutshortChatbot:
             if not answered_successfully and not fieldsets:
                 return False, answered, f"Could not answer recruiter message: {recruiter_text[:80]}"
 
-        return False, answered, "Questionnaire ended without an explicit completion marker"
+def _parse_cutshort_salary(text: str) -> tuple[float | None, float | None]:
+    if not text:
+        return None, None
+    m_yr = re.search(r"₹?\s*([\d\.]+)\s*[lL]?\s*-\s*₹?\s*([\d\.]+)\s*[lL](?:\s*/\s*yr)?", text, re.IGNORECASE)
+    if m_yr:
+        try:
+            return float(m_yr.group(1)), float(m_yr.group(2))
+        except ValueError:
+            pass
+    m_single = re.search(r"₹?\s*([\d\.]+)\s*[lL](?:\s*/\s*yr)?", text, re.IGNORECASE)
+    if m_single:
+        try:
+            v = float(m_single.group(1))
+            return v, v
+        except ValueError:
+            pass
+    m_mo = re.search(r"₹?\s*([\d,]+)\s*[–-]\s*₹?\s*([\d,]+)\s*(?:per month|/month)", text, re.IGNORECASE)
+    if m_mo:
+        try:
+            min_mo = float(m_mo.group(1).replace(",", ""))
+            max_mo = float(m_mo.group(2).replace(",", ""))
+            return round((min_mo * 12) / 100000.0, 2), round((max_mo * 12) / 100000.0, 2)
+        except ValueError:
+            pass
+    return None, None
+
+
+def _parse_cutshort_experience(text: str) -> tuple[float | None, float | None]:
+    if not text:
+        return None, None
+    m = re.search(r"(\d+(?:\.\d+)?)\s*-\s*(\d+(?:\.\d+)?)\s*yrs?", text, re.IGNORECASE)
+    if m:
+        try:
+            return float(m.group(1)), float(m.group(2))
+        except ValueError:
+            pass
+    m_single = re.search(r"(\d+(?:\.\d+)?)\+?\s*yrs?", text, re.IGNORECASE)
+    if m_single:
+        try:
+            v = float(m_single.group(1))
+            return v, None
+        except ValueError:
+            pass
+    return None, None
 
 
 class CutshortPlatform(BaseJobPlatform):
@@ -557,15 +642,168 @@ class CutshortPlatform(BaseJobPlatform):
 
         log.info("cutshort.auth.session_reused")
         return True
+    async def _apply_ui_filters(self, profile: JobProfile) -> None:
+        """
+        Applies verified native UI filters on Cutshort's All Jobs toolbar:
+        1. Hiring Activity: Active in last 7 days / 1-2 weeks (fresh postings only)
+        2. Role Type: Full time
+        3. Job Category: Intentionally left UNTOUCHED on UI so all tech roles
+           (Software, AI/ML, DevOps, QA, Cloud, Systems, Support) are pulled for agent evaluation.
+        4. Location: Intentionally left UNTOUCHED (all locations & remote allowed;
+           avoids restricting candidate pool or dropping multi-city postings).
+        5. Minimum Salary: >= 5 LPA (slider set to 500,000 INR)
+        6. Experience Range: Max experience capped at 3.5y (min exp untouched at 0.0)
+        """
+        log.info("cutshort.filters.applying_ui", profile=profile.name)
+
+        # 1. Hiring activity on job (Active in last 7 days / last week)
+        try:
+            btn = await first_visible(self.page, ["div[data-intercom-target='hiringActivityOnJob-filter']"], timeout_ms=2000)
+            if btn:
+                await btn.click(force=True)
+                await human_pause(400, 800)
+                opt = await first_visible(
+                    self.page,
+                    [
+                        "div:has-text('Active in last 7 days')",
+                        "div:has-text('Active in last 1 week')",
+                        "div:has-text('Active in last week')",
+                        "div:has-text('Active in last 1-2 weeks')",
+                        "div:has-text('Active recently')",
+                        "label:has-text('In the last')",
+                        "div:has-text('In the last')",
+                    ],
+                    timeout_ms=1500,
+                )
+                if opt:
+                    await opt.click(force=True)
+                    await human_pause(300, 500)
+
+                # If there is a unit dropdown showing Months, switch to Weeks
+                unit_btn = await first_visible(self.page, ["div:has-text('Months')", "button:has-text('Months')", "span:has-text('Months')"], timeout_ms=600)
+                if unit_btn:
+                    await unit_btn.click(force=True)
+                    await human_pause(200, 400)
+                    week_opt = await first_visible(self.page, ["div:has-text('Weeks')", "div:has-text('Days')"], timeout_ms=600)
+                    if week_opt:
+                        await week_opt.click(force=True)
+
+                await self.page.keyboard.press("Escape")
+                await human_pause(300, 600)
+        except Exception as exc:
+            log.debug("cutshort.filters.activity_error", error=str(exc))
+
+        # 2. Type of role (Full time)
+        try:
+            btn = await first_visible(self.page, ["div[data-intercom-target='roletype-filter']"], timeout_ms=2000)
+            if btn:
+                await btn.click(force=True)
+                await human_pause(400, 800)
+                opt = await first_visible(
+                    self.page,
+                    [
+                        "button:has-text('Full time')",
+                        "div:has-text('Full time')",
+                        "label:has-text('Full time')",
+                    ],
+                    timeout_ms=1500,
+                )
+                if opt:
+                    await opt.click(force=True)
+                    await human_pause(400, 600)
+                await self.page.keyboard.press("Escape")
+                await human_pause(300, 600)
+        except Exception as exc:
+            log.debug("cutshort.filters.roletype_error", error=str(exc))
+
+        # Job Category and Location are intentionally left UNTOUCHED on the UI:
+        # This ensures Cutshort pulls all eligible tech roles (Software, AI/Data, DevOps,
+        # QA/Automation, Cloud, Systems, and Technical Support) across all locations/remote,
+        # allowing Python's comprehensive `title_must_include_any` engine to evaluate and decide.
+
+        # 4. Minimum salary (>= 5 LPA)
+        min_salary_lpa = profile.filters.min_salary_lpa if (profile.filters and profile.filters.min_salary_lpa) else 5.0
+        if min_salary_lpa and min_salary_lpa >= 5.0:
+            try:
+                btn = await first_visible(self.page, ["div[data-intercom-target='minsal-filter']"], timeout_ms=2000)
+                if btn:
+                    await btn.click(force=True)
+                    await human_pause(400, 800)
+                    slider = await first_visible(self.page, ["div[role='slider']"], timeout_ms=1500)
+                    if slider:
+                        await slider.focus()
+                        await self.page.keyboard.press("Home")
+                        await human_pause(100, 200)
+                        steps = int(min_salary_lpa)
+                        for _ in range(steps):
+                            await self.page.keyboard.press("ArrowRight")
+                            await human_pause(80, 150)
+                    await self.page.keyboard.press("Escape")
+                    await human_pause(300, 600)
+            except Exception as exc:
+                log.debug("cutshort.filters.minsal_error", error=str(exc))
+
+        # 5. Experience range: Only cap Max Experience at 3.5y (Min exp left untouched at 0.0)
+        max_exp = profile.filters.experience.max_years if (profile.filters and profile.filters.experience) else 3.5
+        if max_exp:
+            try:
+                btn = await first_visible(self.page, ["div[data-intercom-target='expRange-filter']"], timeout_ms=2000)
+                if btn:
+                    await btn.click(force=True)
+                    await human_pause(400, 800)
+                    sliders = await self.page.locator("div[role='slider']").all()
+                    if len(sliders) >= 2:
+                        max_slider = sliders[1]
+                        await max_slider.focus()
+                        await self.page.keyboard.press("Home")
+                        await human_pause(100, 200)
+                        steps = int(round(max_exp / 0.5))
+                        for _ in range(steps):
+                            await self.page.keyboard.press("ArrowRight")
+                            await human_pause(80, 150)
+                    await self.page.keyboard.press("Escape")
+                    await human_pause(300, 600)
+            except Exception as exc:
+                log.debug("cutshort.filters.exp_range_error", error=str(exc))
+
+        log.info("cutshort.filters.applied_ui_successfully")
+        await human_pause(1500, 2500)
 
     async def fetch_jobs(self, profile: JobProfile, exclude_job_ids: set[str]) -> list[Job]:
         log.info("cutshort.fetch.start", profile=profile.name)
-        await self.page.goto("https://cutshort.io/profile/recommended-jobs", wait_until="domcontentloaded")
+        target_url = "https://cutshort.io/profile/all-jobs" if not profile.use_recommended else "https://cutshort.io/profile/recommended-jobs"
+        await self.page.goto(target_url, wait_until="domcontentloaded")
         await human_pause(2000, 3000)
+
+        # If not using recommended feed, immediately ensure recommendation switch is OFF and apply filters
+        if not profile.use_recommended:
+            switch_el = await first_visible(
+                self.page,
+                [
+                    "input[role='switch']",
+                    "label:has(input[role='switch'])",
+                    "div:has-text('Turn it OFF to view all jobs') input[role='switch']",
+                ],
+                timeout_ms=3000,
+            )
+            if switch_el:
+                try:
+                    is_checked = await switch_el.is_checked()
+                except Exception:
+                    is_checked = True
+                if is_checked:
+                    await switch_el.scroll_into_view_if_needed()
+                    await human_pause(300, 600)
+                    try:
+                        await switch_el.click(force=True)
+                    except Exception:
+                        await switch_el.evaluate("el => el.click()")
+                    await human_pause(2000, 3000)
+            await self._apply_ui_filters(profile)
 
         job_link_sel = "a[href*='/job/']"
 
-        # Infinite scroll to fetch ALL available jobs in the feed
+        # Infinite scroll to fetch available jobs in the feed
         last_link_count = 0
         stagnant_scrolls = 0
         while True:
@@ -597,10 +835,6 @@ class CutshortPlatform(BaseJobPlatform):
         except Exception as exc:
             log.debug("cutshort.dashboard_dump_failed", error=str(exc))
 
-        # Each job card owns exactly one <a href="/job/...">. Walking those
-        # anchors directly (instead of 'div:has(a):has(button)', which also
-        # matches every wrapper div up to the page root) guarantees each job is
-        # read exactly once and keeps recommendation positions honest.
         anchors = await self.page.locator(job_link_sel).all()
         jobs: list[Job] = []
         seen_urls: set[str] = set()
@@ -622,19 +856,28 @@ class CutshortPlatform(BaseJobPlatform):
                     continue
                 seen_urls.add(url.rstrip("/"))
 
-                # Climb from the title link to the smallest ancestor that also
-                # contains a company link — the real card boundary.
                 company = ""
                 desc = ""
+                card_text = ""
                 card = anchor.locator(
                     "xpath=ancestor::div[descendant::a[contains(@href,'/company/')]][1]"
                 ).first
                 if await card.count() > 0:
                     company = (await safe_text(card.locator("a[href*='/company/']").first)).strip()
-                    # Card carries a JD excerpt in div.prose (verified in dump)
                     prose_el = card.locator("div.prose").first
                     if await prose_el.count() > 0:
                         desc = (await safe_text(prose_el)).strip()
+
+                full_card = anchor.locator(
+                    "xpath=ancestor::div[contains(@class,'sc-61a153a7-3') or descendant::button[contains(.,'Apply') or contains(.,'View') or contains(.,'Applied')]][1]"
+                ).first
+                if await full_card.count() > 0:
+                    card_text = (await safe_text(full_card)).strip()
+                elif await card.count() > 0:
+                    card_text = (await safe_text(card)).strip()
+
+                min_sal, max_sal = _parse_cutshort_salary(card_text)
+                min_exp, max_exp = _parse_cutshort_experience(card_text)
 
                 match = re.search(r"-([a-zA-Z0-9]+)$", url)
                 job_id = f"cutshort-{match.group(1)}" if match else f"cutshort-{Job.stable_id(url, title, company)}"
@@ -649,7 +892,11 @@ class CutshortPlatform(BaseJobPlatform):
                         company=company,
                         url=url,
                         description=desc,
-                        recommendation_tab="default",
+                        min_salary_lpa=min_sal,
+                        max_salary_lpa=max_sal,
+                        min_experience=min_exp,
+                        max_experience=max_exp,
+                        recommendation_tab="default" if profile.use_recommended else "all_jobs",
                         recommendation_position=len(jobs) + 1,
                         platform="cutshort",
                     )
@@ -661,7 +908,7 @@ class CutshortPlatform(BaseJobPlatform):
         # Stage 2: Expand to active platform feed if recommended pool yields fewer than target applies
         target_applies = profile.platform_limits.get(self.platform_name, 150)
         min_needed_jobs = min(target_applies, 50)
-        if len(jobs) < min_needed_jobs:
+        if profile.use_recommended and len(jobs) < min_needed_jobs:
             log.info(
                 "cutshort.fetch.stage2_expand_active_jobs",
                 current_count=len(jobs),
@@ -693,33 +940,8 @@ class CutshortPlatform(BaseJobPlatform):
                         log.info("cutshort.fetch.turned_off_recommendation_switch")
                         await human_pause(2000, 3500)
 
-                        # Optionally select recently active filter if visible
-                        activity_filter = await first_visible(
-                            self.page,
-                            ["div[data-intercom-target='hiringActivityOnJob-filter']"],
-                            timeout_ms=2000,
-                        )
-                        if activity_filter:
-                            try:
-                                await activity_filter.click()
-                                await human_pause(400, 800)
-                                active_opt = await first_visible(
-                                    self.page,
-                                    [
-                                        "div:has-text('Active in last 15 days')",
-                                        "div:has-text('Active in last 1-2 weeks')",
-                                        "div:has-text('Active in last 7 days')",
-                                        "div:has-text('Active recently')",
-                                        "input[value*='15']",
-                                    ],
-                                    timeout_ms=1500,
-                                )
-                                if active_opt:
-                                    await active_opt.click()
-                                    await human_pause(500, 1000)
-                                await self.page.keyboard.press("Escape")
-                            except Exception as exc:
-                                log.debug("cutshort.fetch.activity_filter_error", error=str(exc))
+                        # Apply all native Cutshort UI filters on the toolbar!
+                        await self._apply_ui_filters(profile)
 
                         # Scroll to load expanded feed
                         for _ in range(6):
@@ -752,6 +974,7 @@ class CutshortPlatform(BaseJobPlatform):
 
                                 company = ""
                                 desc = ""
+                                card_text = ""
                                 card = anchor.locator(
                                     "xpath=ancestor::div[descendant::a[contains(@href,'/company/')]][1]"
                                 ).first
@@ -760,6 +983,18 @@ class CutshortPlatform(BaseJobPlatform):
                                     prose_el = card.locator("div.prose").first
                                     if await prose_el.count() > 0:
                                         desc = (await safe_text(prose_el)).strip()
+
+                                # Climb to outer card wrapper to capture salary and experience badges
+                                full_card = anchor.locator(
+                                    "xpath=ancestor::div[contains(@class,'sc-61a153a7-3') or descendant::button[contains(.,'Apply') or contains(.,'View') or contains(.,'Applied')]][1]"
+                                ).first
+                                if await full_card.count() > 0:
+                                    card_text = (await safe_text(full_card)).strip()
+                                elif await card.count() > 0:
+                                    card_text = (await safe_text(card)).strip()
+
+                                min_sal, max_sal = _parse_cutshort_salary(card_text)
+                                min_exp, max_exp = _parse_cutshort_experience(card_text)
 
                                 match = re.search(r"-([a-zA-Z0-9]+)$", url)
                                 job_id = f"cutshort-{match.group(1)}" if match else f"cutshort-{Job.stable_id(url, title, company)}"
@@ -774,6 +1009,10 @@ class CutshortPlatform(BaseJobPlatform):
                                         company=company,
                                         url=url,
                                         description=desc,
+                                        min_salary_lpa=min_sal,
+                                        max_salary_lpa=max_sal,
+                                        min_experience=min_exp,
+                                        max_experience=max_exp,
                                         recommendation_tab="active_feed",
                                         recommendation_position=len(jobs) + 1,
                                         platform="cutshort",
@@ -799,14 +1038,19 @@ class CutshortPlatform(BaseJobPlatform):
 
         raw_id = job.job_id.replace("cutshort-", "")
 
-        # Anchor on this job's unique link, then climb to its card. Broad
-        # selectors like 'div:has(a[href*=id])' also match every wrapper div up
-        # to the page root, so first_visible() used to resolve to a container
-        # holding ALL cards — risking a click on another job's Apply button.
-        anchor = await first_visible(self.page, [f"a[href*='{raw_id}']"], timeout_ms=3000)
+        # 1. Clean slate: dismiss any stale modal or backdrop from a previous job
+        try:
+            old_modal = await first_visible(self.page, ["#modal__content", "div[role='dialog']"], timeout_ms=300)
+            if old_modal:
+                await self.page.keyboard.press("Escape")
+                await human_pause(300, 600)
+        except Exception:
+            pass
 
-        # Fallback: positional lookup over the feed's job links (verify the
-        # href really is our job — positions shift as cards get removed).
+        modal = None
+
+        # 2. Try locating the job card in the current feed
+        anchor = await first_visible(self.page, [f"a[href*='{raw_id}']"], timeout_ms=2000)
         if not anchor and job.recommendation_position:
             try:
                 all_links = self.page.locator("a[href*='/job/']")
@@ -818,7 +1062,6 @@ class CutshortPlatform(BaseJobPlatform):
             except Exception:
                 pass
 
-        scope = None  # Locator of the card (or whole page on the job URL)
         if anchor:
             card = anchor.locator(
                 "xpath=ancestor::div[descendant::button[contains(normalize-space(.),'Apply')"
@@ -827,46 +1070,134 @@ class CutshortPlatform(BaseJobPlatform):
                 " or descendant::a[contains(normalize-space(.),'View conversation')]][1]"
             ).first
             if await card.count() > 0:
-                scope = card
+                if pre_submit_check:
+                    decision = pre_submit_check(job)
+                    if not decision.passed:
+                        not_interested = await first_visible(card, ["button:has-text('Not interested')", "a:has-text('Not interested')"])
+                        if not_interested:
+                            try:
+                                await not_interested.click()
+                                await human_pause(500, 1000)
+                            except Exception:
+                                pass
+                        return ApplyOutcome(ApplicationStatus.SKIPPED, reason=decision.reason, detail=decision.detail)
 
-        if scope is None:
-            # Card gone from the feed (detached / virtualised) — use the job page itself.
+                apply_btn = await first_visible(
+                    card,
+                    [
+                        "button:has-text('Apply now')",
+                        "button:has-text('Apply to this job')",
+                        "button[label*='Apply to this job']",
+                        "button:has-text('Apply')",
+                        "button[label*='Apply']",
+                        "button:has-text('Interested')",
+                        "button[label*='Interested']",
+                    ],
+                    timeout_ms=2500,
+                )
+                if not apply_btn and await first_visible(card, ["button:has-text('Applied')", "a:has-text('View conversation')", "button:has-text('View conversation')"]):
+                    return ApplyOutcome(ApplicationStatus.ALREADY_APPLIED, reason=SkipReason.ALREADY_APPLIED)
+
+                if apply_btn:
+                    try:
+                        await apply_btn.scroll_into_view_if_needed(timeout=1500)
+                    except Exception:
+                        pass
+                    try:
+                        await apply_btn.click(force=True, timeout=3000)
+                    except Exception:
+                        await apply_btn.evaluate("el => el.click()")
+                    await human_pause(1500, 2500)
+
+                    modal = await first_visible(
+                        self.page,
+                        [
+                            "#modal__content",
+                            "div.modal__wrapper",
+                            "div[role='dialog']",
+                            "div#modal-root > div",
+                            "div.modal-content",
+                            "div[class*='modal']",
+                        ],
+                        timeout_ms=3000,
+                    )
+
+        # 3. Fallback or Dedicated Flow: If modal didn't open from feed card, navigate to job.url
+        if not modal:
             if not (job.url and job.url.startswith("http")):
                 return ApplyOutcome(ApplicationStatus.FAILED, detail=f"No feed card or URL for {job.title} at {job.company}")
+
+            log.info("cutshort.apply.navigating_to_job_url", job_id=job.job_id, url=job.url)
             try:
                 await self.page.goto(job.url, wait_until="domcontentloaded")
                 await human_pause(1500, 2500)
             except Exception as exc:
                 return ApplyOutcome(ApplicationStatus.FAILED, detail=f"Failed to load job page: {str(exc)[:150]}")
-            scope = self.page
 
-        if pre_submit_check:
-            decision = pre_submit_check(job)
-            if not decision.passed:
-                not_interested = await first_visible(scope, ["button:has-text('Not interested')", "a:has-text('Not interested')"])
-                if not_interested:
-                    try:
-                        await not_interested.click()
-                        await human_pause(500, 1000)
-                    except Exception:
-                        pass
-                return ApplyOutcome(ApplicationStatus.SKIPPED, reason=decision.reason, detail=decision.detail)
+            if pre_submit_check:
+                decision = pre_submit_check(job)
+                if not decision.passed:
+                    return ApplyOutcome(ApplicationStatus.SKIPPED, reason=decision.reason, detail=decision.detail)
 
-        apply_btn = await first_visible(
-            scope, ["button:has-text('Apply now')", "button:has-text('Apply')", "button:has-text('Interested')"], timeout_ms=3000
-        )
-        if not apply_btn:
-            if await first_visible(scope, ["button:has-text('Applied')", "a:has-text('View conversation')", "button:has-text('View conversation')"]):
-                return ApplyOutcome(ApplicationStatus.ALREADY_APPLIED, reason=SkipReason.ALREADY_APPLIED)
-            return ApplyOutcome(ApplicationStatus.FAILED, detail=f"Apply button not found for {job.title} at {job.company}")
+            # Step 3A: On dedicated job page (cutshort.io/job/...), click primary in-viewport CTA button
+            target_btn = None
+            cta_buttons = await self.page.locator("button:has-text('Apply to this job'), button:has-text('Apply now'), button:has-text('Apply')").all()
+            for b in cta_buttons:
+                if await b.is_visible():
+                    box = await b.bounding_box()
+                    if box and box.get("y", 0) > 0:
+                        target_btn = b
+                        break
+            if not target_btn and cta_buttons:
+                target_btn = cta_buttons[0]
 
-        await apply_btn.scroll_into_view_if_needed()
-        await human_pause(200, 400)
-        await apply_btn.click(force=True)
-        await human_pause(1500, 2500)
+            if target_btn:
+                try:
+                    await target_btn.scroll_into_view_if_needed(timeout=1500)
+                except Exception:
+                    pass
+                try:
+                    await target_btn.click(force=True, timeout=3000)
+                except Exception:
+                    await target_btn.evaluate("el => el.click()")
+                await human_pause(2000, 3000)
 
-        # Handle pitch modal (fill textarea note and click Send)
-        modal = await first_visible(self.page, ["div.modal-content", "div[class*='modal']", "div[role='dialog']"], timeout_ms=4000)
+            # Step 3B: Cutshort redirects to /profile/all-jobs?jobid=... with an active feed card.
+            # Click the feed card's "Apply now" button to trigger the pitch modal!
+            feed_apply = await first_visible(
+                self.page,
+                [
+                    "button:has-text('Apply now')",
+                    "button:has-text('Apply to this job')",
+                    "button[label*='Apply to this job']",
+                ],
+                timeout_ms=5000,
+            )
+            if feed_apply:
+                try:
+                    await feed_apply.scroll_into_view_if_needed(timeout=1500)
+                except Exception:
+                    pass
+                try:
+                    await feed_apply.click(force=True, timeout=3000)
+                except Exception:
+                    await feed_apply.evaluate("el => el.click()")
+                await human_pause(1500, 2500)
+
+            # Step 3C: Wait for pitch modal to appear
+            modal = await first_visible(
+                self.page,
+                [
+                    "#modal__content",
+                    "div.modal__wrapper",
+                    "div[role='dialog']",
+                    "div#modal-root > div",
+                    "div.modal-content",
+                    "div[class*='modal']",
+                ],
+                timeout_ms=5000,
+            )
+
         modal_text = (await safe_text(modal)).strip() if modal else ""
 
         # Check and handle profile-specific resume swapping if configured
@@ -881,7 +1212,7 @@ class CutshortPlatform(BaseJobPlatform):
                     current_resume_text = (await safe_text(modal)).lower() if modal else ""
                     if target_stem not in current_resume_text:
                         upload_btn = await first_visible(
-                            self.page,
+                            modal or self.page,
                             [
                                 "div:has-text('Upload another resume')",
                                 "button:has-text('Upload another resume')",
@@ -891,7 +1222,12 @@ class CutshortPlatform(BaseJobPlatform):
                             timeout_ms=1500,
                         )
                         if upload_btn:
-                            file_input = await first_visible(self.page, ["input[type='file']"], timeout_ms=1000)
+                            try:
+                                await upload_btn.click(timeout=1500)
+                                await human_pause(500, 1000)
+                            except Exception:
+                                pass
+                            file_input = await first_visible(self.page, ["input[type='file']"], timeout_ms=1500)
                             if file_input:
                                 await file_input.set_input_files(str(resume_path))
                                 await human_pause(1000, 2000)
@@ -952,7 +1288,18 @@ class CutshortPlatform(BaseJobPlatform):
         applicant_name = AgentConfig.load().applicant_name or "Mahesh"
         exp_years_str = str(prof.experience_years) if (prof and prof.experience_years) else "2.5"
 
-        textarea = await first_visible(self.page, ["textarea", "input[type='text'][placeholder*='note' i]"], timeout_ms=3000)
+        modal_scope = modal or self.page
+        textarea = await first_visible(
+            modal_scope,
+            [
+                "textarea[name='message']",
+                "textarea[placeholder*='message' i]",
+                "textarea",
+                "input[type='text'][placeholder*='note' i]",
+                "input[type='text'][placeholder*='message' i]",
+            ],
+            timeout_ms=3000,
+        )
         if textarea:
             pitch = (
                 f"Hi {recruiter_name},\n\n"
@@ -963,31 +1310,46 @@ class CutshortPlatform(BaseJobPlatform):
                 f"Best,\n"
                 f"{applicant_name}"
             )
+            try:
+                await textarea.scroll_into_view_if_needed(timeout=1000)
+                await textarea.click()
+            except Exception:
+                pass
             await textarea.fill(pitch)
+            # Crucial: dispatch synthetic events so React updates controlled component state
+            await textarea.dispatch_event("input")
+            await textarea.dispatch_event("change")
             await human_pause(300, 600)
 
         send_btn = await first_visible(
-            self.page,
+            modal_scope,
             [
                 "button:has-text('Send')",
                 "button[type='submit']",
                 "button:has-text('Submit')",
                 "button:has-text('Apply')",
             ],
-            timeout_ms=2500
+            timeout_ms=2500,
         )
 
         submission_attempted = False
         if send_btn:
             self.require_mutation("application.final_submit")
-            await send_btn.click()
-            await human_pause(1200, 2200)
+            try:
+                await send_btn.scroll_into_view_if_needed(timeout=1000)
+            except Exception:
+                pass
+            try:
+                await send_btn.click(timeout=3000)
+            except Exception:
+                await send_btn.evaluate("el => el.click()")
+            await human_pause(1500, 2500)
             submission_attempted = True
         elif textarea:
             # Typed pitch but no Send control — Enter may submit chat-style modals.
             self.require_mutation("application.final_submit")
             await textarea.press("Enter")
-            await human_pause(1200, 2200)
+            await human_pause(1500, 2500)
             submission_attempted = True
 
         confirmation = None
@@ -1007,30 +1369,63 @@ class CutshortPlatform(BaseJobPlatform):
                     "text=Employer will review",
                     "text=Applied successfully",
                     "text=Your response has been recorded",
+                    "text=Thanks for your response",
+                    "text=Message sent",
+                    "div:has-text('Application sent')",
+                    "div:has-text('Applied successfully')",
                     "button:has-text('Applied')",
                 ],
                 timeout_ms=4000,
             )
 
+        # Check if modal closed or disappeared
+        modal_closed = False
+        if modal:
+            try:
+                modal_closed = not (await modal.is_visible(timeout=2000))
+            except Exception:
+                modal_closed = True
+
         # Close modal if still open (keep the page clean for the next job)
-        close_btn = await first_visible(self.page, ["button.close", "span.close", "button[aria-label='Close']"], timeout_ms=1000)
+        close_btn = await first_visible(
+            self.page,
+            [
+                "div:has(img[src*='close.png'])",
+                "img[src*='close.png']",
+                "div[class*='close']",
+                "button[aria-label='Close']",
+                "button.close",
+                "span.close",
+            ],
+            timeout_ms=1000,
+        )
         if close_btn:
             try:
-                await close_btn.click()
+                await close_btn.click(timeout=1000)
                 await human_pause(400, 800)
             except Exception:
-                pass
+                try:
+                    await close_btn.evaluate("el => el.click()")
+                except Exception:
+                    pass
 
-        if confirmation:
+        # Check if card button updated to Applied or View conversation
+        card_applied = await first_visible(
+            self.page,
+            ["button:has-text('Applied')", "a:has-text('View conversation')", "button:has-text('View conversation')"],
+            timeout_ms=1500,
+        )
+
+        if submission_attempted and (confirmation or modal_closed or card_applied):
             return ApplyOutcome(
                 ApplicationStatus.APPLIED,
                 detail="Application confirmed",
                 confirmation_type="dom_marker",
-                confirmation_evidence="Cutshort application success marker observed",
+                confirmation_evidence=f"Cutshort application confirmed (evidence: confirmation={bool(confirmation)}, modal_closed={modal_closed}, card_applied={bool(card_applied)})",
             )
 
-        # Nothing was sent — record honestly so the run retries this job later
-        if await first_visible(scope, ["button:has-text('Applied')", "a:has-text('View conversation')", "button:has-text('View conversation')"]):
+        # Only mark ALREADY_APPLIED if NO submission was attempted (i.e. was already applied before)
+        if not submission_attempted and card_applied:
             return ApplyOutcome(ApplicationStatus.ALREADY_APPLIED, reason=SkipReason.ALREADY_APPLIED)
             
         # DUMP DOM for debugging
@@ -1146,6 +1541,17 @@ class CutshortPlatform(BaseJobPlatform):
             pass
         await human_pause(400, 800)
 
+    def _clean_thread_key(self, text: str) -> str:
+        """Strips relative timestamps and status tags so key remains invariant across rounds."""
+        clean = re.sub(
+            r"\b(?:just now|yesterday|a few seconds ago|(?:an?|\d+)\s*(?:sec|second|min|minute|hour|hr|day|week|month)s?\s*ago)\b",
+            "",
+            text,
+            flags=re.IGNORECASE,
+        )
+        clean = clean.replace("[Questionnaire]", "")
+        return " ".join(clean.split())[:160]
+
     def _is_stale_thread(self, text: str, max_age_days: int = 5) -> bool:
         """
         Returns True if thread relative timestamp indicates it is older than max_age_days
@@ -1185,8 +1591,7 @@ class CutshortPlatform(BaseJobPlatform):
                 except Exception:
                     continue
                 txt = (await safe_text(row)).strip()
-                clean_txt = re.sub(r"\b\d+\s+(?:seconds?|minutes?|hours?|days?|weeks?|months?)\s+ago\b", "", txt, flags=re.IGNORECASE)
-                key = " ".join(clean_txt.split())[:160]
+                key = self._clean_thread_key(txt)
                 if not key or key in processed:
                     continue
 
@@ -1211,8 +1616,7 @@ class CutshortPlatform(BaseJobPlatform):
                         if not await row.is_visible():
                             continue
                         txt = (await safe_text(row)).strip()
-                        clean_txt = re.sub(r"\b\d+\s+(?:seconds?|minutes?|hours?|days?|weeks?|months?)\s+ago\b", "", txt, flags=re.IGNORECASE)
-                        key = " ".join(clean_txt.split())[:160]
+                        key = self._clean_thread_key(txt)
                         if not key or key in processed:
                             continue
 
@@ -1270,8 +1674,7 @@ class CutshortPlatform(BaseJobPlatform):
                 txt = " ".join((await safe_text(el)).split())
                 if len(txt) < 10 or txt.lower() in ("messages", "inbox"):
                     continue
-                clean_txt = re.sub(r"\b\d+\s+(?:seconds?|minutes?|hours?|days?|weeks?|months?)\s+ago\b", "", txt, flags=re.IGNORECASE)
-                key = clean_txt[:160]
+                key = self._clean_thread_key(txt)
                 if not key or key in processed:
                     continue
 

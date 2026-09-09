@@ -203,6 +203,7 @@ class BrowserManager:
         )
         self._context.set_default_timeout(self.config.default_timeout_ms)
         self._context.set_default_navigation_timeout(self.config.navigation_timeout_ms)
+        setattr(self._context, "_headed", not self.config.headless)
         await self._context.add_init_script(STEALTH_SCRIPT)
 
         if self.config.block_resources:

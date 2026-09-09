@@ -89,6 +89,7 @@ class Orchestrator:
         *,
         mode: str = "manual",
         only_profiles: list[str] | None = None,
+        only_platform: str | None = None,
         dry_run: bool = False,
         account: str | None = None,
     ) -> None:
@@ -96,6 +97,7 @@ class Orchestrator:
         self.settings = settings
         self.mode = mode
         self.only_profiles = only_profiles
+        self.only_platform = only_platform.lower().strip() if only_platform else None
         self.policy = RunPolicy(
             dry_run=dry_run or settings.dry_run,
             side_effects_enabled=settings.side_effects_enabled,
@@ -225,18 +227,21 @@ class Orchestrator:
                 self.metrics.browser_startup_s = time.perf_counter() - t_b_0
                 # 1. Determine which platforms run in this session
                 platform_specs: list[str] = []
-                if self.config.platforms.naukri:
-                    platform_specs.append("naukri")
+                if self.only_platform:
+                    platform_specs.append(self.only_platform)
+                else:
+                    if self.config.platforms.naukri:
+                        platform_specs.append("naukri")
 
-                if self.account_key == "primary":
-                    if self.config.platforms.instahyre:
-                        platform_specs.append("instahyre")
-                    if self.config.platforms.cutshort:
-                        platform_specs.append("cutshort")
-                    if self.config.platforms.wellfound:
-                        platform_specs.append("wellfound")
-                    if self.config.platforms.linkedin:
-                        platform_specs.append("linkedin")
+                    if self.account_key == "primary":
+                        if self.config.platforms.instahyre:
+                            platform_specs.append("instahyre")
+                        if self.config.platforms.cutshort:
+                            platform_specs.append("cutshort")
+                        if self.config.platforms.wellfound:
+                            platform_specs.append("wellfound")
+                        if self.config.platforms.linkedin:
+                            platform_specs.append("linkedin")
 
                 answers: AnswerEngine | None = None
                 total_timeout_s = self.config.run.run_timeout_minutes * 60
@@ -315,7 +320,9 @@ class Orchestrator:
                         elif p_name == "linkedin":
                             if answers is None:
                                 answers = await self._build_answer_engine(profiles[0])
-                            platform = LinkedInPlatform(page, self.account, artifacts, answers, self.policy)
+                            platform = LinkedInPlatform(
+                                page, self.account, artifacts, answers, self.policy, config=self.config
+                            )
                         else:
                             continue
 
@@ -344,7 +351,8 @@ class Orchestrator:
                             )
                             continue
 
-                        # If previously paused, unpause upon confirmed authentication
+                        # Persist session cookies and unpause platform upon confirmed authentication
+                        await browser.persist_session()
                         if pause_reason:
                             await self.repo.resume_platform(self.account_key, platform.platform_name)
                             log.info("platform.resumed_successfully", platform=platform.platform_name)
@@ -377,9 +385,11 @@ class Orchestrator:
                             try:
                                 await self._run_profile(platform, profile, page, artifacts)
                             except StopRun as stop:
-                                log.warning("platform.stopped_early", platform=platform.platform_name, reason=str(stop))
-                                self.stats.errors.append(f"{platform.platform_name}: {stop}")
-                                break
+                                log.warning("platform.stopped_early", platform=platform.platform_name, profile=profile.name, reason=str(stop))
+                                self.stats.errors.append(f"{platform.platform_name} ({profile.name}): {stop}")
+                                if "timeout" in str(stop).lower() or "budget" in str(stop).lower():
+                                    break
+                                continue
                             except Exception as exc:
                                 log.exception("platform.profile_failed", platform=platform.platform_name, profile=profile.name)
                                 self.stats.errors.append(f"{platform.platform_name} failed for {profile.name}: {exc}")
@@ -432,7 +442,7 @@ class Orchestrator:
             # email cap, so calling it from any account's run is safe:
             # later runs the same day exit before launching a browser.
             # =========================================================
-            if self.config.platforms.linkedin and self.settings.matched_outreach_enabled:
+            if not self.only_platform and self.config.platforms.linkedin and self.settings.matched_outreach_enabled:
                 try:
                     from ..linkedin.campaign import run_campaign
 
@@ -584,6 +594,7 @@ class Orchestrator:
         artifacts: ArtifactStore,
     ) -> None:
         assert self.repo is not None
+        self.platform_consecutive_failures = 0
         bind_context(profile=profile.name)
         log.info(
             "profile.start",
@@ -957,11 +968,20 @@ class Orchestrator:
             self.consecutive_failures = 0
             self.platform_consecutive_failures = 0
             for question in outcome.unanswered_questions:
+                if isinstance(question, dict):
+                    q_text = question.get("text", "")
+                    q_kind = question.get("kind", "unknown")
+                    q_opts = question.get("options", [])
+                else:
+                    q_text = getattr(question, "text", str(question))
+                    raw_kind = getattr(question, "kind", "unknown")
+                    q_kind = raw_kind.value if hasattr(raw_kind, "value") else str(raw_kind)
+                    q_opts = getattr(question, "options", [])
                 await self.repo.queue_question_for_review(
                     profile=profile.name,
-                    question=question["text"],
-                    kind=question.get("kind", "unknown"),
-                    options=question.get("options", []),
+                    question=q_text,
+                    kind=str(q_kind),
+                    options=q_opts,
                     job_id=job.job_id,
                     screenshot_path=outcome.screenshot_path,
                 )
@@ -996,7 +1016,7 @@ class Orchestrator:
                     "title": job.title,
                     "company": job.company,
                     "reason": outcome.reason.value if outcome.reason else None,
-                    "detail": outcome.detail[:500],
+                    "detail": (outcome.detail or "")[:500],
                     "questions_answered": outcome.questions_answered,
                 },
             )

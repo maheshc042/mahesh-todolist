@@ -1,25 +1,14 @@
 job_id,reason,detail,company,title,url
-instahyre-h-97df7fc4658a59332108,filter_title,title indicates lead/architect/management role,InMobi,Staff Product Software Engineer,https://www.instahyre.com/candidate/opportunities/
-instahyre-h-866b603e287c889d3075,filter_title,title contains blocked term 'java',NTT Data,Backend Developer (Java),https://www.instahyre.com/candidate/opportunities/
-instahyre-h-d67b6b1b78cb9a173098,filter_title,title indicates lead/architect/management role,Anuvaya Labs,Member of Technical Staff,https://www.instahyre.com/candidate/opportunities/
-instahyre-h-eedaf2aa0906859fe529,filter_title,title contains blocked term 'java',Pratham Software (PSI),Sr. Full - Stack Developer (Java),https://www.instahyre.com/candidate/opportunities/
-instahyre-h-08859765773a9d40d36c,filter_title,title indicates lead/architect/management role,Aye Aye Vacations,Lead Systems Engineer - AI,https://www.instahyre.com/candidate/opportunities/
-instahyre-h-ec9b4d6e7a885a997280,filter_title,title indicates lead/architect/management role,Vishvin Technologies,Solution Architect,https://www.instahyre.com/candidate/opportunities/
-instahyre-h-bd1be745f5170abecf6a,filter_title,title indicates non-developer/unaligned track,Shuru Technologies,Data Engineer,https://www.instahyre.com/candidate/opportunities/
-instahyre-h-e26134907fa666751eb8,filter_title,title indicates non-developer/unaligned track,Forbes Advisor,Data Engineer,https://www.instahyre.com/candidate/opportunities/
-instahyre-h-b39ad4dad44cb602a61f,filter_title,title contains blocked term '.net',Accenture,Fullstack Developer - .NET,https://www.instahyre.com/candidate/opportunities/
-instahyre-h-30f2f838c9c959fb1ef7,filter_title,title indicates non-developer/unaligned track,Meraki Labs,AI Data Engineer,https://www.instahyre.com/candidate/opportunities/
-instahyre-h-a7317d276034b3537491,filter_title,title contains blocked term 'golang developer',StockGro,Golang Developer,https://www.instahyre.com/candidate/opportunities/
-instahyre-h-cef66b9865debcb53873,filter_title,title indicates non-developer/unaligned track,Quince,SDET II (ETL Testing),https://www.instahyre.com/candidate/opportunities/
-instahyre-h-15fc48842c06cc52fbd5,filter_title,title indicates non-developer/unaligned track,ZAGENO,Data Engineer,https://www.instahyre.com/candidate/opportunities/
-instahyre-h-d1381df24b3aaa0b812c,filter_title,title contains blocked term 'java',Mojro,Backend Engineer - Java,https://www.instahyre.com/candidate/opportunities/
-instahyre-h-33ce22adc30b6e108694,filter_title,title indicates non-developer/unaligned track,Dream Cricket,Data Analyst,https://www.instahyre.com/candidate/opportunities/
-instahyre-h-aace7986088bbf0ff735,filter_title,title indicates non-developer/unaligned track,DataNimbus,Senior Data Engineer - Databricks,https://www.instahyre.com/candidate/opportunities/
-instahyre-h-c1b9822167ad750f37b1,filter_title,title indicates non-developer/unaligned track,Thomson Reuters,Data Engineer,https://www.instahyre.com/candidate/opportunities/
-instahyre-h-63f60232bcf353a0f2cc,filter_title,title indicates non-developer/unaligned track,Nineleaps,Data Analyst,https://www.instahyre.com/candidate/opportunities/
-instahyre-h-0f1e88210dbfd0ff3357,filter_title,title indicates lead/architect/management role,Arrowhead,Product Manager,https://www.instahyre.com/candidate/opportunities/
-instahyre-h-c80950ec2d01ab7c14b7,filter_title,title indicates non-developer/unaligned track,Yugabyte,Technical Support Executive,https://www.instahyre.com/candidate/opportunities/
-instahyre-h-022661200196826165e0,filter_title,title indicates non-developer/unaligned track,Yugabyte,Technical Support Engineer,https://www.instahyre.com/candidate/opportunities/
-instahyre-h-4ddac45d864e37a126d0,filter_title,title indicates non-developer/unaligned track,Target in India,Data Engineer,https://www.instahyre.com/candidate/opportunities/
-instahyre-h-94bf8c8ca36a9e2df6a7,filter_title,title indicates non-developer/unaligned track,Arista Networks,Senior Data Engineer,https://www.instahyre.com/candidate/opportunities/
-instahyre-h-387b36f981e44f145f0a,filter_title,title indicates non-developer/unaligned track,Wissen Technology,Data Engineer - Snowflake dbt,https://www.instahyre.com/candidate/opportunities/
+cutshort-1F9qtGjY,filter_title,title 'Founding Engineer' lacks required role keywords from title_must_include_any,RedString,Founding Engineer,https://cutshort.io/job/Founding-Engineer-Delhi-Noida-RedString-1F9qtGjY
+cutshort-iS2pquRS,filter_title,title 'Product Engineer II' lacks required role keywords from title_must_include_any,Cutshort Lightning,Product Engineer II,https://cutshort.io/job/Product-Engineer-II-Bengaluru-Bangalore-Cutshort-Lightning-iS2pquRS
+cutshort-28uXEWNi,filter_title,title contains blocked term 'intern',Alpha,Software Development Engineer (Associate/Intern),https://cutshort.io/job/Software-Development-Engineer-Associate-Intern-Alpha-28uXEWNi
+cutshort-J6lhZGAi,filter_title,title 'UI/UX Designers & Developers' lacks required role keywords from title_must_include_any,sisuni technology pvt Ltd.,UI/UX Designers & Developers,https://cutshort.io/job/UI-UX-Designers-Developers-sisuni-technology-pvt-Ltd--J6lhZGAi
+cutshort-i5ZRc5t6,filter_title,title contains blocked term 'java',Uplers,Java Developer,https://cutshort.io/job/Java-Developer-andheri-east-Mumbai-Uplers-i5ZRc5t6
+cutshort-0McaKidD,filter_title,title 'Data Craftsperson' lacks required role keywords from title_must_include_any,Incubyte,Data Craftsperson,https://cutshort.io/job/Data-Craftsperson-Incubyte-0McaKidD
+cutshort-mMe5qUUF,filter_title,title 'Golang System Developer' lacks required role keywords from title_must_include_any,AmpereHour energy,Golang System Developer,https://cutshort.io/job/Golang-System-Developer-Pune-Mumbai-AmpereHour-energy-mMe5qUUF
+cutshort-COCJ6kwz,filter_title,title contains blocked term 'java',Uniprep,Java developer,https://cutshort.io/job/Java-developer-Uniprep-COCJ6kwz
+cutshort-x0LLrisH,filter_title,title 'Reasearch Analyst' lacks required role keywords from title_must_include_any,iDreamCareercom,Reasearch Analyst,https://cutshort.io/job/Reasearch-Analyst-Delhi-iDreamCareercom-x0LLrisH
+cutshort-Z2xcNOpf,filter_title,title 'WPF Developer' lacks required role keywords from title_must_include_any,ONEPOS RETAIL SOLUTIONS PVT LTD,WPF Developer,https://cutshort.io/job/WPF-Developer-Bengaluru-Bangalore-Tirupati-ONEPOS-RETAIL-SOLUTIONS-PVT-LTD-Z2xcNOpf
+cutshort-FkMU5nnF,filter_title,title contains blocked term 'c++',Cutshort Lightning,Quantitative Developer- C++,https://cutshort.io/job/Quantitative-Developer-C-Mumbai-Worli-Cutshort-Lightning-FkMU5nnF
+cutshort-FNOGeaar,filter_title,title contains blocked term 'architect',Quantiphi,Associate/Architect ML Engineer (AWS),https://cutshort.io/job/Associate-Architect-ML-Engineer-AWS-Mumbai-Bengaluru-Bangalore-Trivandrum-Quantiphi-FNOGeaar
+cutshort-0oWmb9Xx,filter_title,title contains blocked term 'architect',Cutshort Lightning,AI Architect,https://cutshort.io/job/AI-Architect-Hyderabad-Cutshort-Lightning-0oWmb9Xx

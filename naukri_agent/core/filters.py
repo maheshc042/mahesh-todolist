@@ -182,18 +182,30 @@ class FilterEngine:
                 )
             )
             if is_broad_title and not specialized_tech_in_title:
-                haystack = _build_searchable_haystack(job)
-                core_skills = getattr(self.candidate, "core_skills", [])
-                has_core_match = any(
-                    _exact_word_match(s, haystack) or _normalize_tech_text(s) in haystack
-                    for s in core_skills
-                )
-                if not has_core_match:
-                    return FilterDecision(
-                        False,
-                        SkipReason.FILTER_TITLE,
-                        f"generic title '{job.title}' lacks matching candidate core skills in listing tags",
+                # Do NOT reject if description/tags are not loaded (e.g. search cards)
+                # or if the title is explicitly a target software role requested in title_must_include_any
+                has_card_content = bool(job.tags or job.description)
+                is_target_role = any(
+                    _contains_any(title, [tr])
+                    for tr in (
+                        "software engineer", "software developer", "sde", "associate software engineer",
+                        "junior software engineer", "full stack", "backend developer", "frontend developer"
                     )
+                )
+                if has_card_content and not is_target_role:
+                    haystack = _build_searchable_haystack(job)
+                    core_skills = getattr(self.candidate, "core_skills", [])
+                    sec_skills = getattr(self.candidate, "secondary_skills", [])
+                    has_core_match = any(
+                        _exact_word_match(s, haystack) or _normalize_tech_text(s) in haystack
+                        for s in list(core_skills) + list(sec_skills)
+                    )
+                    if not has_core_match:
+                        return FilterDecision(
+                            False,
+                            SkipReason.FILTER_TITLE,
+                            f"generic title '{job.title}' lacks matching candidate core skills in listing tags",
+                        )
 
         # 3. Blocked companies
         if self._norm_blocked_companies:
@@ -272,12 +284,14 @@ class FilterEngine:
                 )
 
         # 9. Salary, freshness, rating
-        if rules.min_salary_lpa is not None and job.min_salary_lpa is not None and job.min_salary_lpa < rules.min_salary_lpa:
-            return FilterDecision(
-                False,
-                SkipReason.FILTER_SALARY,
-                f"{job.min_salary_lpa} LPA < min {rules.min_salary_lpa} LPA",
-            )
+        if rules.min_salary_lpa is not None:
+            effective_salary = job.max_salary_lpa if job.max_salary_lpa is not None else job.min_salary_lpa
+            if effective_salary is not None and effective_salary < rules.min_salary_lpa:
+                return FilterDecision(
+                    False,
+                    SkipReason.FILTER_SALARY,
+                    f"max offer {effective_salary} LPA < min {rules.min_salary_lpa} LPA",
+                )
 
         if rules.max_posted_days is not None and job.posted_days_ago is not None and job.posted_days_ago > rules.max_posted_days:
             return FilterDecision(
