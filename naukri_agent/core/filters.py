@@ -58,7 +58,14 @@ def _contains_any(haystack: str, needles: list[str]) -> str | None:
 DEDICATED_AI_KEYWORDS = (
     "machine learning", "ml engineer", "ml developer", "data scientist",
     "deep learning", "nlp engineer", "computer vision", "ai engineer",
-    "ai developer", "ai/ml", "ai ml", "artificial intelligence engineer" ,"chatbot engineer"
+    "ai developer", "ai/ml", "ai ml", "artificial intelligence engineer",
+    "chatbot engineer", "llm engineer", "genai engineer", "prompt engineer",
+    "ai specialist", "ai lead", "ai researcher",
+)
+
+DATA_ROLES_KEYWORDS = (
+    "data engineer", "data engineering", "big data", "etl developer", "etl engineer",
+    "data warehouse", "snowflake developer", "databricks developer",
 )
 
 DISJOINT_SPECIALIZATIONS = (
@@ -75,9 +82,11 @@ def experience_matches(
     job_min: float | None,
     job_max: float | None,
     is_dedicated_ai: bool = False,
+    is_data_role: bool = False,
 ) -> bool:
     """Centralized experience window evaluation (P1-1)."""
-    if is_dedicated_ai and job_min is not None and job_min > 2.0:
+    # Candidate has 6 months AI / limited data engineering experience: cap min_experience at 2.0y
+    if (is_dedicated_ai or is_data_role) and job_min is not None and job_min > 2.0:
         return False
     if job_min is not None:
         if job_min > 3.5:
@@ -275,24 +284,18 @@ class FilterEngine:
             else:
                 return FilterDecision(False, SkipReason.WALKIN, f"walk-in drive outside Bangalore ({job.location})")
 
-        # 7. Dedicated AI / ML Recruiter Reality Gate
-        is_dedicated_ai = any(term in title for term in DEDICATED_AI_KEYWORDS)
-        is_hybrid_dev = any(dev_term in title for dev_term in ("full stack", "fullstack", "software", "backend", "web", "developer", "engineer", "sde"))
-        is_pure_research = any(res_term in title for res_term in ("research", "scientist", "phd"))
-        if is_dedicated_ai and not (is_hybrid_dev and not is_pure_research):
-            if job.min_experience is not None and job.min_experience > 2.0:
-                return FilterDecision(
-                    False,
-                    SkipReason.FILTER_EXPERIENCE,
-                    f"dedicated AI/ML role requires {job.min_experience}y > candidate's 6m AI experience (recruiter will reject)",
-                )
-
-        # 7.1 Data Engineering Reality Gate: Allow junior/entry (<= 2.0y), reject senior (> 2.5y)
-        if _contains_any(title, ["data engineer", "data engineering"]) and job.min_experience is not None and job.min_experience > 2.5:
+        # 7. AI / ML & Data Engineering Recruiter Reality Gate
+        # Candidate has 2.5y total software experience, but specifically 6 months of commercial AI
+        # and limited domain experience in pure Data Engineering. Recruiters for dedicated AI or
+        # Data Engineering roles requiring > 2.0 years will immediately reject candidate for lack of tenure.
+        is_ai_role = any(term in title for term in DEDICATED_AI_KEYWORDS)
+        is_data_role = any(term in title for term in DATA_ROLES_KEYWORDS)
+        if (is_ai_role or is_data_role) and job.min_experience is not None and job.min_experience > 2.0:
+            role_type = "AI/ML" if is_ai_role else "Data Engineering"
             return FilterDecision(
                 False,
                 SkipReason.FILTER_EXPERIENCE,
-                f"data engineering role requires {job.min_experience}y > candidate's experience (senior ETL/pipeline role)",
+                f"{role_type} role requires {job.min_experience}y > candidate's 6m AI / domain experience (recruiter will reject)",
             )
 
         # 8. Numeric experience bounds
