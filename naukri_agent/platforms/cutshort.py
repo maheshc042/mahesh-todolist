@@ -580,11 +580,12 @@ def _parse_cutshort_experience(text: str) -> tuple[float | None, float | None]:
             return float(m.group(1)), float(m.group(2))
         except ValueError:
             pass
-    m_single = re.search(r"(\d+(?:\.\d+)?)\+?\s*yrs?", text, re.IGNORECASE)
+    m_single = re.search(r"(?:\+?\s*(\d+(?:\.\d+)?)\s*yrs?\+?|(\d+(?:\.\d+)?)\s*\+\s*yrs?)", text, re.IGNORECASE)
     if m_single:
         try:
-            v = float(m_single.group(1))
-            return v, None
+            val_str = m_single.group(1) or m_single.group(2)
+            if val_str:
+                return float(val_str), None
         except ValueError:
             pass
     return None, None
@@ -870,9 +871,15 @@ class CutshortPlatform(BaseJobPlatform):
                     if await prose_el.count() > 0:
                         desc = (await safe_text(prose_el)).strip()
 
+                # Comprehensive outer card containing action buttons and metadata (location, exp, salary)
                 full_card = anchor.locator(
-                    "xpath=ancestor::div[contains(@class,'sc-61a153a7-3') or descendant::button[contains(.,'Apply') or contains(.,'View') or contains(.,'Applied')]][1]"
+                    "xpath=ancestor::div[(contains(.,'yrs') or contains(.,'yr') or contains(.,'Exp')) and (descendant::button[contains(.,'Apply') or contains(.,'View') or contains(.,'Applied')])][1]"
                 ).first
+                if await full_card.count() == 0:
+                    full_card = anchor.locator(
+                        "xpath=ancestor::div[descendant::button[contains(.,'Apply') or contains(.,'View') or contains(.,'Applied')]][last()]"
+                    ).first
+
                 if await full_card.count() > 0:
                     card_text = (await safe_text(full_card)).strip()
                 elif await card.count() > 0:
@@ -1005,8 +1012,13 @@ class CutshortPlatform(BaseJobPlatform):
 
                                 # Climb to outer card wrapper to capture salary and experience badges
                                 full_card = anchor.locator(
-                                    "xpath=ancestor::div[contains(@class,'sc-61a153a7-3') or descendant::button[contains(.,'Apply') or contains(.,'View') or contains(.,'Applied')]][1]"
+                                    "xpath=ancestor::div[(contains(.,'yrs') or contains(.,'yr') or contains(.,'Exp')) and (descendant::button[contains(.,'Apply') or contains(.,'View') or contains(.,'Applied')])][1]"
                                 ).first
+                                if await full_card.count() == 0:
+                                    full_card = anchor.locator(
+                                        "xpath=ancestor::div[descendant::button[contains(.,'Apply') or contains(.,'View') or contains(.,'Applied')]][last()]"
+                                    ).first
+
                                 if await full_card.count() > 0:
                                     card_text = (await safe_text(full_card)).strip()
                                 elif await card.count() > 0:

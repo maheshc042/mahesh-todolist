@@ -61,6 +61,15 @@ DEDICATED_AI_KEYWORDS = (
     "ai developer", "ai/ml", "ai ml", "artificial intelligence engineer" ,"chatbot engineer"
 )
 
+DISJOINT_SPECIALIZATIONS = (
+    "data engineer", "data engineering", "big data", "etl developer", "etl engineer",
+    "data warehouse", "data warehousing", "snowflake developer", "snowflake engineer",
+    "databricks developer", "databricks engineer", "bi developer", "business intelligence",
+    "technical support", "tech support", "product support", "it support", "desktop support",
+    "helpdesk", "service desk", "it engineer", "systems engineer", "security engineer",
+    "cyber security", "cybersecurity", "infosec", "soc analyst",
+)
+
 
 def experience_matches(
     candidate_years: float,
@@ -152,6 +161,21 @@ class FilterEngine:
             if hit:
                 return FilterDecision(
                     False, SkipReason.FILTER_TITLE, f"title contains blocked term '{hit}'"
+                )
+
+        # 1.1 Disjoint Specialization Reality Gate
+        # Candidate is a Full-Stack / Software / AI Engineer (FastAPI, Python, React, TypeScript).
+        # Candidate has 0 commercial experience in pure Data Engineering (ETL pipelines, Snowflake, Spark)
+        # or Technical Support / IT helpdesk. Recruiters for these specialized roles immediately reject
+        # candidates without prior domain experience, exhausting daily platform quotas.
+        hit_disjoint = _contains_any(title, DISJOINT_SPECIALIZATIONS)
+        if hit_disjoint:
+            candidate_skills = getattr(self.candidate, "core_skills", []) or []
+            if not any(hit_disjoint in s.lower() for s in candidate_skills):
+                return FilterDecision(
+                    False,
+                    SkipReason.FILTER_TITLE,
+                    f"title contains disjoint specialization '{hit_disjoint}' (candidate lacks requisite experience; recruiter will reject)",
                 )
 
         # 2. Mandatory Title Role Matching
