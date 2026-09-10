@@ -156,7 +156,19 @@ class FilterEngine:
 
         # 2. Mandatory Title Role Matching
         if rules.title_must_include_any:
-            matched_title_term = _contains_any(title, rules.title_must_include_any)
+            title_variants = [title]
+            if "/" in job.title:
+                parts = [p.strip().lower() for p in re.split(r"\s*/\s*", job.title) if p.strip()]
+                if len(parts) >= 2:
+                    suffix_match = re.search(r"\b(engineer|developer|specialist|architect|consultant|analyst|lead)\b", parts[-1])
+                    if suffix_match:
+                        suffix = suffix_match.group(0)
+                        for part in parts[:-1]:
+                            title_variants.append(f"{part} {suffix}")
+                    for part in parts:
+                        title_variants.append(part)
+
+            matched_title_term = any(_contains_any(v, rules.title_must_include_any) for v in title_variants)
             if not matched_title_term:
                 return FilterDecision(
                     False,
@@ -264,24 +276,27 @@ class FilterEngine:
                     f"requires {job.min_experience}y > max {exp.max_years}y",
                 )
         if job.max_experience is not None:
-            if job.max_experience < exp.min_years:
-                return FilterDecision(
-                    False,
-                    SkipReason.FILTER_EXPERIENCE,
-                    f"caps at {job.max_experience}y < min {exp.min_years}y",
-                )
-            if job.max_experience > 6.0:
-                return FilterDecision(
-                    False,
-                    SkipReason.FILTER_EXPERIENCE,
-                    f"caps at {job.max_experience}y > ceiling 6.0y (senior requisition)",
-                )
-            if job.min_experience is not None and (job.max_experience - job.min_experience) >= 5.0 and job.min_experience >= 2.0:
-                return FilterDecision(
-                    False,
-                    SkipReason.FILTER_EXPERIENCE,
-                    f"spread {job.min_experience}-{job.max_experience}y >= 5y (broad senior requisition)",
-                )
+            # Recruiter dummy values (e.g. >= 20 yrs on job boards indicate "no upper cap")
+            is_dummy_unbounded = job.max_experience >= 20.0
+            if not is_dummy_unbounded:
+                if job.max_experience < exp.min_years:
+                    return FilterDecision(
+                        False,
+                        SkipReason.FILTER_EXPERIENCE,
+                        f"caps at {job.max_experience}y < min {exp.min_years}y",
+                    )
+                if job.max_experience > 6.0:
+                    return FilterDecision(
+                        False,
+                        SkipReason.FILTER_EXPERIENCE,
+                        f"caps at {job.max_experience}y > ceiling 6.0y (senior requisition)",
+                    )
+                if job.min_experience is not None and (job.max_experience - job.min_experience) >= 5.0 and job.min_experience >= 2.0:
+                    return FilterDecision(
+                        False,
+                        SkipReason.FILTER_EXPERIENCE,
+                        f"spread {job.min_experience}-{job.max_experience}y >= 5y (broad senior requisition)",
+                    )
 
         # 9. Salary, freshness, rating
         if rules.min_salary_lpa is not None:

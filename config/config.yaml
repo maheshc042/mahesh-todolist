@@ -20,11 +20,11 @@
 
 applicant_name: "Mahesh Chitakoti"
 applicant_location: "Bengaluru, India"
-applicant_email: "maheshchitkoti@gmail.com"
+applicant_email: "[EMAIL_ADDRESS]"
 applicant_phone: "9481777227"
 applicant_linkedin: "https://www.linkedin.com/in/maheshchitakoti"
-applicant_github: "https://github.com/maheshchitakoti"
-applicant_portfolio: "https://github.com/maheshchitakoti"
+applicant_github: "https://github.com/maheshchichkoti"
+applicant_portfolio: "https://github.com/maheshchichkoti"
 
 platforms:
   instahyre: true
@@ -129,8 +129,8 @@ answers:
   mobile number: "9481777227"
   phone number: "9481777227"
   linkedin url: "https://www.linkedin.com/in/maheshchitakoti"
-  github url: "https://github.com/maheshchitakoti"
-  portfolio url: "https://github.com/maheshchitakoti"
+  github url: "https://github.com/maheshchichkoti"
+  portfolio url: "https://github.com/maheshchichkoti"
 
   # Salary & CTC
   current ctc: "4"
@@ -299,6 +299,7 @@ answers:
 # ---------------------------------------------------------------------------
 experience:
   total_years: 2.5
+
   default_years: 2.0
   multi_skill_strategy: max
   skills:
@@ -437,9 +438,9 @@ profiles:
     use_recommended: true
     platform_limits:
       naukri: 35
-      instahyre: 40
+      instahyre: 150
       linkedin: 50
-      cutshort: 150
+      cutshort: 40
       wellfound: 50
     resume_label: "Full Stack Engineer"
     resume_file: "resumes/CV_Mahesh_Chitakoti_2026_1_.pdf"
@@ -502,9 +503,9 @@ profiles:
     use_recommended: true
     platform_limits:
       naukri: 35
-      instahyre: 40
+      instahyre: 150
       linkedin: 50
-      cutshort: 150
+      cutshort: 40
       wellfound: 50
     resume_label: "AI / Python Engineer"
     resume_file: "resumes/CV_Mahesh_Chitakoti_2026.pdf"

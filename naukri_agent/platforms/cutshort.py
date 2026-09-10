@@ -805,10 +805,12 @@ class CutshortPlatform(BaseJobPlatform):
 
         # Infinite scroll to fetch available jobs in the feed
         last_link_count = 0
-        stagnant_scrolls = 0
+        target_pool = min(profile.platform_limits.get(self.platform_name, 40) * 2, 80)
         while True:
             anchors = await self.page.locator(job_link_sel).all()
             link_count = len(anchors)
+            if link_count >= target_pool:
+                break
             if link_count == last_link_count:
                 stagnant_scrolls += 1
                 if stagnant_scrolls >= 3:
@@ -943,15 +945,32 @@ class CutshortPlatform(BaseJobPlatform):
                         # Apply all native Cutshort UI filters on the toolbar!
                         await self._apply_ui_filters(profile)
 
-                        # Scroll to load expanded feed
-                        for _ in range(6):
+                        # Scroll to load expanded feed dynamically based on target limit
+                        stagnant_count = 0
+                        last_total = 0
+                        target_pool = min(target_applies * 2, 80)
+                        for _ in range(25):
                             anchors_now = await self.page.locator(job_link_sel).all()
+                            current_total = len(anchors_now)
+                            if current_total >= target_pool:
+                                log.info("cutshort.fetch.target_pool_reached", count=current_total, target=target_pool)
+                                break
+                            if current_total == last_total:
+                                stagnant_count += 1
+                                if stagnant_count >= 3:
+                                    log.info("cutshort.fetch.feed_end_reached", count=current_total)
+                                    break
+                            else:
+                                stagnant_count = 0
+                                last_total = current_total
+
                             if anchors_now:
                                 try:
                                     await anchors_now[-1].scroll_into_view_if_needed(timeout=1500)
+                                    await anchors_now[-1].hover(timeout=500)
                                 except Exception:
                                     pass
-                            await scroll_page(self.page, steps=3, delay_s=0.5)
+                            await scroll_page(self.page, steps=3, delay_s=0.4)
                             await human_pause(600, 1200)
 
                         # Collect jobs from expanded feed

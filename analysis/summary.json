@@ -1,21 +1,21 @@
 {
-  "profile": "Full Stack / Web Developer",
-  "run_id": 242,
+  "profile": "AI / Python Engineer",
+  "run_id": 246,
   "dry_run": false,
-  "duration_seconds": 198.91,
-  "generated_at": "2026-09-09T16:43:58.770206+00:00",
+  "duration_seconds": 0.01,
+  "generated_at": "2026-09-10T04:11:01.835468+00:00",
   "plan_stats": {
-    "collected": 22,
-    "rejected": 16,
-    "eligible": 6,
-    "selected": 6,
+    "collected": 18,
+    "rejected": 18,
+    "eligible": 0,
+    "selected": 0,
     "overflow": 0,
     "rejection_reasons": {
-      "filter_title": 16
+      "filter_title": 18
     },
-    "top_score": 39.36,
-    "cutoff_score": 37.82
+    "top_score": 0.0,
+    "cutoff_score": 0.0
   },
-  "applied_count": 1,
-  "failed_count": 5
+  "applied_count": 0,
+  "failed_count": 0
 }

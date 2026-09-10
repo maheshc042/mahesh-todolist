@@ -48,10 +48,12 @@ jobs:
       - name: Download Latest Resumes from Vercel
         run: |
           mkdir -p resumes
-          curl --fail --retry 3 --retry-all-errors --silent --show-error --location "https://mahesh-resume.vercel.app/Mahesh_Chitakoti_FullStack_Engineer.pdf" -o resumes/Mahesh_Chitakoti_FullStack_Engineer.pdf
-          curl --fail --retry 3 --retry-all-errors --silent --show-error --location "https://mahesh-resume.vercel.app/Mahesh_Chitakoti_AI_Engineer.pdf" -o resumes/Mahesh_Chitakoti_AI_Engineer.pdf
-          test -s resumes/Mahesh_Chitakoti_FullStack_Engineer.pdf
-          test -s resumes/Mahesh_Chitakoti_AI_Engineer.pdf
+          curl --fail --retry 3 --retry-all-errors --silent --show-error --location "https://mahesh-resume.vercel.app/Mahesh_Chitakoti_FullStack_Engineer.pdf" -o resumes/CV_Mahesh_Chitakoti_2026_1_.pdf
+          curl --fail --retry 3 --retry-all-errors --silent --show-error --location "https://mahesh-resume.vercel.app/Mahesh_Chitakoti_AI_Engineer.pdf" -o resumes/CV_Mahesh_Chitakoti_2026.pdf
+          cp resumes/CV_Mahesh_Chitakoti_2026_1_.pdf resumes/Mahesh_Chitakoti_FullStack_Engineer.pdf
+          cp resumes/CV_Mahesh_Chitakoti_2026.pdf resumes/Mahesh_Chitakoti_AI_Engineer.pdf
+          test -s resumes/CV_Mahesh_Chitakoti_2026_1_.pdf
+          test -s resumes/CV_Mahesh_Chitakoti_2026.pdf
 
       - name: Validate required configuration
         env:
