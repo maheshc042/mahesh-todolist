@@ -90,7 +90,7 @@ def experience_matches(
         max_ceiling = 8.5 if (job_min is not None and job_min <= 3.5) else 6.0
         if job_max > max_ceiling:
             return False
-    return not (job_min is not None and job_max is not None and (job_max - job_min) >= 5.0 and job_min > 3.0)
+    return True
 
 
 TECH_ALIASES = (
@@ -327,13 +327,6 @@ class FilterEngine:
                         False,
                         SkipReason.FILTER_EXPERIENCE,
                         f"caps at {job.max_experience}y > ceiling {max_ceiling}y (senior requisition)",
-                    )
-                # Only reject wide spread if min_experience is senior (> 3.0y)
-                if job.min_experience is not None and (job.max_experience - job.min_experience) >= 5.0 and job.min_experience > 3.0:
-                    return FilterDecision(
-                        False,
-                        SkipReason.FILTER_EXPERIENCE,
-                        f"spread {job.min_experience}-{job.max_experience}y >= 5y (broad senior requisition)",
                     )
 
         # 9. Salary, freshness, rating
