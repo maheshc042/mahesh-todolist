@@ -62,12 +62,11 @@ DEDICATED_AI_KEYWORDS = (
 )
 
 DISJOINT_SPECIALIZATIONS = (
-    "data engineer", "data engineering", "big data", "etl developer", "etl engineer",
+    "big data", "etl developer", "etl engineer",
     "data warehouse", "data warehousing", "snowflake developer", "snowflake engineer",
     "databricks developer", "databricks engineer", "bi developer", "business intelligence",
-    "technical support", "tech support", "product support", "it support", "desktop support",
-    "helpdesk", "service desk", "it engineer", "systems engineer", "security engineer",
-    "cyber security", "cybersecurity", "infosec", "soc analyst",
+    "desktop support", "it support", "helpdesk", "service desk", "it engineer", "systems engineer",
+    "security engineer", "cyber security", "cybersecurity", "infosec", "soc analyst",
 )
 
 
@@ -88,9 +87,10 @@ def experience_matches(
     if job_max is not None:
         if job_max < max(0.0, candidate_years - 1.5):
             return False
-        if job_max > 6.0:
+        max_ceiling = 8.5 if (job_min is not None and job_min <= 3.5) else 6.0
+        if job_max > max_ceiling:
             return False
-    return not (job_min is not None and job_max is not None and (job_max - job_min) >= 5.0 and job_min >= 2.0)
+    return not (job_min is not None and job_max is not None and (job_max - job_min) >= 5.0 and job_min > 3.0)
 
 
 TECH_ALIASES = (
@@ -277,11 +277,22 @@ class FilterEngine:
 
         # 7. Dedicated AI / ML Recruiter Reality Gate
         is_dedicated_ai = any(term in title for term in DEDICATED_AI_KEYWORDS)
-        if is_dedicated_ai and job.min_experience is not None and job.min_experience > 2.0:
+        is_hybrid_dev = any(dev_term in title for dev_term in ("full stack", "fullstack", "software", "backend", "web", "developer", "engineer", "sde"))
+        is_pure_research = any(res_term in title for res_term in ("research", "scientist", "phd"))
+        if is_dedicated_ai and not (is_hybrid_dev and not is_pure_research):
+            if job.min_experience is not None and job.min_experience > 2.0:
+                return FilterDecision(
+                    False,
+                    SkipReason.FILTER_EXPERIENCE,
+                    f"dedicated AI/ML role requires {job.min_experience}y > candidate's 6m AI experience (recruiter will reject)",
+                )
+
+        # 7.1 Data Engineering Reality Gate: Allow junior/entry (<= 2.0y), reject senior (> 2.5y)
+        if _contains_any(title, ["data engineer", "data engineering"]) and job.min_experience is not None and job.min_experience > 2.5:
             return FilterDecision(
                 False,
                 SkipReason.FILTER_EXPERIENCE,
-                f"dedicated AI/ML role requires {job.min_experience}y > candidate's 6m AI experience (recruiter will reject)",
+                f"data engineering role requires {job.min_experience}y > candidate's experience (senior ETL/pipeline role)",
             )
 
         # 8. Numeric experience bounds
@@ -309,13 +320,16 @@ class FilterEngine:
                         SkipReason.FILTER_EXPERIENCE,
                         f"caps at {job.max_experience}y < min {exp.min_years}y",
                     )
-                if job.max_experience > 6.0:
+                # Allow wide startup requisition bands up to 8.5y if min_experience <= 3.5y
+                max_ceiling = 8.5 if (job.min_experience is not None and job.min_experience <= 3.5) else 6.0
+                if job.max_experience > max_ceiling:
                     return FilterDecision(
                         False,
                         SkipReason.FILTER_EXPERIENCE,
-                        f"caps at {job.max_experience}y > ceiling 6.0y (senior requisition)",
+                        f"caps at {job.max_experience}y > ceiling {max_ceiling}y (senior requisition)",
                     )
-                if job.min_experience is not None and (job.max_experience - job.min_experience) >= 5.0 and job.min_experience >= 2.0:
+                # Only reject wide spread if min_experience is senior (> 3.0y)
+                if job.min_experience is not None and (job.max_experience - job.min_experience) >= 5.0 and job.min_experience > 3.0:
                     return FilterDecision(
                         False,
                         SkipReason.FILTER_EXPERIENCE,

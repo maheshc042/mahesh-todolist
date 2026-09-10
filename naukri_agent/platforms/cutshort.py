@@ -544,6 +544,8 @@ class CutshortChatbot:
             if not answered_successfully and not fieldsets:
                 return False, answered, f"Could not answer recruiter message: {recruiter_text[:80]}"
 
+        return True, answered, ""
+
 def _parse_cutshort_salary(text: str) -> tuple[float | None, float | None]:
     if not text:
         return None, None
@@ -717,10 +719,49 @@ class CutshortPlatform(BaseJobPlatform):
         except Exception as exc:
             log.debug("cutshort.filters.roletype_error", error=str(exc))
 
-        # Job Category and Location are intentionally left UNTOUCHED on the UI:
-        # This ensures Cutshort pulls all eligible tech roles (Software, AI/Data, DevOps,
-        # QA/Automation, Cloud, Systems, and Technical Support) across all locations/remote,
-        # allowing Python's comprehensive `title_must_include_any` engine to evaluate and decide.
+        # 3. Job category (tags-filter)
+        try:
+            btn = await first_visible(self.page, ["div[data-intercom-target='tags-filter']"], timeout_ms=2000)
+            if btn:
+                await btn.click(force=True)
+                await human_pause(500, 900)
+                # Categories & sub-tags specified:
+                # - software-development: frontend, backend, fullstack
+                # - testing-QA: manual-testing, automation-testing, others (all three)
+                # - devops-IT-infrastructure
+                target_tags = [
+                    "Software Development", "Software development", "Software", "Tech",
+                    "Frontend", "Backend", "Fullstack", "Full stack",
+                    "Devops", "DevOps", "Devops-IT-infrastructure", "Devops-lT-infrastructure", "Infrastructure",
+                    "Testing-QA", "Testing", "QA", "Manual Testing", "Automation Testing", "Others",
+                    "Data Science", "Data Analytics",
+                ]
+                for tag in target_tags:
+                    tag_el = await first_visible(
+                        self.page,
+                        [
+                            f"label:has-text('{tag}')",
+                            f"div[role='checkbox']:has-text('{tag}')",
+                            f"span:has-text('{tag}')",
+                            f"div:has-text('{tag}')",
+                        ],
+                        timeout_ms=250,
+                    )
+                    if tag_el:
+                        try:
+                            cb = tag_el.locator("input[type='checkbox']").first
+                            if await cb.count() > 0:
+                                if not await cb.is_checked():
+                                    await cb.click(force=True)
+                            else:
+                                await tag_el.click(force=True)
+                            await human_pause(100, 200)
+                        except Exception:
+                            pass
+                await self.page.keyboard.press("Escape")
+                await human_pause(300, 600)
+        except Exception as exc:
+            log.debug("cutshort.filters.category_error", error=str(exc))
 
         # 4. Minimum salary (>= 5 LPA)
         min_salary_lpa = profile.filters.min_salary_lpa if (profile.filters and profile.filters.min_salary_lpa) else 5.0
@@ -744,63 +785,60 @@ class CutshortPlatform(BaseJobPlatform):
             except Exception as exc:
                 log.debug("cutshort.filters.minsal_error", error=str(exc))
 
-        # 5. Experience range: Only cap Max Experience at 3.5y (Min exp left untouched at 0.0)
-        max_exp = profile.filters.experience.max_years if (profile.filters and profile.filters.experience) else 3.5
-        if max_exp:
-            try:
-                btn = await first_visible(self.page, ["div[data-intercom-target='expRange-filter']"], timeout_ms=2000)
-                if btn:
-                    await btn.click(force=True)
-                    await human_pause(400, 800)
-                    sliders = await self.page.locator("div[role='slider']").all()
-                    if len(sliders) >= 2:
-                        max_slider = sliders[1]
-                        await max_slider.focus()
-                        await self.page.keyboard.press("Home")
-                        await human_pause(100, 200)
-                        steps = int(round(max_exp / 0.5))
-                        for _ in range(steps):
-                            await self.page.keyboard.press("ArrowRight")
-                            await human_pause(80, 150)
-                    await self.page.keyboard.press("Escape")
-                    await human_pause(300, 600)
-            except Exception as exc:
-                log.debug("cutshort.filters.exp_range_error", error=str(exc))
+        # 5. Experience range: Allow up to 8.0 years on Cutshort UI slider so broad startup bands (2-8y) are loaded
+        try:
+            btn = await first_visible(self.page, ["div[data-intercom-target='expRange-filter']"], timeout_ms=2000)
+            if btn:
+                await btn.click(force=True)
+                await human_pause(400, 800)
+                sliders = await self.page.locator("div[role='slider']").all()
+                if len(sliders) >= 2:
+                    max_slider = sliders[1]
+                    await max_slider.focus()
+                    await self.page.keyboard.press("Home")
+                    await human_pause(100, 200)
+                    steps = int(round(8.0 / 0.5))
+                    for _ in range(steps):
+                        await self.page.keyboard.press("ArrowRight")
+                        await human_pause(50, 100)
+                await self.page.keyboard.press("Escape")
+                await human_pause(300, 600)
+        except Exception as exc:
+            log.debug("cutshort.filters.exp_range_error", error=str(exc))
 
         log.info("cutshort.filters.applied_ui_successfully")
         await human_pause(1500, 2500)
 
     async def fetch_jobs(self, profile: JobProfile, exclude_job_ids: set[str]) -> list[Job]:
         log.info("cutshort.fetch.start", profile=profile.name)
-        target_url = "https://cutshort.io/profile/all-jobs" if not profile.use_recommended else "https://cutshort.io/profile/recommended-jobs"
-        await self.page.goto(target_url, wait_until="domcontentloaded")
+        await self.page.goto("https://cutshort.io/profile/all-jobs", wait_until="domcontentloaded")
         await human_pause(2000, 3000)
 
-        # If not using recommended feed, immediately ensure recommendation switch is OFF and apply filters
-        if not profile.use_recommended:
-            switch_el = await first_visible(
-                self.page,
-                [
-                    "input[role='switch']",
-                    "label:has(input[role='switch'])",
-                    "div:has-text('Turn it OFF to view all jobs') input[role='switch']",
-                ],
-                timeout_ms=3000,
-            )
-            if switch_el:
+        # Ensure recommendation switch is OFF so all filtered jobs are loaded
+        switch_el = await first_visible(
+            self.page,
+            [
+                "input[role='switch']",
+                "label:has(input[role='switch'])",
+                "div:has-text('Turn it OFF to view all jobs') input[role='switch']",
+            ],
+            timeout_ms=3000,
+        )
+        if switch_el:
+            try:
+                is_checked = await switch_el.is_checked()
+            except Exception:
+                is_checked = True
+            if is_checked:
+                await switch_el.scroll_into_view_if_needed()
+                await human_pause(300, 600)
                 try:
-                    is_checked = await switch_el.is_checked()
+                    await switch_el.click(force=True)
                 except Exception:
-                    is_checked = True
-                if is_checked:
-                    await switch_el.scroll_into_view_if_needed()
-                    await human_pause(300, 600)
-                    try:
-                        await switch_el.click(force=True)
-                    except Exception:
-                        await switch_el.evaluate("el => el.click()")
-                    await human_pause(2000, 3000)
-            await self._apply_ui_filters(profile)
+                    await switch_el.evaluate("el => el.click()")
+                await human_pause(2000, 3000)
+
+        await self._apply_ui_filters(profile)
 
         job_link_sel = "a[href*='/job/']"
 
