@@ -71,7 +71,19 @@ TARGET_ROLES = [
     "Software Test Engineer",
 ]
 
-# High-Precision Boolean Query
+# High-Precision Boolean Queries per Track
+AI_TARGET_QUERY = (
+    '("AI Engineer" OR "Generative AI Engineer" OR "GenAI Engineer" OR "AI Developer" OR '
+    '"ML Engineer" OR "Machine Learning Engineer" OR "LLM Engineer" OR "Python Developer" OR '
+    '"Python AI Developer" OR "AI Software Engineer" OR "MLOps Engineer")'
+)
+
+FULLSTACK_TARGET_QUERY = (
+    '("Full Stack Developer" OR "Full Stack Engineer" OR "Software Engineer" OR "Software Developer" OR '
+    '"Frontend Developer" OR "React Developer" OR "Node.js Developer" OR "Backend Developer" OR '
+    '"SDET" OR "QA Automation Engineer" OR "DevOps Engineer" OR "Web Developer")'
+)
+
 FULL_TARGET_QUERY = (
     '("AI Engineer" OR "Generative AI Engineer" OR "GenAI Engineer" OR "AI Developer" OR "ML Engineer" OR '
     '"Python Developer" OR "Backend Developer" OR "Software Engineer" OR "Software Developer" OR '
@@ -173,9 +185,17 @@ class LinkedInPlatform(BaseJobPlatform):
             return False
 
     def _get_search_url(self, profile: JobProfile) -> str:
-        """Constructs target Easy Apply search URL with 24h freshness, Entry & Associate levels."""
+        """Constructs target Easy Apply search URL tailored to candidate profile with 24h freshness."""
         tpr_seconds = self.days * 86400
-        encoded_keywords = urllib.parse.quote(FULL_TARGET_QUERY)
+        prof_name = (profile.name or "").lower()
+        if any(k in prof_name for k in ["ai", "python", "machine learning", "ml"]):
+            query = AI_TARGET_QUERY
+        elif any(k in prof_name for k in ["full stack", "web", "frontend", "react"]):
+            query = FULLSTACK_TARGET_QUERY
+        else:
+            query = FULL_TARGET_QUERY
+
+        encoded_keywords = urllib.parse.quote(query)
         encoded_loc = urllib.parse.quote(self.location)
 
         # f_E=2,3 filters for Entry level (2) and Associate (3)
