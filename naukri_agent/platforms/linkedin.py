@@ -537,7 +537,10 @@ class LinkedInPlatform(BaseJobPlatform):
             try:
                 await apply_btn.click(force=True)
             except Exception:
-                pass
+                try:
+                    await apply_btn.evaluate("node => node.click()")
+                except Exception:
+                    pass
         await human_pause(1800, 2800)
 
         # Handle any immediate Safety Reminder or intermediate screen
@@ -886,12 +889,42 @@ class LinkedInPlatform(BaseJobPlatform):
                             if "bachelor" in o.lower() or "graduate" in o.lower():
                                 target_val = o.strip()
                                 break
+                    elif any(k in label_low for k in ["disability", "handicap"]):
+                        for o in options:
+                            if any(w in o.lower() for w in ["no", "not have", "decline", "prefer not"]):
+                                target_val = o.strip()
+                                break
+                    elif any(k in label_low for k in ["gender", "sex"]):
+                        for o in options:
+                            if "male" in o.lower() and "female" not in o.lower():
+                                target_val = o.strip()
+                                break
+                    elif any(k in label_low for k in ["veteran", "military"]):
+                        for o in options:
+                            if any(w in o.lower() for w in ["not", "no", "decline", "prefer not"]):
+                                target_val = o.strip()
+                                break
 
                 if not target_val and len(options) > 1:
                     target_val = options[1].strip() if "select" not in options[1].lower() else (options[2].strip() if len(options) > 2 else "")
 
                 if target_val:
-                    await sel.select_option(label=target_val)
+                    try:
+                        await sel.select_option(label=target_val)
+                    except Exception:
+                        try:
+                            # Fallback: substring matching in evaluate
+                            await sel.evaluate(
+                                f"""(el) => {{
+                                    const match = Array.from(el.options).find(o => o.text.toLowerCase().includes('{target_val.lower()}'));
+                                    if (match) {{
+                                        el.value = match.value;
+                                        el.dispatchEvent(new Event('change', {{bubbles: true}}));
+                                    }}
+                                }}"""
+                            )
+                        except Exception:
+                            pass
                     await human_pause(200, 400)
             except Exception:
                 pass
@@ -934,11 +967,18 @@ class LinkedInPlatform(BaseJobPlatform):
                     low_q = q_text.lower()
                     if any(k in low_q for k in ["sponsorship", "visa sponsorship", "require sponsorship"]):
                         target_val = "No"
+                    elif any(k in low_q for k in ["disability", "handicap", "impairment"]):
+                        target_val = "No"
+                    elif any(k in low_q for k in ["veteran", "military"]):
+                        target_val = "No"
+                    elif any(k in low_q for k in ["gender", "sex"]):
+                        target_val = "Male"
                     elif any(k in low_q for k in ["authorized", "authorization", "commute", "relocate", "comfortable", "background", "willing", "participate", "agree", "process", "interest", "onsite", "hybrid", "remote", "budget", "salary", "lpa", "join", "immediate"]):
                         target_val = "Yes"
                     else:
                         target_val = "Yes"
 
+                matched_radio = False
                 for opt in options:
                     otext = (await safe_text(opt)).strip()
                     aria_lbl = (await opt.get_attribute("aria-label") or "").strip()
@@ -957,7 +997,33 @@ class LinkedInPlatform(BaseJobPlatform):
                                 el.click();
                             }""")
                         await human_pause(200, 400)
+                        matched_radio = True
                         break
+
+                if not matched_radio and options:
+                    # Robust fallback: click first option or option containing decline / prefer not
+                    chosen_opt = None
+                    for opt in options:
+                        otext = (await safe_text(opt)).strip().lower()
+                        if any(d in otext for d in ["prefer not", "decline", "not wish", "no", "yes"]):
+                            chosen_opt = opt
+                            break
+                    if not chosen_opt:
+                        chosen_opt = options[0]
+                    try:
+                        await chosen_opt.scroll_into_view_if_needed(timeout=1000)
+                        await chosen_opt.click(force=True, timeout=1500)
+                    except Exception:
+                        pass
+                    inp = chosen_opt.locator("input[type='radio']").first
+                    if await inp.count() > 0:
+                        await inp.evaluate("""el => {
+                            el.checked = true;
+                            el.dispatchEvent(new Event('change', {bubbles: true}));
+                            el.dispatchEvent(new Event('input', {bubbles: true}));
+                            el.click();
+                        }""")
+                    await human_pause(200, 400)
             except Exception:
                 pass
 
@@ -1168,8 +1234,18 @@ class LinkedInPlatform(BaseJobPlatform):
                             ans = "6"
                         elif "rate" in label_low or "scale" in label_low or "1 to 10" in label_low:
                             ans = "9"
-                        elif "ctc" in label_low or "salary" in label_low:
-                            ans = "7"
+                        elif "ctc" in label_low or "salary" in label_low or "compensation" in label_low:
+                            min_attr = await inp.get_attribute("min")
+                            if min_attr and float(min_attr) >= 100:
+                                ans = "650000" if float(min_attr) > 10000 else "650"
+                            elif "lakh" in label_low or "lpa" in label_low:
+                                ans = "7"
+                            elif "thousand" in label_low:
+                                ans = "650"
+                            elif any(w in label_low for w in ["inr", "annual", "per year", "per annum", "/year"]):
+                                ans = "650000"
+                            else:
+                                ans = "650000" if (min_attr and float(min_attr) > 1000) else "7"
                         else:
                             # Skill or general years of experience -> whole integer 2
                             ans = "2"
@@ -1177,14 +1253,23 @@ class LinkedInPlatform(BaseJobPlatform):
                     resolved = self.answers.resolve(ScreeningQuestion(text=label, kind="text"))
                     ans = resolved.value if resolved else ""
 
-                    if any(k in label_low for k in ["last working", "lwd", "relieving"]):
-                        if inp_type == "date":
-                            import datetime
-                            ans = datetime.date.today().strftime("%Y-%m-%d")
-                        else:
-                            ans = "Immediate"
+                    if inp_type == "date" or any(k in label_low for k in ["start date", "joining date", "available date", "date of", "last working", "lwd", "relieving"]):
+                        import datetime
+                        ans = datetime.date.today().strftime("%Y-%m-%d")
                     elif any(k in label_low for k in ["notice", "immediate", "serving", "availability"]):
                         ans = "0"
+                    elif any(k in label_low for k in ["ctc", "salary", "compensation", "package"]):
+                        min_attr = await inp.get_attribute("min")
+                        if min_attr and float(min_attr) >= 100:
+                            ans = "650000" if float(min_attr) > 10000 else "650"
+                        elif "lakh" in label_low or "lpa" in label_low:
+                            ans = "7"
+                        elif "thousand" in label_low:
+                            ans = "650"
+                        elif any(w in label_low for w in ["inr", "annual", "per year", "per annum", "/year"]):
+                            ans = "650000"
+                        else:
+                            ans = "650000" if (min_attr and float(min_attr) > 1000) else "7"
                     elif not ans or "days" in str(ans).lower():
                         if "title" in label_low:
                             ans = "Full Stack & AI Engineer"
@@ -1252,12 +1337,34 @@ class LinkedInPlatform(BaseJobPlatform):
                     inputs = await target_scope.locator("input:not([type='radio']):not([type='checkbox']):not([type='hidden']):not([type='file']), textarea").all()
                     for inp in inputs:
                         val = (await inp.input_value()).strip()
-                        if not val:
-                            await inp.fill("2")
+                        err_text_low = (await safe_text(err)).lower()
+                        if not val or err:
+                            new_val = "2"
+                            if "larger than" in err_text_low or "greater than" in err_text_low:
+                                num_match = re.search(r"(?:larger|greater)\s+than\s+(\d+)", err_text_low)
+                                if num_match:
+                                    min_val = int(num_match.group(1))
+                                    new_val = str(min_val + 10) if min_val < 1000 else str(min_val + 50000)
+                                else:
+                                    new_val = "500000"
+                            elif "between 0 and 99" in err_text_low or "between 0 and" in err_text_low:
+                                new_val = "2"
+                            elif "decimal" in err_text_low:
+                                new_val = "2.5"
+                            elif "email" in err_text_low:
+                                new_val = "maheshchitkoti@gmail.com"
+                            elif "phone" in err_text_low or "mobile" in err_text_low:
+                                new_val = "9481777227"
+                            elif "date" in err_text_low or (await inp.get_attribute("type") == "date"):
+                                import datetime
+                                new_val = datetime.date.today().strftime("%Y-%m-%d")
+
+                            await inp.fill("")
+                            await inp.fill(new_val)
                             await inp.dispatch_event("input")
                             await inp.dispatch_event("change")
                             await inp.dispatch_event("blur")
-                            log.info("linkedin.apply.error_recovered_input")
+                            log.info("linkedin.apply.error_recovered_input", val=new_val)
 
                     # 3. Select dropdown in error container
                     selects = await target_scope.locator("select").all()
@@ -1266,7 +1373,10 @@ class LinkedInPlatform(BaseJobPlatform):
                         if len(options) > 1:
                             target = options[1].strip() if "select" not in options[1].lower() else (options[2].strip() if len(options) > 2 else "")
                             if target:
-                                await sel.select_option(label=target)
+                                try:
+                                    await sel.select_option(label=target)
+                                except Exception:
+                                    await sel.evaluate(f"el => {{ el.selectedIndex = 1; el.dispatchEvent(new Event('change', {{bubbles: true}})); }}")
                                 log.info("linkedin.apply.error_recovered_select", label=target)
 
                     # 4. Checkbox in error container
