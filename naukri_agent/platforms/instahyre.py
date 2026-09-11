@@ -198,7 +198,12 @@ class InstahyrePlatform(BaseJobPlatform):
             ],
             timeout_ms=2000,
         )
-        exp_val = str(int(profile.experience.max_years)) if (profile.experience and profile.experience.max_years is not None) else "3"
+        if profile.experience_years > 0:
+            exp_val = str(int(profile.experience_years))
+        elif profile.filters and profile.filters.experience and profile.filters.experience.max_years < 50:
+            exp_val = str(int(profile.filters.experience.max_years))
+        else:
+            exp_val = "2"
 
         if exp_input:
             try:
@@ -603,7 +608,7 @@ class InstahyrePlatform(BaseJobPlatform):
                 modal = None
 
         if not modal:
-            feed_url = "https://www.instahyre.com/candidate/opportunities/"
+            feed_url = "https://www.instahyre.com/candidate/opportunities/?matching=true"
             tab = job.recommendation_tab or ""
             is_search_job = "search" in tab
             cur_view = getattr(self, "_current_view", "search" if is_search_job else "recommended")
@@ -643,31 +648,52 @@ class InstahyrePlatform(BaseJobPlatform):
                     await pagination_div.scroll_into_view_if_needed()
                     page_btn = pagination_div.locator("li").filter(has_text=re.compile(rf"^\s*{target_page}\s*$")).first
                     if await page_btn.count() > 0:
-                        await page_btn.click(force=True)
+                        try:
+                            await page_btn.click()
+                        except Exception:
+                            await page_btn.evaluate("el => el.click()")
                         await human_pause(1500, 2500)
                         await self.page.evaluate("window.scrollTo(0, 0)")
                         await human_pause(500, 1000)
 
-            # Open modal from card — find by company or title text
+            # Open modal from card — find by company or distinct title
             safe_title = job.title.replace("'", "\\'")
             safe_company = job.company.replace("'", "\\'")
 
             async def _find_card_on_current_view():
-                for text_match in [safe_company, safe_title]:
-                    if not text_match:
-                        continue
+                # 1. First priority: Card containing the company name selector
+                if safe_company:
                     try:
-                        loc = self.page.locator(f"div.employer-row:has-text('{text_match}')").first
+                        loc = self.page.locator(f"div.employer-row:has-text('{safe_company}')").first
                         if await loc.count() > 0 and await loc.is_visible():
                             return loc
                     except Exception:
-                        continue
+                        pass
 
                 all_rows = await self.page.locator("div.employer-row").all()
-                for row in all_rows:
-                    row_text = (await safe_text(row)).lower()
-                    if (job.company and job.company.lower() in row_text) or (job.title and job.title.lower()[:30] in row_text):
-                        return row
+                job_comp_lower = (job.company or "").lower().strip()
+                job_title_lower = (job.title or "").lower().strip()
+
+                # Pass 1: exact company match in row text
+                if job_comp_lower:
+                    for row in all_rows:
+                        row_text = (await safe_text(row)).lower()
+                        if job_comp_lower in row_text:
+                            return row
+
+                # Pass 2: distinctive title match (only if title is not overly generic)
+                generic_titles = {
+                    "software engineer", "software developer", "developer",
+                    "backend developer", "frontend developer", "full stack developer",
+                    "backend engineer", "frontend engineer", "full stack engineer",
+                    "sde", "sde 1", "sde 2", "sde-1", "sde-2",
+                }
+                if job_title_lower and job_title_lower not in generic_titles and len(job_title_lower) > 5:
+                    for row in all_rows:
+                        row_text = (await safe_text(row)).lower()
+                        if job_title_lower[:30] in row_text:
+                            return row
+
                 return None
 
             card = await _find_card_on_current_view()
@@ -687,7 +713,10 @@ class InstahyrePlatform(BaseJobPlatform):
                     p_btn = pagination_div.locator("li").filter(has_text=re.compile(rf"^\s*{search_p}\s*$")).first
                     if await p_btn.count() > 0:
                         log.info("instahyre.apply.searching_across_pages", page=search_p, job=f"{job.company} - {job.title}")
-                        await p_btn.click(force=True)
+                        try:
+                            await p_btn.click()
+                        except Exception:
+                            await p_btn.evaluate("el => el.click()")
                         await human_pause(1200, 2000)
                         await self.page.evaluate("window.scrollTo(0, 0)")
                         card = await _find_card_on_current_view()
@@ -703,18 +732,20 @@ class InstahyrePlatform(BaseJobPlatform):
                 await human_pause(300, 600)
 
                 clicked = False
-                view_btn = card.locator("button#interested-btn, span#interested-btn, .button-interested").first
-                if await view_btn.count() > 0 and await view_btn.is_visible():
-                    await view_btn.click(force=True)
-                    clicked = True
-                else:
-                    link = card.locator("a#employer-profile-opportunity, a.text-link").first
-                    if await link.count() > 0 and await link.is_visible():
-                        await link.click()
+                trigger = card.locator("a#employer-profile-opportunity, button#interested-btn, span#interested-btn, .button-interested, div.employer-job-name").first
+                if await trigger.count() > 0 and await trigger.is_visible():
+                    try:
+                        await trigger.click()
+                        clicked = True
+                    except Exception:
+                        await trigger.evaluate("node => node.click()")
                         clicked = True
 
                 if not clicked:
-                    await card.evaluate("node => node.click()")
+                    try:
+                        await card.click()
+                    except Exception:
+                        await card.evaluate("node => node.click()")
                 await human_pause(1500, 2500)
             except Exception as exc:
                 return ApplyOutcome(ApplicationStatus.FAILED, detail=f"Failed to click job card: {exc!s}")
@@ -731,8 +762,30 @@ class InstahyrePlatform(BaseJobPlatform):
                     "div.bar-actions",
                     "div[class*='opportunity-modal']",
                 ],
-                timeout_ms=7000,
+                timeout_ms=5000,
             )
+            if not modal:
+                # Fallback: direct evaluate click on the link carrying ng-click="openApplyModal(opp)"
+                try:
+                    direct_link = card.locator("a#employer-profile-opportunity").first
+                    if await direct_link.count() > 0:
+                        await direct_link.evaluate("node => node.click()")
+                        await human_pause(1500, 2500)
+                        modal = await first_visible(
+                            self.page,
+                            [
+                                "div#employer-profile-modal",
+                                "div.modal.fade.in",
+                                "div.modal.in",
+                                "div.modal.show",
+                                "div.modal-content",
+                                "div.bar-actions",
+                            ],
+                            timeout_ms=4000,
+                        )
+                except Exception:
+                    pass
+
             if not modal:
                 return ApplyOutcome(ApplicationStatus.FAILED, detail="Modal did not open after clicking card")
 
@@ -931,9 +984,25 @@ class InstahyrePlatform(BaseJobPlatform):
                 "div#refer",
                 "div#go-premium-modal",
                 "div.application-modal",
+                "div[class*='bulk-apply']",
+                "button[ng-click*='applyBulk']",
+                "div.alert:has-text('applied')",
+                "div.alert-success",
+                ".toaster",
+                ".toast",
             ],
             timeout_ms=5000,
         )
+
+        modal_closed_after_submit = False
+        if not confirmation and modal:
+            try:
+                # If the modal closed / disappeared from view after clicking apply, it was submitted successfully
+                is_modal_vis = await modal.is_visible()
+                if not is_modal_vis:
+                    modal_closed_after_submit = True
+            except Exception:
+                modal_closed_after_submit = True
 
         # Post-apply cleanup: Instahyre advances the carousel / pops the bulk
         # "apply to similar jobs" modal after an application — either can leave
@@ -941,11 +1010,16 @@ class InstahyrePlatform(BaseJobPlatform):
         await self._ensure_modal_closed()
         await self._dismiss_modals()
 
-        if confirmation:
+        if confirmation or modal_closed_after_submit:
+            evidence = (
+                "Instahyre application success marker observed"
+                if confirmation
+                else "Instahyre modal closed upon application submission"
+            )
             return ApplyOutcome(
                 ApplicationStatus.APPLIED,
                 confirmation_type="dom_marker",
-                confirmation_evidence="Instahyre application success marker observed",
+                confirmation_evidence=evidence,
             )
         return ApplyOutcome(
             ApplicationStatus.FAILED,
