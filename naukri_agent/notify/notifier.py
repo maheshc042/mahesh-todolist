@@ -52,9 +52,20 @@ class TelegramNotifier(Notifier):
 
     async def send(self, title: str, body: str, *, is_error: bool = False) -> None:
         prefix = "🚨 FAILED" if is_error else "🚀 SUCCESS"
-        text = f"<b>{prefix}: {html.escape(title)}</b>\n\n<pre>{html.escape(body)}</pre>"
-        if len(text) > TELEGRAM_LIMIT:
-            text = text[: TELEGRAM_LIMIT - 12] + "\n…</pre>"
+        title_esc = html.escape(title)
+        header = f"<b>{prefix}: {title_esc}</b>\n\n<pre>"
+        footer = "</pre>"
+        max_esc_len = TELEGRAM_LIMIT - len(header) - len(footer) - 10
+
+        escaped_body = html.escape(body)
+        if len(escaped_body) > max_esc_len:
+            cut = max_esc_len
+            last_amp = escaped_body.rfind("&", max(0, cut - 8), cut)
+            if last_amp != -1 and ";" not in escaped_body[last_amp:cut]:
+                cut = last_amp
+            escaped_body = escaped_body[:cut] + "\n…"
+
+        text = f"{header}{escaped_body}{footer}"
         try:
             async with httpx.AsyncClient(timeout=self.timeout_s) as client:
                 response = await client.post(
@@ -113,12 +124,14 @@ def format_run_summary(
     include_job_list: bool = True,
     max_jobs: int = 20,
     error: str | None = None,
+    dry_run: bool = False,
 ) -> str:
     """Executive product-grade run summary formatted for clarity and readability."""
     mins = int(duration_s // 60)
     secs = int(duration_s % 60)
+    mode_tag = " [DRY-RUN]" if dry_run else ""
     lines = [
-        f"📊 RUN METRICS (ID: #{run_id if run_id is not None else 'N/A'} | ⏱️ {mins}m {secs}s):",
+        f"📊 RUN METRICS{mode_tag} (ID: #{run_id if run_id is not None else 'N/A'} | ⏱️ {mins}m {secs}s):",
         f"  • Total Scraped     : {stats.scraped}",
         f"  • Jobs Considered   : {stats.considered}",
         f"  • Filtered Out      : {stats.filtered_out}",
@@ -128,6 +141,8 @@ def format_run_summary(
         f"  • ⚠️ Needs Review   : {stats.needs_review}",
         f"  • ❌ Failed         : {stats.failed}",
     ]
+    if dry_run:
+        lines.insert(1, "  ℹ️ SIMULATION ONLY — No live applications submitted.")
 
     if stats.per_profile:
         lines.append("")

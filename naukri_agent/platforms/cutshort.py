@@ -1279,10 +1279,14 @@ class CutshortPlatform(BaseJobPlatform):
                             "div.modal__wrapper",
                             "div[role='dialog']",
                             "div#modal-root > div",
+                            "div#modal-root div[class*='Modal']",
+                            "div#modal-root div[class*='modal']",
                             "div.modal-content",
                             "div[class*='modal']",
+                            "form:has(textarea)",
+                            "div:has(> textarea[name='message'])",
                         ],
-                        timeout_ms=3000,
+                        timeout_ms=3500,
                     )
 
         # 3. Fallback or Dedicated Flow: If modal didn't open from feed card, navigate to job.url
@@ -1302,17 +1306,53 @@ class CutshortPlatform(BaseJobPlatform):
                 if not decision.passed:
                     return ApplyOutcome(ApplicationStatus.SKIPPED, reason=decision.reason, detail=decision.detail)
 
+            # Check for Already Applied on dedicated job page
+            already_applied_marker = await first_visible(
+                self.page,
+                [
+                    "button:has-text('Applied')",
+                    "a:has-text('View conversation')",
+                    "button:has-text('View conversation')",
+                    "text=Already applied",
+                    "text=You have already applied",
+                    "div:has-text('Already applied')",
+                ],
+                timeout_ms=1500,
+            )
+            if already_applied_marker:
+                log.info("cutshort.apply.already_applied_on_job_page", job_id=job.job_id)
+                return ApplyOutcome(ApplicationStatus.ALREADY_APPLIED, reason=SkipReason.ALREADY_APPLIED)
+
+            # Check for Inactive / Closed Job on dedicated job page
+            closed_marker = await first_visible(
+                self.page,
+                [
+                    "text=no longer active",
+                    "text=job has expired",
+                    "text=applications are closed",
+                    "text=paused hiring",
+                    "text=Job is closed",
+                    "text=This job is no longer available",
+                ],
+                timeout_ms=1200,
+            )
+            if closed_marker:
+                log.info("cutshort.apply.job_closed_on_page", job_id=job.job_id)
+                return ApplyOutcome(ApplicationStatus.SKIPPED, reason=SkipReason.COMPANY_BLACKLIST, detail="Job posting is no longer active / closed on Cutshort")
+
             # Step 3A: On dedicated job page (cutshort.io/job/...), click primary in-viewport CTA button
-            target_btn = None
-            cta_buttons = await self.page.locator("button:has-text('Apply to this job'), button:has-text('Apply now'), button:has-text('Apply')").all()
-            for b in cta_buttons:
-                if await b.is_visible():
-                    box = await b.bounding_box()
-                    if box and box.get("y", 0) > 0:
-                        target_btn = b
-                        break
-            if not target_btn and cta_buttons:
-                target_btn = cta_buttons[0]
+            # The main job's primary CTA is 'Apply to this job' (in header & floating bar).
+            # We prioritize 'Apply to this job' so we never accidentally click 'Apply now' on 'Similar jobs' below!
+            target_btn = await first_visible(
+                self.page,
+                [
+                    "button:has-text('Apply to this job')",
+                    "a:has-text('Apply to this job')",
+                    "button:has-text('Apply now')",
+                    "button:has-text('Apply')",
+                ],
+                timeout_ms=3000,
+            )
 
             if target_btn:
                 try:
@@ -1323,31 +1363,9 @@ class CutshortPlatform(BaseJobPlatform):
                     await target_btn.click(force=True, timeout=3000)
                 except Exception:
                     await target_btn.evaluate("el => el.click()")
-                await human_pause(2000, 3000)
-
-            # Step 3B: Cutshort redirects to /profile/all-jobs?jobid=... with an active feed card.
-            # Click the feed card's "Apply now" button to trigger the pitch modal!
-            feed_apply = await first_visible(
-                self.page,
-                [
-                    "button:has-text('Apply now')",
-                    "button:has-text('Apply to this job')",
-                    "button[label*='Apply to this job']",
-                ],
-                timeout_ms=5000,
-            )
-            if feed_apply:
-                try:
-                    await feed_apply.scroll_into_view_if_needed(timeout=1500)
-                except Exception:
-                    pass
-                try:
-                    await feed_apply.click(force=True, timeout=3000)
-                except Exception:
-                    await feed_apply.evaluate("el => el.click()")
                 await human_pause(1500, 2500)
 
-            # Step 3C: Wait for pitch modal to appear
+            # Check if modal appeared directly from Step 3A CTA click
             modal = await first_visible(
                 self.page,
                 [
@@ -1355,11 +1373,70 @@ class CutshortPlatform(BaseJobPlatform):
                     "div.modal__wrapper",
                     "div[role='dialog']",
                     "div#modal-root > div",
+                    "div#modal-root div[class*='Modal']",
+                    "div#modal-root div[class*='modal']",
                     "div.modal-content",
                     "div[class*='modal']",
+                    "form:has(textarea)",
+                    "div:has(> textarea[name='message'])",
                 ],
-                timeout_ms=5000,
+                timeout_ms=3000,
             )
+
+            # Step 3B: Only if modal did NOT appear and the page redirected to /profile/all-jobs?jobid=...
+            # check the feed card and click its 'Apply now' button
+            if not modal and "/profile/all-jobs" in self.page.url:
+                feed_apply = await first_visible(
+                    self.page,
+                    [
+                        "button:has-text('Apply now')",
+                        "button:has-text('Apply to this job')",
+                        "button[label*='Apply to this job']",
+                    ],
+                    timeout_ms=3000,
+                )
+                if not feed_apply:
+                    feed_already = await first_visible(
+                        self.page,
+                        [
+                            "button:has-text('Applied')",
+                            "a:has-text('View conversation')",
+                            "button:has-text('View conversation')",
+                            "text=Already applied",
+                        ],
+                        timeout_ms=1500,
+                    )
+                    if feed_already:
+                        log.info("cutshort.apply.already_applied_on_feed_redirect", job_id=job.job_id)
+                        return ApplyOutcome(ApplicationStatus.ALREADY_APPLIED, reason=SkipReason.ALREADY_APPLIED)
+
+                if feed_apply:
+                    try:
+                        await feed_apply.scroll_into_view_if_needed(timeout=1500)
+                    except Exception:
+                        pass
+                    try:
+                        await feed_apply.click(force=True, timeout=3000)
+                    except Exception:
+                        await feed_apply.evaluate("el => el.click()")
+                    await human_pause(1500, 2500)
+
+                    modal = await first_visible(
+                        self.page,
+                        [
+                            "#modal__content",
+                            "div.modal__wrapper",
+                            "div[role='dialog']",
+                            "div#modal-root > div",
+                            "div#modal-root div[class*='Modal']",
+                            "div#modal-root div[class*='modal']",
+                            "div.modal-content",
+                            "div[class*='modal']",
+                            "form:has(textarea)",
+                            "div:has(> textarea[name='message'])",
+                        ],
+                        timeout_ms=4000,
+                    )
 
         modal_text = (await safe_text(modal)).strip() if modal else ""
 
@@ -1463,6 +1540,13 @@ class CutshortPlatform(BaseJobPlatform):
             ],
             timeout_ms=3000,
         )
+        if not modal and textarea:
+            try:
+                wrapper = textarea.locator("xpath=ancestor::div[@id='modal-root']/div[1] | ancestor::div[contains(@class,'modal') or contains(@class,'Modal')][1] | ancestor::form[1]").first
+                if await wrapper.count() > 0:
+                    modal = wrapper
+            except Exception:
+                pass
         if textarea:
             pitch = (
                 f"Hi {recruiter_name},\n\n"
@@ -1491,6 +1575,9 @@ class CutshortPlatform(BaseJobPlatform):
                 "button[type='submit']",
                 "button:has-text('Submit')",
                 "button:has-text('Apply')",
+                "button:has-text('Send application')",
+                "button:has-text('Submit application')",
+                "button:has-text('Confirm & Send')",
             ],
             timeout_ms=2500,
         )
@@ -1537,6 +1624,8 @@ class CutshortPlatform(BaseJobPlatform):
                     "div:has-text('Application sent')",
                     "div:has-text('Applied successfully')",
                     "button:has-text('Applied')",
+                    "button:has-text('View conversation')",
+                    "a:has-text('View conversation')",
                 ],
                 timeout_ms=4000,
             )
@@ -1546,6 +1635,11 @@ class CutshortPlatform(BaseJobPlatform):
         if modal:
             try:
                 modal_closed = not (await modal.is_visible(timeout=2000))
+            except Exception:
+                modal_closed = True
+        elif textarea:
+            try:
+                modal_closed = not (await textarea.is_visible(timeout=2000))
             except Exception:
                 modal_closed = True
 
@@ -1571,6 +1665,18 @@ class CutshortPlatform(BaseJobPlatform):
                     await close_btn.evaluate("el => el.click()")
                 except Exception:
                     pass
+        else:
+            try:
+                await self.page.keyboard.press("Escape")
+                await human_pause(300, 500)
+            except Exception:
+                pass
+
+        # Clear any lingering backdrops
+        try:
+            await self.page.evaluate("() => { document.querySelectorAll('.modal-backdrop, [class*=\"backdrop\"]').forEach(e => e.remove()); }")
+        except Exception:
+            pass
 
         # Check if card button updated to Applied or View conversation
         card_applied = await first_visible(
@@ -1579,30 +1685,38 @@ class CutshortPlatform(BaseJobPlatform):
             timeout_ms=1500,
         )
 
+        outcome: ApplyOutcome
         if submission_attempted and (confirmation or modal_closed or card_applied):
-            return ApplyOutcome(
+            outcome = ApplyOutcome(
                 ApplicationStatus.APPLIED,
                 detail="Application confirmed",
                 confirmation_type="dom_marker",
                 confirmation_evidence=f"Cutshort application confirmed (evidence: confirmation={bool(confirmation)}, modal_closed={modal_closed}, card_applied={bool(card_applied)})",
             )
+        elif not submission_attempted and card_applied:
+            outcome = ApplyOutcome(ApplicationStatus.ALREADY_APPLIED, reason=SkipReason.ALREADY_APPLIED)
+        else:
+            # DUMP DOM for debugging
+            try:
+                dump_path = self.artifacts.dir / f"cutshort-apply-failed-{raw_id}.html"
+                dump_path.write_text(await self.page.content(), encoding="utf-8")
+                log.info("cutshort.apply_failed_dump", path=str(dump_path))
+            except Exception:
+                pass
+            outcome = ApplyOutcome(
+                ApplicationStatus.FAILED,
+                detail=f"Pitch modal/send button never appeared for {job.title} at {job.company}",
+            )
 
-        # Only mark ALREADY_APPLIED if NO submission was attempted (i.e. was already applied before)
-        if not submission_attempted and card_applied:
-            return ApplyOutcome(ApplicationStatus.ALREADY_APPLIED, reason=SkipReason.ALREADY_APPLIED)
-            
-        # DUMP DOM for debugging
-        try:
-            dump_path = self.artifacts.dir / f"cutshort-apply-failed-{raw_id}.html"
-            dump_path.write_text(await self.page.content(), encoding="utf-8")
-            log.info("cutshort.apply_failed_dump", path=str(dump_path))
-        except Exception:
-            pass
-            
-        return ApplyOutcome(
-            ApplicationStatus.FAILED,
-            detail=f"Pitch modal/send button never appeared for {job.title} at {job.company}",
-        )
+        # Always ensure browser returns cleanly to /profile/all-jobs feed for subsequent jobs
+        if "/profile/all-jobs" not in self.page.url:
+            try:
+                await self.page.goto("https://cutshort.io/profile/all-jobs", wait_until="domcontentloaded")
+                await human_pause(800, 1500)
+            except Exception:
+                pass
+
+        return outcome
 
     # ---------------------------------------------------------
     # Phase 2 Message Handling (Questionnaire Sweep)

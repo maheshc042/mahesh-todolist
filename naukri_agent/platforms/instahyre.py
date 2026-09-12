@@ -682,7 +682,16 @@ class InstahyrePlatform(BaseJobPlatform):
             safe_company = job.company.replace("'", "\\'")
 
             async def _find_card_on_current_view():
-                # 1. First priority: Card containing the company name selector
+                # 1. First priority: Card containing BOTH company name and title
+                if safe_company and safe_title:
+                    try:
+                        loc = self.page.locator(f"div.employer-row:has-text('{safe_company}'):has-text('{safe_title}')").first
+                        if await loc.count() > 0 and await loc.is_visible():
+                            return loc
+                    except Exception:
+                        pass
+
+                # 2. Second priority: Card containing the company name selector
                 if safe_company:
                     try:
                         loc = self.page.locator(f"div.employer-row:has-text('{safe_company}')").first
@@ -695,14 +704,21 @@ class InstahyrePlatform(BaseJobPlatform):
                 job_comp_lower = (job.company or "").lower().strip()
                 job_title_lower = (job.title or "").lower().strip()
 
-                # Pass 1: exact company match in row text
+                # Pass 1: both company and title match in row text
+                if job_comp_lower and job_title_lower:
+                    for row in all_rows:
+                        row_text = (await safe_text(row)).lower()
+                        if job_comp_lower in row_text and (job_title_lower in row_text or job_title_lower[:25] in row_text):
+                            return row
+
+                # Pass 2: exact company match in row text
                 if job_comp_lower:
                     for row in all_rows:
                         row_text = (await safe_text(row)).lower()
                         if job_comp_lower in row_text:
                             return row
 
-                # Pass 2: distinctive title match (only if title is not overly generic)
+                # Pass 3: distinctive title match (only if title is not overly generic)
                 generic_titles = {
                     "software engineer", "software developer", "developer",
                     "backend developer", "frontend developer", "full stack developer",
@@ -817,7 +833,7 @@ class InstahyrePlatform(BaseJobPlatform):
                     opened_via_angular = await card.evaluate("""(el) => {
                         if (!window.angular) return false;
                         const cardScope = window.angular.element(el).scope();
-                        const opp = cardScope ? cardScope.opp : null;
+                        const opp = cardScope ? (cardScope.opp || (cardScope.$parent && cardScope.$parent.opp)) : null;
                         const modalCtrl = document.querySelector('[ng-controller="employerProfileModalCtrl"]');
                         const modalScope = modalCtrl ? window.angular.element(modalCtrl).scope() : null;
                         if (modalScope && opp && typeof modalScope.openApplyModal === 'function') {

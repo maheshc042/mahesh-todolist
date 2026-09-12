@@ -53,7 +53,7 @@ from ..core.models import (
 )
 from ..core.reporting import ReportExporter
 from ..core.run_policy import RunPolicy
-from ..core.runtime_metrics import RuntimeMetrics
+from ..core.runtime_metrics import JobTiming, RuntimeMetrics
 from ..db.repository import Repository
 from ..logging_setup import bind_context, clear_context, get_logger
 from ..naukri import selectors as S
@@ -729,6 +729,8 @@ class Orchestrator:
         # Step 5: Dry Run Gate — Stop before ApplyEngine
         if self.dry_run:
             log.info("dry_run.complete", selected_count=len(plan.selected_jobs))
+            self.stats.bump(profile.name, "considered", s.collected_count, platform=platform.platform_name)
+            self.stats.bump(profile.name, "filtered_out", s.rejected_count, platform=platform.platform_name)
             duration = time.monotonic() - profile_start_time
             exporter.export_summary_json(
                 plan,
@@ -876,6 +878,7 @@ class Orchestrator:
             )
             return outcome
 
+        t_job_apply_0 = time.perf_counter()
         try:
             # Phase 2 runs INSIDE apply_to_job(): the platform loads the job page,
             # enriches description, then calls pre_submit_check before clicking Apply.
@@ -906,6 +909,16 @@ class Orchestrator:
                 status=ApplicationStatus.FAILED,
                 detail=f"{type(exc).__name__}: {str(exc)[:200]}",
                 screenshot_path=shot,
+            )
+
+        if outcome.status == ApplicationStatus.APPLIED:
+            dur = max(0.1, time.perf_counter() - t_job_apply_0)
+            self.metrics.job_timings.append(
+                JobTiming(
+                    job_id=job.job_id,
+                    title=job.title,
+                    total_s=dur,
+                )
             )
 
         await self._record(job, profile, outcome, platform.platform_name)
@@ -1048,15 +1061,20 @@ class Orchestrator:
 
         mailer = ColdEmailer(sender_email=gmail_user, app_password=gmail_pass, gemini_api_key=gemini_key)
 
-        # Dynamically route the correct PDF based on the active profile track
-        fallback_name = (AgentConfig.load().applicant_name or "Applicant").replace(" ", "_")
-        role = job.title or profile.name
-        if "FullStack" in role or "MERN" in role:
-            resume_name = f"{fallback_name}_FullStack_Engineer.pdf"
-        else:
-            resume_name = f"{fallback_name}_AI_Engineer.pdf"
+        # Dynamically route the correct PDF based on profile and role
+        resume_path = None
+        if profile and getattr(profile, "resume_file", None):
+            cand = PROJECT_ROOT / profile.resume_file
+            if cand.exists():
+                resume_path = cand
 
-        resume_path = PROJECT_ROOT / "resumes" / resume_name
+        if not resume_path:
+            resume_dir = PROJECT_ROOT / "resumes"
+            role = (job.title or profile.name or "").lower()
+            if any(k in role for k in ["full stack", "fullstack", "react", "frontend", "web", "node", "mern", "javascript"]):
+                resume_path = resume_dir / "CV_Mahesh_Chitakoti_2026_1_.pdf"
+            else:
+                resume_path = resume_dir / "CV_Mahesh_Chitakoti_2026.pdf"
 
         if not resume_path.exists():
             log.error("cold_email.resume_missing", path=str(resume_path))
@@ -1097,9 +1115,11 @@ class Orchestrator:
             include_job_list=notifications.include_job_list,
             max_jobs=notifications.max_jobs_in_message,
             error=error,
+            dry_run=self.dry_run,
         )
+        mode_str = " [DRY-RUN]" if self.dry_run else ""
         title = (
-            f"Naukri agent [{self.account_key}] {status.value} — "
+            f"Naukri agent [{self.account_key}]{mode_str} {status.value} — "
             f"{self.stats.applied} applied"
         )
         t_notif_0 = time.perf_counter()

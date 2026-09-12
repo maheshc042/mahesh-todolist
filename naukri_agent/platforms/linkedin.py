@@ -354,13 +354,13 @@ class LinkedInPlatform(BaseJobPlatform):
 
             try:
                 await self.page.wait_for_selector(
-                    ".jobs-search-results-list, .scaffold-layout__list, li.jobs-search-results__list-item, div.job-card-container",
+                    ".jobs-search-results-list, .scaffold-layout__list, li.jobs-search-results__list-item, div.job-card-container, div.base-card, ul.jobs-search__results-list",
                     timeout=12000,
                 )
             except Exception:
                 pass
 
-            # Scroll the left listings pane
+            # Scroll the listings pane (supporting both split-view and grid layouts)
             list_pane = await first_visible(
                 self.page,
                 [
@@ -368,6 +368,8 @@ class LinkedInPlatform(BaseJobPlatform):
                     ".scaffold-layout__list",
                     "div[class*='jobs-search-results-list']",
                     ".jobs-search__results-list",
+                    "ul.jobs-search__results-list",
+                    "main",
                 ],
                 timeout_ms=3000,
             )
@@ -385,7 +387,9 @@ class LinkedInPlatform(BaseJobPlatform):
                     pass
 
             card_locators = self.page.locator(
-                ".jobs-search-results-list li, .scaffold-layout__list-container li, li.jobs-search-results__list-item, div.job-card-container, div[data-job-id]"
+                ".jobs-search-results-list li, .scaffold-layout__list-container li, li.jobs-search-results__list-item, "
+                "div.job-card-container, div[data-job-id], div.base-card, div.base-search-card, "
+                "ul.jobs-search__results-list li, div[data-entity-urn*='jobPosting']"
             )
             total_cards = await card_locators.count()
             if total_cards == 0:
@@ -404,9 +408,9 @@ class LinkedInPlatform(BaseJobPlatform):
                     if not await card.is_visible():
                         continue
 
-                    title_el = card.locator("a.job-card-list__title, a[href*='/jobs/view/'], strong").first
-                    company_el = card.locator(".job-card-container__primary-description, .artdeco-entity-lockup__subtitle, span.job-card-container__publisher, .job-card-container__company-name").first
-                    loc_el = card.locator(".job-card-container__metadata-item, .artdeco-entity-lockup__caption").first
+                    title_el = card.locator("a.job-card-list__title, a.base-card__full-link, .base-search-card__title, h3, a[href*='/jobs/view/'], strong").first
+                    company_el = card.locator(".job-card-container__primary-description, .artdeco-entity-lockup__subtitle, span.job-card-container__publisher, .job-card-container__company-name, h4, a.hidden-nested-link, .base-search-card__subtitle").first
+                    loc_el = card.locator(".job-card-container__metadata-item, .artdeco-entity-lockup__caption, .job-search-card__location, .base-search-card__metadata").first
 
                     title = (await safe_text(title_el)).strip()
                     title = re.sub(r"\s+with verification\b", "", title, flags=re.IGNORECASE).strip()
@@ -425,8 +429,17 @@ class LinkedInPlatform(BaseJobPlatform):
                     if card_url and not card_url.startswith("http"):
                         card_url = f"https://www.linkedin.com{card_url}"
 
-                    match = re.search(r"/view/(\d+)", card_url)
-                    raw_id = match.group(1) if match else Job.stable_id(card_url, title, company)
+                    raw_id = None
+                    entity_urn = await card.get_attribute("data-entity-urn") or await card.get_attribute("data-job-id") or ""
+                    urn_match = re.search(r"(\d{7,})", entity_urn)
+                    if urn_match:
+                        raw_id = urn_match.group(1)
+                    if not raw_id and card_url:
+                        url_match = re.search(r"/view/.*?(\d{7,})", card_url) or re.search(r"(\d{7,})", card_url)
+                        if url_match:
+                            raw_id = url_match.group(1)
+                    if not raw_id:
+                        raw_id = Job.stable_id(card_url, title, company)
                     job_id = f"linkedin-{raw_id}"
 
                     if job_id in exclude_job_ids or job_id in seen_ids:
@@ -465,7 +478,8 @@ class LinkedInPlatform(BaseJobPlatform):
                     continue
 
             log.info("linkedin.fetch.page_done", page=page_idx + 1, added=page_added, total=len(jobs))
-            if page_added == 0 and total_cards < 5:
+            if page_added == 0 and (len(jobs) >= 20 or page_idx >= 1):
+                log.info("linkedin.fetch.no_new_jobs_done", total=len(jobs))
                 break
 
         log.info("linkedin.fetch.ready", count=len(jobs))
@@ -481,7 +495,10 @@ class LinkedInPlatform(BaseJobPlatform):
         log.info("linkedin.apply.start", job_id=job.job_id, title=job.title, company=job.company)
 
         # Locate and click job card in left pane
-        card = self.page.locator(f"div[data-job-id*='{job.job_id.replace('linkedin-', '')}'], a[href*='{job.job_id.replace('linkedin-', '')}']").first
+        raw_num_id = job.job_id.replace("linkedin-", "")
+        card = self.page.locator(
+            f"div[data-job-id*='{raw_num_id}'], div[data-entity-urn*='{raw_num_id}'], a[href*='{raw_num_id}']"
+        ).first
         if await card.count() > 0:
             await card.scroll_into_view_if_needed()
             await human_pause(200, 400)

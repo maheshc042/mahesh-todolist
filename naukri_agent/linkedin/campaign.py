@@ -41,8 +41,9 @@ SEARCH_KEYWORDS = [
 
 import urllib.parse
 
+# Focus search strictly on active hiring posts containing email/resume contact points within the past 24h
 SEARCH_URLS = [
-    f"https://www.linkedin.com/search/results/content/?keywords={urllib.parse.quote(kw)}&origin=GLOBAL_SEARCH_HEADER&sortBy=%5B%22relevance%22%5D&datePosted=%5B%22past-24h%22%5D"
+    f'https://www.linkedin.com/search/results/content/?keywords={urllib.parse.quote(f"{kw} (hiring OR email OR resume)")}&origin=GLOBAL_SEARCH_HEADER&sortBy=%5B%22date_posted%22%5D&datePosted=%5B%22past-24h%22%5D'
     for kw in SEARCH_KEYWORDS
 ]
 
