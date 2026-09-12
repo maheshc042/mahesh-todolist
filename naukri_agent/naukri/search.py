@@ -430,6 +430,10 @@ class JobSearcher:
                 "div[class*='tab']",
                 "a[class*='tab']",
                 "button[class*='tab']",
+                "div[class*='chip']",
+                "button[class*='chip']",
+                "span[class*='chip']",
+                "a[class*='chip']",
             ):
                 try:
                     items = await self.page.locator(selector).all()
@@ -443,6 +447,30 @@ class JobSearcher:
                             and low not in HEADER_NAV_BLACKLIST
                         ):
                             found[low] = item
+                except Exception:
+                    continue
+
+        # Strategy 3: Targeted Known Recommendation Tabs (Naukri Modern UI)
+        if not found:
+            known_tabs = [
+                "for you",
+                "profile",
+                "preferences",
+                "key skills",
+                "role",
+                "top candidate",
+                "you might like",
+                "keywords",
+            ]
+            for kt in known_tabs:
+                try:
+                    el = self.page.locator(
+                        f"a:has-text('{kt}'), button:has-text('{kt}'), div[role='button']:has-text('{kt}')"
+                    ).first
+                    if await el.count() > 0 and await el.is_visible():
+                        label = (await safe_text(el)).strip().lower()
+                        if label and label not in HEADER_NAV_BLACKLIST and label not in found:
+                            found[label] = el
                 except Exception:
                     continue
 
@@ -605,7 +633,8 @@ class JobSearcher:
                 break
 
             # P1-5 Composite termination: stop if DOM stopped growing AND no new jobs added
-            if no_growth_rounds >= 2 and added_in_round == 0:
+            min_rounds_needed = 4 if curr_dom_count <= 2 else 2
+            if no_growth_rounds >= min_rounds_needed and added_in_round == 0:
                 log.info(
                     "reco.end_of_list_detected",
                     tab=tab_enum.value,

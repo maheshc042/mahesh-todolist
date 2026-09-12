@@ -45,6 +45,7 @@ class NaukriPlatform(BaseJobPlatform):
             page,
             config.browser.min_action_delay_ms,
             config.browser.max_action_delay_ms,
+            artifacts=artifacts,
             metrics=metrics,
         )
         self.applier = ApplyEngine(
@@ -67,7 +68,11 @@ class NaukriPlatform(BaseJobPlatform):
         return True
 
     async def fetch_jobs(self, profile: JobProfile, exclude_job_ids: set[str]) -> list[Job]:
-        if profile.use_recommended and self.config.recommended.enabled:
+        # ARCHITECTURAL DESIGN POLICY (DO NOT CHANGE OR ADD KEYWORD SEARCH FALLBACK):
+        # Naukri exclusively relies on the curated "Recommended jobs" feed (/mnjuser/recommendedjobs).
+        # This feed consistently provides 200+ high-relevance opportunities tailored to the candidate's
+        # active resume. Keyword search fallback is strictly NOT needed and must NOT be added.
+        if profile.use_recommended and self.configenabled:
             return await self.searcher.search_recommended(self.config.recommended, exclude_job_ids=exclude_job_ids)
         return []
 

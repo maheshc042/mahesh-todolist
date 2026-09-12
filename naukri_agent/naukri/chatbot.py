@@ -313,6 +313,7 @@ class ChatbotHandler:
         if kind == "combobox":
             return await self._answer_combobox(value)
 
+        val_clean = value.strip().lower()
         selectors = (
             S.CHATBOT_CHECKBOX_OPTIONS if kind == "checkbox" else S.CHATBOT_RADIO_OPTIONS
         ) + S.CHATBOT_CHIPS
@@ -320,7 +321,6 @@ class ChatbotHandler:
             locators = await self.page.locator(selector).all()
             for locator in locators:
                 text = (await safe_text(locator)).strip().lower()
-                val_clean = value.strip().lower()
                 if text and (text == val_clean or val_clean in text or text in val_clean):
                     try:
                         self.policy.require_mutation("naukri.screening.answer")

@@ -648,32 +648,31 @@ class CutshortPlatform(BaseJobPlatform):
     async def _apply_ui_filters(self, profile: JobProfile) -> None:
         """
         Applies verified native UI filters on Cutshort's All Jobs toolbar:
-        1. Hiring Activity: Active in last 7 days / 1-2 weeks (fresh postings only)
+        1. Hiring Activity: In the last 1 week (active/fresh postings)
         2. Role Type: Full time
-        3. Job Category: Intentionally left UNTOUCHED on UI so all tech roles
-           (Software, AI/ML, DevOps, QA, Cloud, Systems, Support) are pulled for agent evaluation.
-        4. Location: Intentionally left UNTOUCHED (all locations & remote allowed;
-           avoids restricting candidate pool or dropping multi-city postings).
-        5. Minimum Salary: >= 5 LPA (slider set to 500,000 INR)
-        6. Experience Range: Max experience capped at 3.5y (min exp untouched at 0.0)
+        3. Minimum Salary: >= 5 LPA (slider set to 500,000 INR)
+        4. Experience Range: 0.0 – 3.5 years (slider dual-handles [0.0, 3.5])
+        5. Job Category: Expands accordions and selects verified specialisations:
+           - Full Stack: Software Development (Frontend, Backend, Full Stack),
+                         Testing / QA (Automation Testing, QA),
+                         DevOps & IT (DevOps, Site Reliability)
+           - AI / Python: Data Science & Analytics (Data Science, ML Engineering, Data Analytics),
+                          Software Development (Backend)
+        6. Location & Skills: Intentionally untouched so candidate pool is not overly constrained.
         """
         log.info("cutshort.filters.applying_ui", profile=profile.name)
 
-        # 1. Hiring activity on job (Active in last 7 days / last week)
+        # 1. Hiring activity on job ("In the last 1 week")
         try:
-            btn = await first_visible(self.page, ["div[data-intercom-target='hiringActivityOnJob-filter']"], timeout_ms=2000)
+            btn = await first_visible(self.page, ["div[data-intercom-target='hiringActivityOnJob-filter']"], timeout_ms=2500)
             if btn:
                 await btn.click(force=True)
-                await human_pause(400, 800)
+                await human_pause(500, 800)
                 opt = await first_visible(
                     self.page,
                     [
-                        "div:has-text('Active in last 7 days')",
-                        "div:has-text('Active in last 1 week')",
-                        "div:has-text('Active in last week')",
-                        "div:has-text('Active in last 1-2 weeks')",
-                        "div:has-text('Active recently')",
                         "label:has-text('In the last')",
+                        "span:has-text('In the last')",
                         "div:has-text('In the last')",
                     ],
                     timeout_ms=1500,
@@ -682,32 +681,61 @@ class CutshortPlatform(BaseJobPlatform):
                     await opt.click(force=True)
                     await human_pause(300, 500)
 
-                # If there is a unit dropdown showing Months, switch to Weeks
-                unit_btn = await first_visible(self.page, ["div:has-text('Months')", "button:has-text('Months')", "span:has-text('Months')"], timeout_ms=600)
+                # Set number input to 1
+                num_input = await first_visible(self.page, ["input[type='number']"], timeout_ms=1000)
+                if num_input:
+                    await num_input.fill("1")
+                    await human_pause(200, 400)
+
+                # If unit dropdown shows Months or Days, switch to Weeks
+                unit_btn = await first_visible(
+                    self.page,
+                    [
+                        "div:has-text('Months')",
+                        "button:has-text('Months')",
+                        "span:has-text('Months')",
+                        "div:has-text('Days')",
+                        "button:has-text('Days')",
+                        "span:has-text('Days')",
+                    ],
+                    timeout_ms=800,
+                )
                 if unit_btn:
                     await unit_btn.click(force=True)
-                    await human_pause(200, 400)
-                    week_opt = await first_visible(self.page, ["div:has-text('Weeks')", "div:has-text('Days')"], timeout_ms=600)
+                    await human_pause(250, 450)
+                    week_opt = await first_visible(
+                        self.page,
+                        [
+                            "div:has-text('Weeks')",
+                            "span:has-text('Weeks')",
+                            "div[role='option']:has-text('Weeks')",
+                            "button:has-text('Weeks')",
+                        ],
+                        timeout_ms=800,
+                    )
                     if week_opt:
                         await week_opt.click(force=True)
+                        await human_pause(250, 450)
 
                 await self.page.keyboard.press("Escape")
-                await human_pause(300, 600)
+                await human_pause(400, 600)
+                log.info("cutshort.filters.hiring_activity_applied")
         except Exception as exc:
-            log.debug("cutshort.filters.activity_error", error=str(exc))
+            log.warning("cutshort.filters.activity_error", error=str(exc))
 
         # 2. Type of role (Full time)
         try:
-            btn = await first_visible(self.page, ["div[data-intercom-target='roletype-filter']"], timeout_ms=2000)
+            btn = await first_visible(self.page, ["div[data-intercom-target='roletype-filter']"], timeout_ms=2500)
             if btn:
                 await btn.click(force=True)
-                await human_pause(400, 800)
+                await human_pause(500, 800)
                 opt = await first_visible(
                     self.page,
                     [
-                        "button:has-text('Full time')",
-                        "div:has-text('Full time')",
                         "label:has-text('Full time')",
+                        "button:has-text('Full time')",
+                        "span:has-text('Full time')",
+                        "div:has-text('Full time')",
                     ],
                     timeout_ms=1500,
                 )
@@ -715,99 +743,151 @@ class CutshortPlatform(BaseJobPlatform):
                     await opt.click(force=True)
                     await human_pause(400, 600)
                 await self.page.keyboard.press("Escape")
-                await human_pause(300, 600)
+                await human_pause(400, 600)
+                log.info("cutshort.filters.role_type_applied")
         except Exception as exc:
-            log.debug("cutshort.filters.roletype_error", error=str(exc))
+            log.warning("cutshort.filters.roletype_error", error=str(exc))
 
-        # 3. Job category (tags-filter)
-        try:
-            btn = await first_visible(self.page, ["div[data-intercom-target='tags-filter']"], timeout_ms=2000)
-            if btn:
-                await btn.click(force=True)
-                await human_pause(500, 900)
-                # Categories & sub-tags specified:
-                # - software-development: frontend, backend, fullstack
-                # - testing-QA: manual-testing, automation-testing, others (all three)
-                # - devops-IT-infrastructure
-                target_tags = [
-                    "Software Development", "Software development", "Software", "Tech",
-                    "Frontend", "Backend", "Fullstack", "Full stack",
-                    "Devops", "DevOps", "Devops-IT-infrastructure", "Devops-lT-infrastructure", "Infrastructure",
-                    "Testing-QA", "Testing", "QA", "Manual Testing", "Automation Testing", "Others",
-                    "Data Science", "Data Analytics",
-                ]
-                for tag in target_tags:
-                    tag_el = await first_visible(
-                        self.page,
-                        [
-                            f"label:has-text('{tag}')",
-                            f"div[role='checkbox']:has-text('{tag}')",
-                            f"span:has-text('{tag}')",
-                            f"div:has-text('{tag}')",
-                        ],
-                        timeout_ms=250,
-                    )
-                    if tag_el:
-                        try:
-                            cb = tag_el.locator("input[type='checkbox']").first
-                            if await cb.count() > 0:
-                                if not await cb.is_checked():
-                                    await cb.click(force=True)
-                            else:
-                                await tag_el.click(force=True)
-                            await human_pause(100, 200)
-                        except Exception:
-                            pass
-                await self.page.keyboard.press("Escape")
-                await human_pause(300, 600)
-        except Exception as exc:
-            log.debug("cutshort.filters.category_error", error=str(exc))
-
-        # 4. Minimum salary (>= 5 LPA)
+        # 3. Minimum salary (>= 5 LPA)
         min_salary_lpa = profile.filters.min_salary_lpa if (profile.filters and profile.filters.min_salary_lpa) else 5.0
         if min_salary_lpa and min_salary_lpa >= 5.0:
             try:
-                btn = await first_visible(self.page, ["div[data-intercom-target='minsal-filter']"], timeout_ms=2000)
+                btn = await first_visible(self.page, ["div[data-intercom-target='minsal-filter']"], timeout_ms=2500)
                 if btn:
                     await btn.click(force=True)
-                    await human_pause(400, 800)
+                    await human_pause(500, 800)
                     slider = await first_visible(self.page, ["div[role='slider']"], timeout_ms=1500)
                     if slider:
                         await slider.focus()
                         await self.page.keyboard.press("Home")
-                        await human_pause(100, 200)
-                        steps = int(min_salary_lpa)
+                        await human_pause(150, 300)
+                        # Step up to desired LPA (each step is 1 LPA / 100,000 INR)
+                        steps = int(round(min_salary_lpa))
                         for _ in range(steps):
                             await self.page.keyboard.press("ArrowRight")
                             await human_pause(80, 150)
+                        await human_pause(400, 600)
                     await self.page.keyboard.press("Escape")
-                    await human_pause(300, 600)
+                    await human_pause(400, 600)
+                    log.info("cutshort.filters.minsal_applied", min_salary_lpa=min_salary_lpa)
             except Exception as exc:
-                log.debug("cutshort.filters.minsal_error", error=str(exc))
+                log.warning("cutshort.filters.minsal_error", error=str(exc))
 
-        # 5. Experience range: Allow up to 8.0 years on Cutshort UI slider so broad startup bands (2-8y) are loaded
+        # 4. Experience range (0.0 – 3.5 years)
         try:
-            btn = await first_visible(self.page, ["div[data-intercom-target='expRange-filter']"], timeout_ms=2000)
+            btn = await first_visible(self.page, ["div[data-intercom-target='expRange-filter']"], timeout_ms=2500)
             if btn:
                 await btn.click(force=True)
-                await human_pause(400, 800)
+                await human_pause(500, 800)
                 sliders = await self.page.locator("div[role='slider']").all()
                 if len(sliders) >= 2:
+                    min_slider = sliders[0]
                     max_slider = sliders[1]
+
+                    # Ensure min handle is at 0
+                    await min_slider.focus()
+                    await self.page.keyboard.press("Home")
+                    await human_pause(150, 300)
+
+                    # Reset max handle to 0, then step to 3.5 years (7 steps of 0.5y)
                     await max_slider.focus()
                     await self.page.keyboard.press("Home")
-                    await human_pause(100, 200)
-                    steps = int(round(8.0 / 0.5))
-                    for _ in range(steps):
+                    await human_pause(150, 300)
+                    for _ in range(7):
                         await self.page.keyboard.press("ArrowRight")
-                        await human_pause(50, 100)
+                        await human_pause(70, 130)
+                    await human_pause(400, 600)
+
                 await self.page.keyboard.press("Escape")
-                await human_pause(300, 600)
+                await human_pause(400, 600)
+                log.info("cutshort.filters.exp_range_applied", min_exp=0.0, max_exp=3.5)
         except Exception as exc:
-            log.debug("cutshort.filters.exp_range_error", error=str(exc))
+            log.warning("cutshort.filters.exp_range_error", error=str(exc))
+
+        # 5. Job category (tags-filter) with accordion expansion
+        try:
+            btn = await first_visible(self.page, ["div[data-intercom-target='tags-filter']"], timeout_ms=2500)
+            if btn:
+                await btn.click(force=True)
+                await human_pause(600, 1000)
+
+                is_ai_profile = any(k in profile.name.lower() for k in ["ai", "python", "data", "machine learning"])
+                if is_ai_profile:
+                    categories_to_select = [
+                        ("Data Science", ["Data Science", "ML Engineering", "Data Analytics"]),
+                        ("Software Development", ["Backend"]),
+                    ]
+                else:
+                    categories_to_select = [
+                        ("Software Development", ["Frontend", "Backend", "Fullstack", "Full Stack"]),
+                        ("Testing / QA", ["Automation Testing", "QA"]),
+                        ("DevOps", ["DevOps", "Site Reliability"]),
+                    ]
+
+                for cat_header_name, sub_tags in categories_to_select:
+                    # Find category accordion header
+                    cat_header = await first_visible(
+                        self.page,
+                        [
+                            f"div:has-text('{cat_header_name}')",
+                            f"span:has-text('{cat_header_name}')",
+                        ],
+                        timeout_ms=1200,
+                    )
+                    if cat_header:
+                        # Check if collapsed (has plus icon or sub_tags not yet visible)
+                        is_collapsed = False
+                        plus_icon = cat_header.locator("img[src*='plus']")
+                        if await plus_icon.count() > 0 and await plus_icon.first.is_visible():
+                            is_collapsed = True
+                        else:
+                            first_sub = await first_visible(self.page, [f"text={sub_tags[0]}"], timeout_ms=300)
+                            if not first_sub:
+                                is_collapsed = True
+
+                        if is_collapsed:
+                            await cat_header.click(force=True)
+                            await human_pause(400, 600)
+
+                    # Check each requested sub-tag under the category
+                    for tag_name in sub_tags:
+                        tag_el = await first_visible(
+                            self.page,
+                            [
+                                f"label:has-text('{tag_name}')",
+                                f"div[role='checkbox']:has-text('{tag_name}')",
+                                f"span:has-text('{tag_name}')",
+                                f"div:has-text('{tag_name}')",
+                            ],
+                            timeout_ms=800,
+                        )
+                        if tag_el:
+                            try:
+                                cb = tag_el.locator("input[type='checkbox']").first
+                                if await cb.count() > 0:
+                                    if not await cb.is_checked():
+                                        await cb.click(force=True)
+                                        await human_pause(150, 250)
+                                else:
+                                    is_active = await tag_el.evaluate(
+                                        "el => el.classList.contains('active') || el.getAttribute('aria-checked') === 'true' || !!el.querySelector('svg, img[src*=\"check\"]')"
+                                    )
+                                    if not is_active:
+                                        await tag_el.click(force=True)
+                                        await human_pause(150, 250)
+                                log.debug("cutshort.filters.tag_checked", category=cat_header_name, tag=tag_name)
+                            except Exception as tag_err:
+                                log.debug("cutshort.filters.tag_click_error", tag=tag_name, error=str(tag_err))
+
+                await human_pause(400, 600)
+                await self.page.keyboard.press("Escape")
+                await human_pause(400, 600)
+                log.info("cutshort.filters.categories_applied", profile=profile.name)
+        except Exception as exc:
+            log.warning("cutshort.filters.category_error", error=str(exc))
 
         log.info("cutshort.filters.applied_ui_successfully")
-        await human_pause(1500, 2500)
+        await human_pause(2000, 3000)
 
     async def fetch_jobs(self, profile: JobProfile, exclude_job_ids: set[str]) -> list[Job]:
         log.info("cutshort.fetch.start", profile=profile.name)
@@ -844,20 +924,29 @@ class CutshortPlatform(BaseJobPlatform):
 
         # Infinite scroll to fetch available jobs in the feed
         last_link_count = 0
-        target_pool = min(profile.platform_limits.get(self.platform_name, 40) * 2, 80)
+        stagnant_scrolls = 0
+        target_pool = max(100, min(profile.platform_limits.get(self.platform_name, 40) * 3, 150))
         while True:
             anchors = await self.page.locator(job_link_sel).all()
             link_count = len(anchors)
             if link_count >= target_pool:
+                log.info("cutshort.fetch.target_pool_reached", count=link_count, target=target_pool)
                 break
             if link_count == last_link_count:
                 stagnant_scrolls += 1
-                if stagnant_scrolls >= 3:
+                if stagnant_scrolls >= 5:
+                    log.info("cutshort.fetch.stagnant_end_of_feed", count=link_count)
                     break
+                # Scroll up slightly and then back down to kick intersection observer
+                try:
+                    await self.page.evaluate("window.scrollBy(0, -600)")
+                    await human_pause(400, 700)
+                except Exception:
+                    pass
             else:
                 stagnant_scrolls = 0
                 last_link_count = link_count
-                
+
             if anchors:
                 try:
                     await anchors[-1].scroll_into_view_if_needed(timeout=2000)
@@ -865,8 +954,13 @@ class CutshortPlatform(BaseJobPlatform):
                 except Exception:
                     pass
 
-            await scroll_page(self.page, steps=3, delay_s=0.5)
-            await human_pause(800, 1500)
+            # Deep scroll to document bottom to trigger infinite lazy load
+            try:
+                await self.page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
+            except Exception:
+                pass
+            await scroll_page(self.page, steps=4, delay_s=0.5)
+            await human_pause(1500, 2500)
 
         # Dump AFTER scrolling so the artifact reflects what was actually parsed
         try:

@@ -76,7 +76,8 @@ _WILLINGNESS_INTENT = re.compile(
     r"relocate|relocation|"
     r"work\s+from\s+office|wfo|hybrid|onsite|on[\s-]site|"
     r"join\s+immediately|immediate\s+joiner|"
-    r"location\s+of\s+this\s+job|job\s+location"
+    r"location\s+of\s+this\s+job|job\s+location|"
+    r"bond|contract|service\s+agreement|undertaking|policy|terms?"
     r")\b",
     re.IGNORECASE,
 )
@@ -239,12 +240,30 @@ class AnswerEngine:
         if lang_prof is not None:
             return lang_prof
 
+        # Stage 3.5: Academic & Examination Scores Intent
+        academic = self._resolve_academic_score(text, question)
+        if academic is not None:
+            return academic
+
         # Stage 4: Fuzzy Math
         fuzzy = self._resolve_fuzzy(text, question)
         if fuzzy is not None:
             return fuzzy
 
         log.info("answers.unresolved", question=question.text[:160], kind=question.kind, options=len(question.options))
+        return None
+
+    def _resolve_academic_score(self, text: str, question: ScreeningQuestion) -> ResolvedAnswer | None:
+        low = text.lower()
+        if any(k in low for k in ("percentile", "cet")):
+            ans = "92"
+            return self._fit_to_options(ans, question, "intent:academic_percentile", "intent-map")
+        if "jee" in low:
+            ans = "88"
+            return self._fit_to_options(ans, question, "intent:academic_jee", "intent-map")
+        if any(k in low for k in ("math", "class 10", "10th", "12th", "percentage", "cgpa")):
+            ans = "95"
+            return self._fit_to_options(ans, question, "intent:academic_score", "intent-map")
         return None
 
     def _resolve_language_proficiency(self, text: str, question: ScreeningQuestion) -> ResolvedAnswer | None:

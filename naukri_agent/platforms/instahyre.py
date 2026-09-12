@@ -487,56 +487,35 @@ class InstahyrePlatform(BaseJobPlatform):
         seen_ids: set[str] = set()
         feed_url = "https://www.instahyre.com/candidate/opportunities/"
         target_applies = profile.platform_limits.get(self.platform_name, 150)
-        # Scrape a generous pool (2x apply limit) so that after filtering out non-tech
-        # and senior roles, the apply engine actually has enough eligible jobs to reach target applies.
+        # Scrape a generous pool (2x apply limit) directly from UI search filters
         max_scrape = max(250, int(target_applies * 2))
         self._current_profile = profile
-        self._current_view = "recommended"
+        self._current_view = "search"
 
         try:
             await self.page.goto(feed_url, wait_until="domcontentloaded")
             await human_pause(2000, 3000)
             await self._dismiss_modals()
 
-            # Dump feed HTML for diagnostic trace
-            try:
-                dump_path = self.artifacts.dir / "instahyre-feed.html"
-                content = await self.page.content()
-                dump_path.write_text(content, encoding="utf-8")
-                log.info("instahyre.feed_html_saved", path=str(dump_path))
-            except Exception as exc:
-                log.debug("instahyre.feed_html_dump_failed", error=str(exc))
+            # Directly apply targeted UI Search Filters (Node.js/Python + Exp)
+            log.info(
+                "instahyre.fetch.direct_search_filters_start",
+                target_limit=max_scrape,
+                profile=profile.name,
+            )
+            await self._apply_ui_filters(profile)
+            self._current_view = "search"
 
-            # Stage 1: Scrape Recommended Opportunities Feed
-            log.info("instahyre.fetch.stage1_recommended_start", target_limit=max_scrape)
+            # Paginate through filtered search results directly
             await self._paginate_and_collect(
-                tab_name="recommended_page",
-                max_pages=5,
+                tab_name="search_page",
+                max_pages=10,
                 exclude_job_ids=exclude_job_ids,
                 seen_ids=seen_ids,
                 jobs=jobs,
                 max_jobs=max_scrape,
             )
-            log.info("instahyre.fetch.stage1_recommended_done", count=len(jobs))
-
-            # Stage 2: Profile Search Filters (collect more jobs up to scrape limit)
-            if len(jobs) < max_scrape:
-                log.info(
-                    "instahyre.fetch.stage2_search_filters_start",
-                    current_count=len(jobs),
-                    target_limit=max_scrape,
-                )
-                await self._apply_ui_filters(profile)
-                self._current_view = "search"
-                await self._paginate_and_collect(
-                    tab_name="search_page",
-                    max_pages=10,
-                    exclude_job_ids=exclude_job_ids,
-                    seen_ids=seen_ids,
-                    jobs=jobs,
-                    max_jobs=max_scrape,
-                )
-                log.info("instahyre.fetch.stage2_search_filters_done", total_gathered=len(jobs))
+            log.info("instahyre.fetch.direct_search_filters_done", total_gathered=len(jobs))
 
         except Exception as exc:
             log.warning("instahyre.fetch.error", url=feed_url, error=str(exc))
@@ -544,8 +523,56 @@ class InstahyrePlatform(BaseJobPlatform):
         log.info("instahyre.fetch.done", count=len(jobs), current_view=self._current_view)
         return jobs
 
+    async def _switch_to_page(self, target_page: int) -> bool:
+        """Safely switch to target page in Instahyre search/reco feed using AngularJS nthPage."""
+        try:
+            switched = await self.page.evaluate("""(target) => {
+                const pag = document.querySelector('div.pagination');
+                if (pag && window.angular) {
+                    const scope = window.angular.element(pag).scope();
+                    if (scope && typeof scope.nthPage === 'function') {
+                        scope.nthPage(target);
+                        scope.$evalAsync();
+                        return true;
+                    }
+                }
+                return false;
+            }""", target_page)
+            if switched:
+                try:
+                    active_page = self.page.locator("div.pagination li.active").filter(has_text=re.compile(rf"^\s*{target_page}\s*$"))
+                    await active_page.wait_for(state="visible", timeout=4000)
+                except Exception:
+                    await human_pause(1500, 2500)
+                await human_pause(500, 1000)
+                await self.page.evaluate("window.scrollTo(0, 0)")
+                return True
+        except Exception:
+            pass
+        return False
+
     async def _ensure_modal_closed(self) -> None:
-        """Forces the Instahyre carousel modal to close and removes any backdrops so the Orchestrator stays in control."""
+        """Forces the Instahyre carousel modal to close cleanly and removes any backdrops without destroying DOM templates."""
+        # 1. Native AngularJS Scope Close Trigger on employerProfileModalCtrl
+        try:
+            await self.page.evaluate("""() => {
+                const modalCtrl = document.querySelector('[ng-controller="employerProfileModalCtrl"]');
+                if (modalCtrl && window.angular) {
+                    const scope = window.angular.element(modalCtrl).scope();
+                    if (scope) {
+                        if (typeof scope.closeApplyModal === 'function') {
+                            scope.closeApplyModal();
+                        }
+                        if (scope.bulkParams) {
+                            scope.bulkParams.showApplyModal = false;
+                        }
+                        scope.$evalAsync();
+                    }
+                }
+            }""")
+        except Exception:
+            pass
+
         modal = await first_visible(
             self.page,
             ["div.modal-content", "div#employer-profile-modal", "div[class*='modal']"],
@@ -554,7 +581,7 @@ class InstahyrePlatform(BaseJobPlatform):
         if modal is not None:
             close_btn = await first_visible(
                 self.page,
-                ["button.close", "span.close", "button[aria-label='Close']", ".modal-header button"],
+                ["button.close", "span.close", "button[aria-label='Close']", ".modal-header button", ".application-modal-backdrop"],
                 timeout_ms=1000,
             )
             if close_btn:
@@ -568,10 +595,10 @@ class InstahyrePlatform(BaseJobPlatform):
                 pass
             await human_pause(300, 600)
 
-        # Force remove any hanging backdrops or promotional modals that intercept clicks
+        # Force remove ONLY promotional overlays and stray backdrops (NEVER remove .application-modal!)
         try:
             await self.page.evaluate("""() => {
-                document.querySelectorAll('.modal-backdrop, #go-premium-modal, #refer, .application-modal').forEach(el => el.remove());
+                document.querySelectorAll('.modal-backdrop, #go-premium-modal, #refer, #follow-premium-modal').forEach(el => el.remove());
                 document.body.classList.remove('modal-open');
             }""")
         except Exception:
@@ -608,22 +635,14 @@ class InstahyrePlatform(BaseJobPlatform):
                 modal = None
 
         if not modal:
-            feed_url = "https://www.instahyre.com/candidate/opportunities/?matching=true"
-            tab = job.recommendation_tab or ""
-            is_search_job = "search" in tab
-            cur_view = getattr(self, "_current_view", "search" if is_search_job else "recommended")
-
-            if is_search_job and cur_view != "search":
-                log.info("instahyre.apply.switching_view_to_search", job_id=job.job_id)
+            cur_view = getattr(self, "_current_view", "search")
+            if cur_view != "search":
+                log.info("instahyre.apply.ensuring_search_view", job_id=job.job_id)
                 if self._current_profile:
                     await self._apply_ui_filters(self._current_profile)
                 self._current_view = "search"
-            elif not is_search_job and cur_view != "recommended":
-                log.info("instahyre.apply.switching_view_to_recommended", job_id=job.job_id)
-                await self.page.goto(feed_url, wait_until="domcontentloaded")
-                await human_pause(1500, 2500)
-                await self._dismiss_modals()
-                self._current_view = "recommended"
+
+            tab = job.recommendation_tab or ""
 
             # 1. Determine target pagination page
             target_page = 1
@@ -645,16 +664,18 @@ class InstahyrePlatform(BaseJobPlatform):
 
                 if current_page_num != target_page:
                     log.info("instahyre.apply.switching_page", from_page=current_page_num, to_page=target_page)
-                    await pagination_div.scroll_into_view_if_needed()
-                    page_btn = pagination_div.locator("li").filter(has_text=re.compile(rf"^\s*{target_page}\s*$")).first
-                    if await page_btn.count() > 0:
-                        try:
-                            await page_btn.click()
-                        except Exception:
-                            await page_btn.evaluate("el => el.click()")
-                        await human_pause(1500, 2500)
-                        await self.page.evaluate("window.scrollTo(0, 0)")
-                        await human_pause(500, 1000)
+                    switched = await self._switch_to_page(target_page)
+                    if not switched:
+                        await pagination_div.scroll_into_view_if_needed()
+                        page_btn = pagination_div.locator("li").filter(has_text=re.compile(rf"^\s*{target_page}\s*$")).first
+                        if await page_btn.count() > 0:
+                            try:
+                                await page_btn.click()
+                            except Exception:
+                                await page_btn.evaluate("el => el.click()")
+                            await human_pause(1500, 2500)
+                            await self.page.evaluate("window.scrollTo(0, 0)")
+                            await human_pause(500, 1000)
 
             # Open modal from card — find by company or distinct title
             safe_title = job.title.replace("'", "\\'")
@@ -709,19 +730,21 @@ class InstahyrePlatform(BaseJobPlatform):
 
                 search_targets = [p for p in sorted(set(available_pages)) if p != target_page][:8]
                 for search_p in search_targets:
-                    await pagination_div.scroll_into_view_if_needed()
-                    p_btn = pagination_div.locator("li").filter(has_text=re.compile(rf"^\s*{search_p}\s*$")).first
-                    if await p_btn.count() > 0:
-                        log.info("instahyre.apply.searching_across_pages", page=search_p, job=f"{job.company} - {job.title}")
-                        try:
-                            await p_btn.click()
-                        except Exception:
-                            await p_btn.evaluate("el => el.click()")
-                        await human_pause(1200, 2000)
-                        await self.page.evaluate("window.scrollTo(0, 0)")
-                        card = await _find_card_on_current_view()
-                        if card:
-                            break
+                    log.info("instahyre.apply.searching_across_pages", page=search_p, job=f"{job.company} - {job.title}")
+                    switched = await self._switch_to_page(search_p)
+                    if not switched:
+                        await pagination_div.scroll_into_view_if_needed()
+                        p_btn = pagination_div.locator("li").filter(has_text=re.compile(rf"^\s*{search_p}\s*$")).first
+                        if await p_btn.count() > 0:
+                            try:
+                                await p_btn.click()
+                            except Exception:
+                                await p_btn.evaluate("el => el.click()")
+                            await human_pause(1200, 2000)
+                            await self.page.evaluate("window.scrollTo(0, 0)")
+                    card = await _find_card_on_current_view()
+                    if card:
+                        break
 
             if not card:
                 return ApplyOutcome(ApplicationStatus.FAILED, detail=f"Job card for {job.company} - {job.title} not found on feed")
@@ -754,6 +777,7 @@ class InstahyrePlatform(BaseJobPlatform):
                 self.page,
                 [
                     "div#employer-profile-modal",
+                    "div.application-modal-block",
                     "div.modal.fade.in",
                     "div.modal.in",
                     "div.modal.show",
@@ -765,7 +789,7 @@ class InstahyrePlatform(BaseJobPlatform):
                 timeout_ms=5000,
             )
             if not modal:
-                # Fallback: direct evaluate click on the link carrying ng-click="openApplyModal(opp)"
+                # Fallback 1: direct evaluate click on the link carrying ng-click="openApplyModal(opp)"
                 try:
                     direct_link = card.locator("a#employer-profile-opportunity").first
                     if await direct_link.count() > 0:
@@ -775,6 +799,7 @@ class InstahyrePlatform(BaseJobPlatform):
                             self.page,
                             [
                                 "div#employer-profile-modal",
+                                "div.application-modal-block",
                                 "div.modal.fade.in",
                                 "div.modal.in",
                                 "div.modal.show",
@@ -785,6 +810,44 @@ class InstahyrePlatform(BaseJobPlatform):
                         )
                 except Exception:
                     pass
+
+            if not modal:
+                # Fallback 2: direct AngularJS evaluate invocation on employerProfileModalCtrl scope
+                try:
+                    opened_via_angular = await card.evaluate("""(el) => {
+                        if (!window.angular) return false;
+                        const cardScope = window.angular.element(el).scope();
+                        const opp = cardScope ? cardScope.opp : null;
+                        const modalCtrl = document.querySelector('[ng-controller="employerProfileModalCtrl"]');
+                        const modalScope = modalCtrl ? window.angular.element(modalCtrl).scope() : null;
+                        if (modalScope && opp && typeof modalScope.openApplyModal === 'function') {
+                            modalScope.openApplyModal(opp);
+                            if (modalScope.bulkParams) {
+                                modalScope.bulkParams.showApplyModal = true;
+                            }
+                            modalScope.$evalAsync();
+                            return true;
+                        }
+                        return false;
+                    }""")
+                    if opened_via_angular:
+                        await human_pause(1500, 2500)
+                        modal = await first_visible(
+                            self.page,
+                            [
+                                "div#employer-profile-modal",
+                                "div.application-modal-block",
+                                "div.modal.fade.in",
+                                "div.modal.in",
+                                "div.modal.show",
+                                "div.modal-content",
+                                "div.bar-actions",
+                                "div[class*='opportunity-modal']",
+                            ],
+                            timeout_ms=5000,
+                        )
+                except Exception as exc:
+                    log.debug("instahyre.apply.angular_open_failed", error=str(exc))
 
             if not modal:
                 return ApplyOutcome(ApplicationStatus.FAILED, detail="Modal did not open after clicking card")
@@ -983,7 +1046,6 @@ class InstahyrePlatform(BaseJobPlatform):
                 "div.apply[class*='applied']",
                 "div#refer",
                 "div#go-premium-modal",
-                "div.application-modal",
                 "div[class*='bulk-apply']",
                 "button[ng-click*='applyBulk']",
                 "div.alert:has-text('applied')",

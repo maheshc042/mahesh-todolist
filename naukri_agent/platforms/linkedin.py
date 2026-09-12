@@ -993,7 +993,7 @@ class LinkedInPlatform(BaseJobPlatform):
                         target_val = "No"
                     elif any(k in low_q for k in ["gender", "sex"]):
                         target_val = "Male"
-                    elif any(k in low_q for k in ["authorized", "authorization", "commute", "relocate", "comfortable", "background", "willing", "participate", "agree", "process", "interest", "onsite", "hybrid", "remote", "budget", "salary", "lpa", "join", "immediate"]):
+                    elif any(k in low_q for k in ["authorized", "authorization", "commute", "relocate", "comfortable", "background", "willing", "participate", "agree", "process", "interest", "onsite", "hybrid", "remote", "budget", "salary", "lpa", "join", "immediate", "bond", "contract", "policy", "terms", "undertaking"]):
                         target_val = "Yes"
                     else:
                         target_val = "Yes"
@@ -1002,7 +1002,28 @@ class LinkedInPlatform(BaseJobPlatform):
                 for opt in options:
                     otext = (await safe_text(opt)).strip()
                     aria_lbl = (await opt.get_attribute("aria-label") or "").strip()
-                    if target_val and (target_val.lower() in otext.lower() or target_val.lower() in aria_lbl.lower()):
+                    opt_combo = f"{otext} {aria_lbl}".lower()
+                    is_affirmative_opt = any(y in opt_combo for y in ["yes", "agree", "okay", "ok", "accept", "willing", "available", "confirm"])
+                    is_negative_opt = any(n in opt_combo for n in ["no", "decline", "not", "disagree", "unwilling"])
+
+                    if target_val == "Yes" and (target_val.lower() in opt_combo or (is_affirmative_opt and not is_negative_opt)):
+                        try:
+                            await opt.scroll_into_view_if_needed(timeout=1000)
+                            await opt.click(force=True, timeout=1500)
+                        except Exception:
+                            pass
+                        inp = opt.locator("input[type='radio']").first
+                        if await inp.count() > 0:
+                            await inp.evaluate("""el => {
+                                el.checked = true;
+                                el.dispatchEvent(new Event('change', {bubbles: true}));
+                                el.dispatchEvent(new Event('input', {bubbles: true}));
+                                el.click();
+                            }""")
+                        await human_pause(200, 400)
+                        matched_radio = True
+                        break
+                    elif target_val and target_val.lower() in opt_combo:
                         try:
                             await opt.scroll_into_view_if_needed(timeout=1000)
                             await opt.click(force=True, timeout=1500)
@@ -1248,16 +1269,31 @@ class LinkedInPlatform(BaseJobPlatform):
                                 ans = str(max(0, min(99, round(float(num_match.group(0))))))
 
                     if not ans:
+                        max_attr = await inp.get_attribute("max")
+                        min_attr = await inp.get_attribute("min")
+                        max_val = float(max_attr) if max_attr and re.match(r"^\d+(\.\d+)?$", max_attr) else None
+                        min_val = float(min_attr) if min_attr and re.match(r"^\d+(\.\d+)?$", min_attr) else None
+
                         if any(k in label_low for k in ["notice", "how soon", "availability", "immediate", "serving"]):
                             ans = "0"
                         elif "months" in label_low:
                             ans = "6"
-                        elif "rate" in label_low or "scale" in label_low or "1 to 10" in label_low:
-                            ans = "9"
+                        elif any(k in label_low for k in ["percentile", "cet"]):
+                            ans = "92"
+                        elif "jee" in label_low:
+                            ans = "88"
+                        elif any(k in label_low for k in ["math", "class 10", "10th", "12th", "percentage", "cgpa", "marks"]):
+                            ans = "95"
+                        elif "rate" in label_low or "scale" in label_low or "out of" in label_low or "/5" in label_low or "/10" in label_low:
+                            if (max_val and max_val <= 5) or "out of 5" in label_low or "/5" in label_low or "1-5" in label_low or "1 to 5" in label_low:
+                                ans = "5"
+                            elif (max_val and max_val <= 10) or "out of 10" in label_low or "/10" in label_low or "1-10" in label_low or "1 to 10" in label_low:
+                                ans = "9"
+                            else:
+                                ans = "5" if (max_val and max_val <= 5) else "9"
                         elif "ctc" in label_low or "salary" in label_low or "compensation" in label_low:
-                            min_attr = await inp.get_attribute("min")
-                            if min_attr and float(min_attr) >= 100:
-                                ans = "650000" if float(min_attr) > 10000 else "650"
+                            if min_val and min_val >= 100:
+                                ans = "650000" if min_val > 10000 else "650"
                             elif "lakh" in label_low or "lpa" in label_low:
                                 ans = "7"
                             elif "thousand" in label_low:
@@ -1265,23 +1301,41 @@ class LinkedInPlatform(BaseJobPlatform):
                             elif any(w in label_low for w in ["inr", "annual", "per year", "per annum", "/year"]):
                                 ans = "650000"
                             else:
-                                ans = "650000" if (min_attr and float(min_attr) > 1000) else "7"
+                                ans = "650000" if (min_val and min_val > 1000) else "7"
                         else:
-                            # Skill or general years of experience -> whole integer 2
-                            ans = "2"
+                            # Skill or general years of experience -> whole integer 2 (respecting max if 1)
+                            ans = "1" if (max_val and max_val < 2) else "2"
                 else:
                     resolved = self.answers.resolve(ScreeningQuestion(text=label, kind="text"))
                     ans = resolved.value if resolved else ""
 
-                    if inp_type == "date" or any(k in label_low for k in ["start date", "joining date", "available date", "date of", "last working", "lwd", "relieving"]):
-                        import datetime
+                    import datetime
+                    if "ddmmyy" in label_low or "ddmmyyyy" in label_low or "dd-mm-yy" in label_low or "dd/mm/yy" in label_low or "dd-mm-yyyy" in label_low or "dd/mm/yyyy" in label_low:
+                        if "ddmmyyyy" in label_low or "dd-mm-yyyy" in label_low:
+                            ans = datetime.date.today().strftime("%d%m%Y" if "ddmmyyyy" in label_low else "%d-%m-%Y")
+                        elif "dd/mm/yyyy" in label_low:
+                            ans = datetime.date.today().strftime("%d/%m/%Y")
+                        elif "dd/mm/yy" in label_low:
+                            ans = datetime.date.today().strftime("%d/%m/%y")
+                        elif "dd-mm-yy" in label_low:
+                            ans = datetime.date.today().strftime("%d-%m-%y")
+                        else:
+                            ans = datetime.date.today().strftime("%d%m%y")
+                    elif inp_type == "date" or any(k in label_low for k in ["start date", "joining date", "available date", "date of", "last working", "lwd", "relieving"]):
                         ans = datetime.date.today().strftime("%Y-%m-%d")
+                    elif any(k in label_low for k in ["percentile", "cet"]):
+                        ans = "92"
+                    elif "jee" in label_low:
+                        ans = "88"
+                    elif any(k in label_low for k in ["math", "class 10", "10th", "12th", "percentage", "cgpa", "marks"]):
+                        ans = "95"
                     elif any(k in label_low for k in ["notice", "immediate", "serving", "availability"]):
                         ans = "0"
                     elif any(k in label_low for k in ["ctc", "salary", "compensation", "package"]):
                         min_attr = await inp.get_attribute("min")
-                        if min_attr and float(min_attr) >= 100:
-                            ans = "650000" if float(min_attr) > 10000 else "650"
+                        min_val = float(min_attr) if min_attr and re.match(r"^\d+(\.\d+)?$", min_attr) else None
+                        if min_val and min_val >= 100:
+                            ans = "650000" if min_val > 10000 else "650"
                         elif "lakh" in label_low or "lpa" in label_low:
                             ans = "7"
                         elif "thousand" in label_low:
@@ -1289,7 +1343,7 @@ class LinkedInPlatform(BaseJobPlatform):
                         elif any(w in label_low for w in ["inr", "annual", "per year", "per annum", "/year"]):
                             ans = "650000"
                         else:
-                            ans = "650000" if (min_attr and float(min_attr) > 1000) else "7"
+                            ans = "650000" if (min_val and min_val > 1000) else "7"
                     elif not ans or "days" in str(ans).lower():
                         if "title" in label_low:
                             ans = "Full Stack & AI Engineer"
