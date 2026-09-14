@@ -32,6 +32,46 @@ from .base import BaseJobPlatform
 
 log = get_logger(__name__)
 
+CUTSHORT_AI_SKILLS: list[str | tuple[str, str]] = [
+    "Python",
+    "Generative AI",
+    "Agentic AI",
+    "Large Language Models (LLM)",
+    ("RAG", "Retrieval Augmented Generation (RAG)"),
+    ("Artificial Intelligence", "Artificial Intelligence (AI)"),
+    "MLOps",
+    ("tuning", "Large Language Models (LLM) tuning"),
+    ("Bedrock", "AWS Bedrock"),
+    "FastAPI",
+    "LangGraph",
+    ("Prompt", "Prompt engineering"),
+    ("Vector", "Vector database"),
+    "Docker",
+    ("Node", "NodeJS (Node.js)"),
+    "TypeScript",
+    "Javascript",
+]
+
+CUTSHORT_FULLSTACK_SKILLS: list[str | tuple[str, str]] = [
+    ("React", "React.js"),
+    ("Next", "NextJs (Next.js)"),
+    "Javascript",
+    ("Node", "NodeJS (Node.js)"),
+    "TypeScript",
+    "Python",
+    "FastAPI",
+    "Docker",
+    "PostgreSQL",
+    "MongoDB",
+    "GraphQL",
+    ("Tailwind", "tailwindcss"),
+]
+
+# Unified automatically merges AI and Full Stack with zero duplication
+CUTSHORT_UNIFIED_SKILLS: list[str | tuple[str, str]] = list(
+    dict.fromkeys(CUTSHORT_AI_SKILLS + CUTSHORT_FULLSTACK_SKILLS)
+)
+
 
 class CutshortChatbot:
     """Handles recruiter screening questions and quick-reply options in Cutshort messages."""
@@ -664,58 +704,35 @@ class CutshortPlatform(BaseJobPlatform):
 
         # 1. Hiring activity on job ("In the last 1 week")
         try:
-            btn = await first_visible(self.page, ["div[data-intercom-target='hiringActivityOnJob-filter']"], timeout_ms=2500)
+            btn = await first_visible(self.page, ["div[data-intercom-target='hiringActivityOnJob-filter']"], timeout_ms=3000)
             if btn:
                 await btn.click(force=True)
                 await human_pause(500, 800)
-                opt = await first_visible(
-                    self.page,
-                    [
-                        "label:has-text('In the last')",
-                        "span:has-text('In the last')",
-                        "div:has-text('In the last')",
-                    ],
-                    timeout_ms=1500,
-                )
-                if opt:
-                    await opt.click(force=True)
-                    await human_pause(300, 500)
+                popover = self.page.locator(".react-tiny-popover-container")
+
+                # Click "In the last"
+                radio = popover.locator("text='In the last'").first
+                if await radio.is_visible():
+                    await radio.click(force=True)
+                    await human_pause(200, 400)
 
                 # Set number input to 1
-                num_input = await first_visible(self.page, ["input[type='number']"], timeout_ms=1000)
-                if num_input:
+                num_input = popover.locator("input[type='number']").first
+                if await num_input.is_visible():
                     await num_input.fill("1")
                     await human_pause(200, 400)
 
                 # If unit dropdown shows Months or Days, switch to Weeks
-                unit_btn = await first_visible(
-                    self.page,
-                    [
-                        "div:has-text('Months')",
-                        "button:has-text('Months')",
-                        "span:has-text('Months')",
-                        "div:has-text('Days')",
-                        "button:has-text('Days')",
-                        "span:has-text('Days')",
-                    ],
-                    timeout_ms=800,
-                )
-                if unit_btn:
-                    await unit_btn.click(force=True)
-                    await human_pause(250, 450)
-                    week_opt = await first_visible(
-                        self.page,
-                        [
-                            "div:has-text('Weeks')",
-                            "span:has-text('Weeks')",
-                            "div[role='option']:has-text('Weeks')",
-                            "button:has-text('Weeks')",
-                        ],
-                        timeout_ms=800,
-                    )
-                    if week_opt:
-                        await week_opt.click(force=True)
-                        await human_pause(250, 450)
+                trigger = popover.locator(".component_select_trigger_wrapper").first
+                if await trigger.is_visible():
+                    cur_unit = (await trigger.inner_text()).strip()
+                    if cur_unit != "Weeks":
+                        await trigger.click(force=True)
+                        await human_pause(300, 500)
+                        week_opt = self.page.locator("text='Weeks'").first
+                        if await week_opt.is_visible():
+                            await week_opt.click(force=True)
+                            await human_pause(200, 400)
 
                 await self.page.keyboard.press("Escape")
                 await human_pause(400, 600)
@@ -804,87 +821,56 @@ class CutshortPlatform(BaseJobPlatform):
         except Exception as exc:
             log.warning("cutshort.filters.exp_range_error", error=str(exc))
 
-        # 5. Job category (tags-filter) with accordion expansion
+        # 5. Native Skills Filter (skills-filter) with exact autocomplete options
         try:
-            btn = await first_visible(self.page, ["div[data-intercom-target='tags-filter']"], timeout_ms=2500)
+            btn = await first_visible(self.page, ["div[data-intercom-target='skills-filter']"], timeout_ms=3000)
             if btn:
                 await btn.click(force=True)
                 await human_pause(600, 1000)
+                popover = self.page.locator(".react-tiny-popover-container").first
 
-                is_ai_profile = any(k in profile.name.lower() for k in ["ai", "python", "data", "machine learning"])
-                if is_ai_profile:
-                    categories_to_select = [
-                        ("Data Science", ["Data Science", "ML Engineering", "Data Analytics"]),
-                        ("Software Development", ["Backend"]),
-                    ]
+                # Clear existing skills filter if any active from previous pass
+                clear_btn = popover.locator("text='Clear this filter'").first
+                if await clear_btn.is_visible():
+                    await clear_btn.click(force=True)
+                    await human_pause(400, 600)
+
+                prof_low = profile.name.lower()
+                is_unified = ("unified" in prof_low) or ("ai" in prof_low and "full stack" in prof_low)
+                if is_unified:
+                    skills_to_select = CUTSHORT_UNIFIED_SKILLS
+                elif "ai" in prof_low or "python" in prof_low:
+                    skills_to_select = CUTSHORT_AI_SKILLS
                 else:
-                    categories_to_select = [
-                        ("Software Development", ["Frontend", "Backend", "Fullstack", "Full Stack"]),
-                        ("Testing / QA", ["Automation Testing", "QA"]),
-                        ("DevOps", ["DevOps", "Site Reliability"]),
-                    ]
+                    skills_to_select = CUTSHORT_FULLSTACK_SKILLS
 
-                for cat_header_name, sub_tags in categories_to_select:
-                    # Find category accordion header
-                    cat_header = await first_visible(
-                        self.page,
-                        [
-                            f"div:has-text('{cat_header_name}')",
-                            f"span:has-text('{cat_header_name}')",
-                        ],
-                        timeout_ms=1200,
-                    )
-                    if cat_header:
-                        # Check if collapsed (has plus icon or sub_tags not yet visible)
-                        is_collapsed = False
-                        plus_icon = cat_header.locator("img[src*='plus']")
-                        if await plus_icon.count() > 0 and await plus_icon.first.is_visible():
-                            is_collapsed = True
-                        else:
-                            first_sub = await first_visible(self.page, [f"text={sub_tags[0]}"], timeout_ms=300)
-                            if not first_sub:
-                                is_collapsed = True
-
-                        if is_collapsed:
-                            await cat_header.click(force=True)
-                            await human_pause(400, 600)
-
-                    # Check each requested sub-tag under the category
-                    for tag_name in sub_tags:
-                        tag_el = await first_visible(
-                            self.page,
-                            [
-                                f"label:has-text('{tag_name}')",
-                                f"div[role='checkbox']:has-text('{tag_name}')",
-                                f"span:has-text('{tag_name}')",
-                                f"div:has-text('{tag_name}')",
-                            ],
-                            timeout_ms=800,
-                        )
-                        if tag_el:
-                            try:
-                                cb = tag_el.locator("input[type='checkbox']").first
-                                if await cb.count() > 0:
-                                    if not await cb.is_checked():
-                                        await cb.click(force=True)
-                                        await human_pause(150, 250)
-                                else:
-                                    is_active = await tag_el.evaluate(
-                                        "el => el.classList.contains('active') || el.getAttribute('aria-checked') === 'true' || !!el.querySelector('svg, img[src*=\"check\"]')"
-                                    )
-                                    if not is_active:
-                                        await tag_el.click(force=True)
-                                        await human_pause(150, 250)
-                                log.debug("cutshort.filters.tag_checked", category=cat_header_name, tag=tag_name)
-                            except Exception as tag_err:
-                                log.debug("cutshort.filters.tag_click_error", tag=tag_name, error=str(tag_err))
+                input_el = popover.locator("input[placeholder*='skill' i]").first
+                for item in skills_to_select:
+                    query, exact_name = item if isinstance(item, tuple) else (item, item)
+                    try:
+                        await input_el.click()
+                        await input_el.fill("")
+                        await human_type(input_el, query)
+                        await human_pause(500, 800)
+                        flyout = popover.locator(".flyout_el_wrapper").first
+                        if await flyout.count() > 0:
+                            options = await flyout.locator("div, label, span").all()
+                            for opt in options:
+                                if (await safe_text(opt)).strip() == exact_name:
+                                    await opt.click(force=True)
+                                    await human_pause(350, 550)
+                                    log.debug("cutshort.filters.skill_selected", skill=exact_name)
+                                    break
+                    except Exception as skill_err:
+                        log.debug("cutshort.filters.skill_selection_failed", skill=exact_name, error=str(skill_err))
 
                 await human_pause(400, 600)
-                await self.page.keyboard.press("Escape")
-                await human_pause(400, 600)
-                log.info("cutshort.filters.categories_applied", profile=profile.name)
+                # Close popover by clicking filter button again
+                await btn.click(force=True)
+                await human_pause(600, 1000)
+                log.info("cutshort.filters.skills_applied", profile=profile.name, count=len(skills_to_select))
         except Exception as exc:
-            log.warning("cutshort.filters.category_error", error=str(exc))
+            log.warning("cutshort.filters.skills_error", error=str(exc))
 
         log.info("cutshort.filters.applied_ui_successfully")
         await human_pause(2000, 3000)
@@ -1045,147 +1031,6 @@ class CutshortPlatform(BaseJobPlatform):
             except Exception as exc:
                 log.debug("cutshort.fetch.parse_error", error=str(exc))
                 continue
-
-        # Stage 2: Expand to active platform feed if recommended pool yields fewer than target applies
-        target_applies = profile.platform_limits.get(self.platform_name, 150)
-        min_needed_jobs = min(target_applies, 50)
-        if profile.use_recommended and len(jobs) < min_needed_jobs:
-            log.info(
-                "cutshort.fetch.stage2_expand_active_jobs",
-                current_count=len(jobs),
-                target_needed=min_needed_jobs,
-            )
-            try:
-                # Look for recommendation switch: input[role='switch'] or label containing the switch
-                switch_el = await first_visible(
-                    self.page,
-                    [
-                        "input[role='switch']",
-                        "label:has(input[role='switch'])",
-                        "div:has-text('Turn it OFF to view all jobs') input[role='switch']",
-                    ],
-                    timeout_ms=3000,
-                )
-                if switch_el:
-                    try:
-                        is_checked = await switch_el.is_checked()
-                    except Exception:
-                        is_checked = True
-                    if is_checked:
-                        await switch_el.scroll_into_view_if_needed()
-                        await human_pause(400, 800)
-                        try:
-                            await switch_el.click(force=True)
-                        except Exception:
-                            await switch_el.evaluate("el => el.click()")
-                        log.info("cutshort.fetch.turned_off_recommendation_switch")
-                        await human_pause(2000, 3500)
-
-                        # Apply all native Cutshort UI filters on the toolbar!
-                        await self._apply_ui_filters(profile)
-
-                        # Scroll to load expanded feed dynamically based on target limit
-                        stagnant_count = 0
-                        last_total = 0
-                        target_pool = min(target_applies * 2, 80)
-                        for _ in range(25):
-                            anchors_now = await self.page.locator(job_link_sel).all()
-                            current_total = len(anchors_now)
-                            if current_total >= target_pool:
-                                log.info("cutshort.fetch.target_pool_reached", count=current_total, target=target_pool)
-                                break
-                            if current_total == last_total:
-                                stagnant_count += 1
-                                if stagnant_count >= 3:
-                                    log.info("cutshort.fetch.feed_end_reached", count=current_total)
-                                    break
-                            else:
-                                stagnant_count = 0
-                                last_total = current_total
-
-                            if anchors_now:
-                                try:
-                                    await anchors_now[-1].scroll_into_view_if_needed(timeout=1500)
-                                    await anchors_now[-1].hover(timeout=500)
-                                except Exception:
-                                    pass
-                            await scroll_page(self.page, steps=3, delay_s=0.4)
-                            await human_pause(600, 1200)
-
-                        # Collect jobs from expanded feed
-                        expanded_anchors = await self.page.locator(job_link_sel).all()
-                        log.info("cutshort.fetch.expanded_cards_found", count=len(expanded_anchors))
-                        for anchor in expanded_anchors:
-                            try:
-                                url = (await anchor.get_attribute("href")) or ""
-                                if "/job/" not in url:
-                                    continue
-                                if url.startswith("/"):
-                                    url = f"https://cutshort.io{url}"
-                                if url.rstrip("/") in seen_urls:
-                                    continue
-
-                                title = (await safe_text(anchor)).strip()
-                                if not title:
-                                    continue
-                                seen_urls.add(url.rstrip("/"))
-
-                                company = ""
-                                desc = ""
-                                card_text = ""
-                                card = anchor.locator(
-                                    "xpath=ancestor::div[descendant::a[contains(@href,'/company/')]][1]"
-                                ).first
-                                if await card.count() > 0:
-                                    company = (await safe_text(card.locator("a[href*='/company/']").first)).strip()
-                                    prose_el = card.locator("div.prose").first
-                                    if await prose_el.count() > 0:
-                                        desc = (await safe_text(prose_el)).strip()
-
-                                # Climb to outer card wrapper to capture salary and experience badges
-                                full_card = anchor.locator(
-                                    "xpath=ancestor::div[(contains(.,'yrs') or contains(.,'yr') or contains(.,'Exp')) and (descendant::button[contains(.,'Apply') or contains(.,'View') or contains(.,'Applied')])][1]"
-                                ).first
-                                if await full_card.count() == 0:
-                                    full_card = anchor.locator(
-                                        "xpath=ancestor::div[descendant::button[contains(.,'Apply') or contains(.,'View') or contains(.,'Applied')]][last()]"
-                                    ).first
-
-                                if await full_card.count() > 0:
-                                    card_text = (await safe_text(full_card)).strip()
-                                elif await card.count() > 0:
-                                    card_text = (await safe_text(card)).strip()
-
-                                min_sal, max_sal = _parse_cutshort_salary(card_text)
-                                min_exp, max_exp = _parse_cutshort_experience(card_text)
-
-                                match = re.search(r"-([a-zA-Z0-9]+)$", url)
-                                job_id = f"cutshort-{match.group(1)}" if match else f"cutshort-{Job.stable_id(url, title, company)}"
-
-                                if job_id in exclude_job_ids:
-                                    continue
-
-                                jobs.append(
-                                    Job(
-                                        job_id=job_id,
-                                        title=title,
-                                        company=company,
-                                        url=url,
-                                        description=desc,
-                                        min_salary_lpa=min_sal,
-                                        max_salary_lpa=max_sal,
-                                        min_experience=min_exp,
-                                        max_experience=max_exp,
-                                        recommendation_tab="active_feed",
-                                        recommendation_position=len(jobs) + 1,
-                                        platform="cutshort",
-                                    )
-                                )
-                            except Exception as exc:
-                                log.debug("cutshort.fetch.expanded_parse_error", error=str(exc))
-                                continue
-            except Exception as exc:
-                log.warning("cutshort.fetch.stage2_expand_failed", error=str(exc))
 
         log.info("cutshort.fetch.done", count=len(jobs))
         return jobs
@@ -1440,44 +1285,62 @@ class CutshortPlatform(BaseJobPlatform):
 
         modal_text = (await safe_text(modal)).strip() if modal else ""
 
-        # Check and handle profile-specific resume swapping if configured
+        # Dynamic Per-Job Resume Selection based on job engineering track
         try:
             from ..config import PROJECT_ROOT
             cfg = AgentConfig.load()
-            prof = next((p for p in cfg.profiles if p.name.lower() == profile_name.lower()), None)
-            if prof and prof.resume_file:
-                resume_path = PROJECT_ROOT / prof.resume_file
-                if resume_path.exists():
-                    target_stem = resume_path.stem.lower()
-                    current_resume_text = (await safe_text(modal)).lower() if modal else ""
-                    if target_stem not in current_resume_text:
-                        upload_btn = await first_visible(
-                            modal or self.page,
-                            [
-                                "div:has-text('Upload another resume')",
-                                "button:has-text('Upload another resume')",
-                                "span:has-text('Upload another resume')",
-                                "a:has-text('Upload another resume')",
-                            ],
-                            timeout_ms=1500,
-                        )
-                        if upload_btn:
-                            try:
-                                await upload_btn.click(timeout=1500)
-                                await human_pause(500, 1000)
-                            except Exception:
-                                pass
-                            file_input = await first_visible(self.page, ["input[type='file']"], timeout_ms=1500)
-                            if file_input:
-                                await file_input.set_input_files(str(resume_path))
-                                await human_pause(1000, 2000)
-                                log.info(
-                                    "cutshort.apply.swapped_resume",
-                                    profile=profile_name,
-                                    resume=str(resume_path.name),
-                                )
+
+            text_for_resume = f"{job.title} {modal_text} {job.description}".lower()
+            is_ai_job = any(k in text_for_resume for k in ["ai", "llm", "genai", "gpt", "machine learning", "ml", "rag", "agent", "prompt", "nlp", "chatbot", "fastapi"])
+
+            # Map to target resume tailored for this specific job track
+            if is_ai_job:
+                target_resume_rel = "resumes/CV_Mahesh_Chitakoti_2026.pdf"
+                target_track = "AI / Python Engineer"
+            else:
+                target_resume_rel = "resumes/CV_Mahesh_Chitakoti_2026_1_.pdf"
+                target_track = "Full Stack Engineer"
+
+            resume_path = PROJECT_ROOT / target_resume_rel
+            if resume_path.exists():
+                target_stem = resume_path.stem.lower()
+                current_resume_text = (await safe_text(modal)).lower() if modal else ""
+                if target_stem not in current_resume_text:
+                    upload_btn = await first_visible(
+                        modal or self.page,
+                        [
+                            "div:has-text('Upload another resume')",
+                            "button:has-text('Upload another resume')",
+                            "span:has-text('Upload another resume')",
+                            "a:has-text('Upload another resume')",
+                        ],
+                        timeout_ms=1500,
+                    )
+                    if upload_btn:
+                        try:
+                            await upload_btn.click(timeout=1500)
+                            await human_pause(500, 1000)
+                        except Exception:
+                            pass
+                        file_input = await first_visible(self.page, ["input[type='file']"], timeout_ms=1500)
+                        if file_input:
+                            await file_input.set_input_files(str(resume_path))
+                            await human_pause(1000, 2000)
+                            log.info(
+                                "cutshort.apply.dynamic_resume_selected",
+                                job_id=job.job_id,
+                                track=target_track,
+                                resume=str(resume_path.name),
+                            )
+                else:
+                    log.info(
+                        "cutshort.apply.resume_already_matched",
+                        job_id=job.job_id,
+                        track=target_track,
+                        resume=str(resume_path.name),
+                    )
         except Exception as exc:
-            log.debug("cutshort.apply.resume_swap_failed", error=str(exc))
+            log.debug("cutshort.apply.dynamic_resume_failed", error=str(exc))
 
         recruiter_name = "Hiring Team"
         rec_match = re.search(r"To\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)", modal_text)
@@ -1526,7 +1389,7 @@ class CutshortPlatform(BaseJobPlatform):
             specific_achievement = "reliable, production-grade applications"
 
         applicant_name = AgentConfig.load().applicant_name or "Mahesh"
-        exp_years_str = str(prof.experience_years) if (prof and prof.experience_years) else "2.5"
+        exp_years_str = "2.5" if is_ai_job else "2.6"
 
         modal_scope = modal or self.page
         textarea = await first_visible(
@@ -1829,11 +1692,11 @@ class CutshortPlatform(BaseJobPlatform):
         clean = clean.replace("[Questionnaire]", "")
         return " ".join(clean.split())[:160]
 
-    def _is_stale_thread(self, text: str, max_age_days: int = 5) -> bool:
+    def _is_stale_thread(self, text: str, max_age_days: int = 3) -> bool:
         """
         Returns True if thread relative timestamp indicates it is older than max_age_days
-        (e.g., '2 weeks ago', '1 month ago', or '6 days ago').
-        Fresh threads ('seconds ago', 'minutes ago', 'hours ago', '<= 5 days ago') return False.
+        (e.g., '2 weeks ago', '1 month ago', or '4 days ago').
+        Fresh threads ('seconds ago', 'minutes ago', 'hours ago', '<= 3 days ago') return False.
         """
         match = re.search(r"\b(\d+)\s+(second|minute|hour|day|week|month)s?\s+ago\b", text, flags=re.IGNORECASE)
         if not match:
@@ -1872,9 +1735,9 @@ class CutshortPlatform(BaseJobPlatform):
                 if not key or key in processed:
                     continue
 
-                # Freshness Guard: Skip stale questionnaires from weeks/months ago
-                if self._is_stale_thread(txt, max_age_days=5):
-                    log.info("cutshort.messages.skip_stale_questionnaire", item=key[:60], age=">5 days old")
+                # Freshness Guard: Skip stale questionnaires older than 3 days
+                if self._is_stale_thread(txt, max_age_days=3):
+                    log.info("cutshort.messages.skip_stale_questionnaire", item=key[:60], age=">3 days old")
                     processed.add(key)
                     continue
 
@@ -1897,8 +1760,8 @@ class CutshortPlatform(BaseJobPlatform):
                         if not key or key in processed:
                             continue
 
-                        if self._is_stale_thread(txt, max_age_days=5):
-                            log.info("cutshort.messages.skip_stale_questionnaire", item=key[:60], age=">5 days old")
+                        if self._is_stale_thread(txt, max_age_days=3):
+                            log.info("cutshort.messages.skip_stale_questionnaire", item=key[:60], age=">3 days old")
                             processed.add(key)
                             continue
 
@@ -1955,8 +1818,8 @@ class CutshortPlatform(BaseJobPlatform):
                 if not key or key in processed:
                     continue
 
-                # Freshness Guard: Skip stale threads from weeks/months ago
-                if self._is_stale_thread(txt, max_age_days=5):
+                # Freshness Guard: Skip stale threads older than 3 days
+                if self._is_stale_thread(txt, max_age_days=3):
                     log.debug("cutshort.messages.skip_stale_inbox_thread", thread=key[:60])
                     processed.add(key)
                     continue

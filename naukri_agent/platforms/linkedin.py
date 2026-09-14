@@ -111,7 +111,7 @@ class LinkedInPlatform(BaseJobPlatform):
         policy: RunPolicy,
         config: AgentConfig | None = None,
         location: str = "India",
-        days: int = 1,
+        days: int = 3,
     ):
         super().__init__(page, account.key, policy)
         self.account = account
@@ -119,7 +119,8 @@ class LinkedInPlatform(BaseJobPlatform):
         self.answers = answers
         self.config = config or AgentConfig.load()
         self.location = location
-        self.days = days
+        cfg_days = getattr(getattr(self.config, "linkedin", None), "days", None)
+        self.days = cfg_days if cfg_days is not None else days
 
     @property
     def platform_name(self) -> str:
@@ -184,9 +185,10 @@ class LinkedInPlatform(BaseJobPlatform):
             log.error("linkedin.auth.timeout")
             return False
 
-    def _get_search_url(self, profile: JobProfile) -> str:
-        """Constructs target Easy Apply search URL tailored to candidate profile with 24h freshness."""
-        tpr_seconds = self.days * 86400
+    def _get_search_url(self, profile: JobProfile, days: int | None = None) -> str:
+        """Constructs target Easy Apply search URL tailored to candidate profile with freshness."""
+        effective_days = days if days is not None else self.days
+        tpr_seconds = effective_days * 86400
         prof_name = (profile.name or "").lower()
         if any(k in prof_name for k in ["ai", "python", "machine learning", "ml"]):
             query = AI_TARGET_QUERY
@@ -278,15 +280,149 @@ class LinkedInPlatform(BaseJobPlatform):
         reason = f"{match_info} (Score: {score}/100)" if is_suitable else f"Low relevance score ({score}/100)"
         return is_suitable, reason, score
 
+    async def _scroll_and_extract_cards(
+        self,
+        scrape_target: int,
+        exclude_job_ids: set[str],
+        seen_ids: set[str],
+        jobs: list[Job],
+    ) -> int:
+        """Scrolls the job listings pane and extracts fresh job cards."""
+        try:
+            await self.page.wait_for_selector(
+                ".jobs-search-results-list, .scaffold-layout__list, li.jobs-search-results__list-item, div.job-card-container, div.base-card, ul.jobs-search__results-list",
+                timeout=12000,
+            )
+        except Exception:
+            pass
+
+        # Scroll the listings pane (supporting both split-view and grid layouts)
+        list_pane = await first_visible(
+            self.page,
+            [
+                ".jobs-search-results-list",
+                ".scaffold-layout__list",
+                "div[class*='jobs-search-results-list']",
+                ".jobs-search__results-list",
+                "ul.jobs-search__results-list",
+                "main",
+            ],
+            timeout_ms=3000,
+        )
+        if list_pane:
+            try:
+                await list_pane.hover()
+            except Exception:
+                pass
+
+        for _ in range(6):
+            try:
+                await self.page.mouse.wheel(0, 700)
+                await human_pause(500, 1000)
+            except Exception:
+                pass
+
+        card_locators = self.page.locator(
+            ".jobs-search-results-list li, .scaffold-layout__list-container li, li.jobs-search-results__list-item, "
+            "div.job-card-container, div[data-job-id], div.base-card, div.base-search-card, "
+            "ul.jobs-search__results-list li, div[data-entity-urn*='jobPosting']"
+        )
+        total_cards = await card_locators.count()
+        if total_cards == 0:
+            return 0
+
+        page_added = 0
+        for idx in range(total_cards):
+            if len(jobs) >= scrape_target:
+                break
+            try:
+                card = card_locators.nth(idx)
+                if not await card.is_visible():
+                    await card.scroll_into_view_if_needed()
+                    await human_pause(100, 200)
+                if not await card.is_visible():
+                    continue
+
+                title_el = card.locator("a.job-card-list__title, a.base-card__full-link, .base-search-card__title, h3, a[href*='/jobs/view/'], strong").first
+                company_el = card.locator(".job-card-container__primary-description, .artdeco-entity-lockup__subtitle, span.job-card-container__publisher, .job-card-container__company-name, h4, a.hidden-nested-link, .base-search-card__subtitle").first
+                loc_el = card.locator(".job-card-container__metadata-item, .artdeco-entity-lockup__caption, .job-search-card__location, .base-search-card__metadata").first
+
+                title = (await safe_text(title_el)).strip()
+                title = re.sub(r"\s+with verification\b", "", title, flags=re.IGNORECASE).strip()
+                half_len = len(title) // 2
+                if half_len > 3 and title[:half_len].strip() == title[half_len:].strip():
+                    title = title[:half_len].strip()
+                company = (await safe_text(company_el)).strip()
+                location = (await safe_text(loc_el)).strip()
+
+                if not title or len(title) < 3:
+                    continue
+
+                card_url = ""
+                if await title_el.count() > 0:
+                    card_url = (await title_el.get_attribute("href") or "").split("?")[0]
+                if card_url and not card_url.startswith("http"):
+                    card_url = f"https://www.linkedin.com{card_url}"
+
+                raw_id = None
+                entity_urn = await card.get_attribute("data-entity-urn") or await card.get_attribute("data-job-id") or ""
+                urn_match = re.search(r"(\d{7,})", entity_urn)
+                if urn_match:
+                    raw_id = urn_match.group(1)
+                if not raw_id and card_url:
+                    url_match = re.search(r"/view/.*?(\d{7,})", card_url) or re.search(r"(\d{7,})", card_url)
+                    if url_match:
+                        raw_id = url_match.group(1)
+                if not raw_id:
+                    raw_id = Job.stable_id(card_url, title, company)
+                job_id = f"linkedin-{raw_id}"
+
+                if job_id in exclude_job_ids or job_id in seen_ids:
+                    continue
+                seen_ids.add(job_id)
+
+                card_text = (await safe_text(card)).strip()
+                min_exp, max_exp = None, None
+                exp_match = re.search(r"(\d+(?:\.\d+)?)\s*(?:-|to|\+)\s*(\d+(?:\.\d+)?)?\s*(?:yrs|years|yr)", f"{title} {card_text}", re.IGNORECASE)
+                if exp_match:
+                    min_exp = float(exp_match.group(1))
+                    if exp_match.group(2):
+                        max_exp = float(exp_match.group(2))
+                    elif "+" in exp_match.group(0):
+                        max_exp = min_exp + 5.0
+                elif any(k in f"{title} {card_text}".lower() for k in ("senior", "sr.", "sr ", "lead", "principal", "staff")):
+                    min_exp = 5.0
+                    max_exp = 10.0
+                elif any(k in f"{title} {card_text}".lower() for k in ("intern", "trainee", "fresher")):
+                    min_exp = 0.0
+                    max_exp = 0.0
+
+                job = Job(
+                    job_id=job_id,
+                    title=title,
+                    company=company or "Confidential",
+                    url=card_url or self.page.url,
+                    location=location,
+                    min_experience=min_exp,
+                    max_experience=max_exp,
+                    platform="linkedin",
+                )
+                jobs.append(job)
+                page_added += 1
+            except Exception:
+                continue
+        return page_added
+
     async def fetch_jobs(self, profile: JobProfile, exclude_job_ids: set[str]) -> list[Job]:
         """Fetches fresh Easy Apply jobs from LinkedIn job search with left-pane scrolling across pages."""
-        base_search_url = self._get_search_url(profile)
+        current_days = self.days
+        base_search_url = self._get_search_url(profile, days=current_days)
         target_applies = profile.platform_limits.get(self.platform_name, 50)
         # Scrape a generous pool (2.5x the apply target) so that after hard filtering
         # and recruiter alignment, the apply engine actually has enough eligible jobs
         # to satisfy the application quota (e.g. 50 successful applies).
         scrape_target = max(125, int(target_applies * 2.5))
-        log.info("linkedin.fetch.start", profile=profile.name, target_applies=target_applies, scrape_target=scrape_target)
+        log.info("linkedin.fetch.start", profile=profile.name, target_applies=target_applies, scrape_target=scrape_target, days=current_days)
 
         jobs: list[Job] = []
         seen_ids: set[str] = set()
@@ -306,6 +442,27 @@ class LinkedInPlatform(BaseJobPlatform):
                 except Exception as exc:
                     log.warning("linkedin.fetch.goto_error", page=1, error=str(exc))
                     break
+
+                page_added = await self._scroll_and_extract_cards(scrape_target, exclude_job_ids, seen_ids, jobs)
+                log.info("linkedin.fetch.page_done", page=1, added=page_added, total=len(jobs))
+
+                # Fallback to past week (7 days) if page 1 yields fewer than 10 jobs
+                if len(jobs) < 10 and current_days < 7:
+                    log.info(
+                        "linkedin.fetch.fallback_past_week",
+                        page1_count=len(jobs),
+                        current_days=current_days,
+                        fallback_days=7,
+                    )
+                    current_days = 7
+                    base_search_url = self._get_search_url(profile, days=7)
+                    try:
+                        await self.page.goto(base_search_url, wait_until="domcontentloaded", timeout=35000)
+                        await human_pause(2500, 4000)
+                        fb_added = await self._scroll_and_extract_cards(scrape_target, exclude_job_ids, seen_ids, jobs)
+                        log.info("linkedin.fetch.fallback_page_done", page=1, added=fb_added, total=len(jobs))
+                    except Exception as exc:
+                        log.warning("linkedin.fetch.fallback_goto_error", error=str(exc))
             else:
                 page_clicked = False
                 try:
@@ -352,132 +509,9 @@ class LinkedInPlatform(BaseJobPlatform):
                         log.warning("linkedin.fetch.goto_error", page=target_page_num, error=str(exc))
                         break
 
-            try:
-                await self.page.wait_for_selector(
-                    ".jobs-search-results-list, .scaffold-layout__list, li.jobs-search-results__list-item, div.job-card-container, div.base-card, ul.jobs-search__results-list",
-                    timeout=12000,
-                )
-            except Exception:
-                pass
+                page_added = await self._scroll_and_extract_cards(scrape_target, exclude_job_ids, seen_ids, jobs)
+                log.info("linkedin.fetch.page_done", page=target_page_num, added=page_added, total=len(jobs))
 
-            # Scroll the listings pane (supporting both split-view and grid layouts)
-            list_pane = await first_visible(
-                self.page,
-                [
-                    ".jobs-search-results-list",
-                    ".scaffold-layout__list",
-                    "div[class*='jobs-search-results-list']",
-                    ".jobs-search__results-list",
-                    "ul.jobs-search__results-list",
-                    "main",
-                ],
-                timeout_ms=3000,
-            )
-            if list_pane:
-                try:
-                    await list_pane.hover()
-                except Exception:
-                    pass
-
-            for _ in range(6):
-                try:
-                    await self.page.mouse.wheel(0, 700)
-                    await human_pause(500, 1000)
-                except Exception:
-                    pass
-
-            card_locators = self.page.locator(
-                ".jobs-search-results-list li, .scaffold-layout__list-container li, li.jobs-search-results__list-item, "
-                "div.job-card-container, div[data-job-id], div.base-card, div.base-search-card, "
-                "ul.jobs-search__results-list li, div[data-entity-urn*='jobPosting']"
-            )
-            total_cards = await card_locators.count()
-            if total_cards == 0:
-                log.info("linkedin.fetch.no_more_cards", page=page_idx + 1)
-                break
-
-            page_added = 0
-            for idx in range(total_cards):
-                if len(jobs) >= scrape_target:
-                    break
-                try:
-                    card = card_locators.nth(idx)
-                    if not await card.is_visible():
-                        await card.scroll_into_view_if_needed()
-                        await human_pause(100, 200)
-                    if not await card.is_visible():
-                        continue
-
-                    title_el = card.locator("a.job-card-list__title, a.base-card__full-link, .base-search-card__title, h3, a[href*='/jobs/view/'], strong").first
-                    company_el = card.locator(".job-card-container__primary-description, .artdeco-entity-lockup__subtitle, span.job-card-container__publisher, .job-card-container__company-name, h4, a.hidden-nested-link, .base-search-card__subtitle").first
-                    loc_el = card.locator(".job-card-container__metadata-item, .artdeco-entity-lockup__caption, .job-search-card__location, .base-search-card__metadata").first
-
-                    title = (await safe_text(title_el)).strip()
-                    title = re.sub(r"\s+with verification\b", "", title, flags=re.IGNORECASE).strip()
-                    half_len = len(title) // 2
-                    if half_len > 3 and title[:half_len].strip() == title[half_len:].strip():
-                        title = title[:half_len].strip()
-                    company = (await safe_text(company_el)).strip()
-                    location = (await safe_text(loc_el)).strip()
-
-                    if not title or len(title) < 3:
-                        continue
-
-                    card_url = ""
-                    if await title_el.count() > 0:
-                        card_url = (await title_el.get_attribute("href") or "").split("?")[0]
-                    if card_url and not card_url.startswith("http"):
-                        card_url = f"https://www.linkedin.com{card_url}"
-
-                    raw_id = None
-                    entity_urn = await card.get_attribute("data-entity-urn") or await card.get_attribute("data-job-id") or ""
-                    urn_match = re.search(r"(\d{7,})", entity_urn)
-                    if urn_match:
-                        raw_id = urn_match.group(1)
-                    if not raw_id and card_url:
-                        url_match = re.search(r"/view/.*?(\d{7,})", card_url) or re.search(r"(\d{7,})", card_url)
-                        if url_match:
-                            raw_id = url_match.group(1)
-                    if not raw_id:
-                        raw_id = Job.stable_id(card_url, title, company)
-                    job_id = f"linkedin-{raw_id}"
-
-                    if job_id in exclude_job_ids or job_id in seen_ids:
-                        continue
-                    seen_ids.add(job_id)
-
-                    card_text = (await safe_text(card)).strip()
-                    min_exp, max_exp = None, None
-                    exp_match = re.search(r"(\d+(?:\.\d+)?)\s*(?:-|to|\+)\s*(\d+(?:\.\d+)?)?\s*(?:yrs|years|yr)", f"{title} {card_text}", re.IGNORECASE)
-                    if exp_match:
-                        min_exp = float(exp_match.group(1))
-                        if exp_match.group(2):
-                            max_exp = float(exp_match.group(2))
-                        elif "+" in exp_match.group(0):
-                            max_exp = min_exp + 5.0
-                    elif any(k in f"{title} {card_text}".lower() for k in ("senior", "sr.", "sr ", "lead", "principal", "staff")):
-                        min_exp = 5.0
-                        max_exp = 10.0
-                    elif any(k in f"{title} {card_text}".lower() for k in ("intern", "trainee", "fresher")):
-                        min_exp = 0.0
-                        max_exp = 0.0
-
-                    job = Job(
-                        job_id=job_id,
-                        title=title,
-                        company=company or "Confidential",
-                        url=card_url or self.page.url,
-                        location=location,
-                        min_experience=min_exp,
-                        max_experience=max_exp,
-                        platform="linkedin",
-                    )
-                    jobs.append(job)
-                    page_added += 1
-                except Exception:
-                    continue
-
-            log.info("linkedin.fetch.page_done", page=page_idx + 1, added=page_added, total=len(jobs))
             if page_added == 0 and (len(jobs) >= 20 or page_idx >= 1):
                 log.info("linkedin.fetch.no_new_jobs_done", total=len(jobs))
                 break

@@ -238,6 +238,30 @@ class ChatbotHandler:
 
         return closest_idx
 
+    @staticmethod
+    def _match_option_text(opt_text: str, val_clean: str) -> bool:
+        """Fuzzy matches options, chips, and combobox entries."""
+        ct = opt_text.strip().lower()
+        rv = val_clean.strip().lower()
+        if not ct or not rv:
+            return False
+        if ct == rv or rv in ct or ct in rv:
+            return True
+        if rv in ("yes", "true") and any(w in ct for w in ["yes", "agree", "comfortable", "available", "willing", "open", "ready", "works", "sure"]):
+            return True
+        if rv in ("no", "false") and any(w in ct for w in ["no", "never", "not"]):
+            return True
+        if any(c in rv for c in ["bengaluru", "bangalore"]):
+            if any(w in ct for w in ["bengaluru", "bangalore", "yes", "willing", "open", "relocate"]):
+                return True
+        if any(c in rv for c in ["mumbai", "bombay"]):
+            if any(w in ct for w in ["mumbai", "bombay", "yes", "willing", "open", "relocate"]):
+                return True
+        if any(c in rv for c in ["hyderabad", "delhi", "noida", "pune", "chennai"]):
+            if any(w in ct for w in [rv, "yes", "willing", "open", "relocate"]):
+                return True
+        return False
+
     async def _answer_combobox(self, value: str) -> bool:
         """Handles modern React custom dropdowns and searchable select comboboxes."""
         await self._dismiss_blocking_overlays()
@@ -264,17 +288,20 @@ class ChatbotHandler:
             except Exception:
                 pass
 
-        # Step 3: Find matching option locator (exact text match first)
+        # Step 3: Find matching option locator (exact text match or fuzzy match)
         for selector in S.CHATBOT_DROPDOWN_OPTIONS:
             locators = await self.page.locator(selector).all()
             for locator in locators:
                 try:
                     if not await locator.is_visible():
                         continue
-                    text = (await safe_text(locator)).strip().lower()
-                    if text and (text == val_clean or val_clean in text or text in val_clean):
+                    text = (await safe_text(locator)).strip()
+                    if text and self._match_option_text(text, val_clean):
                         self.policy.require_mutation("naukri.screening.answer")
-                        await locator.click(force=True, timeout=2_500)
+                        try:
+                            await locator.click(force=True, timeout=2_500)
+                        except Exception:
+                            await locator.evaluate("el => el.click()")
                         await human_pause(200, 500)
                         await self._submit()
                         return True
@@ -320,8 +347,8 @@ class ChatbotHandler:
         for selector in selectors:
             locators = await self.page.locator(selector).all()
             for locator in locators:
-                text = (await safe_text(locator)).strip().lower()
-                if text and (text == val_clean or val_clean in text or text in val_clean):
+                text = (await safe_text(locator)).strip()
+                if text and self._match_option_text(text, val_clean):
                     try:
                         self.policy.require_mutation("naukri.screening.answer")
                         await locator.click(force=True, timeout=3_000)
@@ -329,7 +356,13 @@ class ChatbotHandler:
                         await self._submit()
                         return True
                     except Exception:
-                        continue
+                        try:
+                            await locator.evaluate("el => el.click()")
+                            await human_pause(200, 500)
+                            await self._submit()
+                            return True
+                        except Exception:
+                            continue
 
         # Numeric range fallback for radio / chip options (e.g. experience chips '2-3 years')
         texts = []
@@ -461,6 +494,19 @@ class ChatbotHandler:
                     )
 
             if not ok:
+                # Before raising failure, verify if the submission triggered page redirect to Apply Confirmation
+                is_confirmed = (
+                    await self._fast_check(S.APPLY_SUCCESS)
+                    or "applied" in self.page.url.lower()
+                    or "confirmation" in (await self.page.title()).lower()
+                    or await self.page.locator("meta[name='atdlayout'][content='jobapplied'], meta[atdlayout='jobapplied']").count() > 0
+                )
+                if is_confirmed:
+                    result.completed = True
+                    result.error = None
+                    log.info("chatbot.page_confirmed_on_answer", answered=result.answered)
+                    break
+
                 result.error = f"could not submit answer for: {question.text[:120]}"
                 log.error("chatbot.answer_submit_failed", question=question.text[:150])
                 break
@@ -474,8 +520,14 @@ class ChatbotHandler:
             )
 
         if not result.completed and result.error is None:
-            # Drawer gone == Naukri accepted the application.
-            result.completed = not await self.is_open(1_500)
+            is_confirmed = (
+                await self._fast_check(S.APPLY_SUCCESS)
+                or "applied" in self.page.url.lower()
+                or "confirmation" in (await self.page.title()).lower()
+                or await self.page.locator("meta[name='atdlayout'][content='jobapplied'], meta[atdlayout='jobapplied']").count() > 0
+            )
+            # Drawer gone or confirmation page visible == Naukri accepted the application.
+            result.completed = is_confirmed or not await self.is_open(1_500)
 
         await dismiss_overlays(self.page)
         return result

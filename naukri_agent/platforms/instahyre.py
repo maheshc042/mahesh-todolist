@@ -15,7 +15,7 @@ from ..browser.resilience import (
     human_type,
     safe_text,
 )
-from ..config import JobProfile, NaukriAccount, get_settings
+from ..config import AgentConfig, JobProfile, NaukriAccount, get_settings
 from ..core.models import ApplicationStatus, ApplyOutcome, FilterDecision, Job, SkipReason
 from ..core.run_policy import RunPolicy
 from ..logging_setup import get_logger
@@ -25,18 +25,34 @@ log = get_logger(__name__)
 
 
 class InstahyrePlatform(BaseJobPlatform):
-    def __init__(self, page: Page, account: NaukriAccount, artifacts: ArtifactStore, policy: RunPolicy):
+    def __init__(
+        self,
+        page: Page,
+        account: NaukriAccount,
+        artifacts: ArtifactStore,
+        policy: RunPolicy,
+        config: AgentConfig | None = None,
+    ):
         super().__init__(page, account.key, policy)
         self.account = account
         self.artifacts = artifacts
+        self.policy = policy
+        self.config = config
         self._current_view: str = "recommended"
         self._current_profile: JobProfile | None = None
+        self.logged_out_markers = [
+            "input[type='email']",
+            "input[name='email']",
+            "input[type='password']",
+            "form[action*='login']",
+        ]
 
     @property
     def platform_name(self) -> str:
         return "instahyre"
 
     async def ensure_logged_in(self) -> bool:
+        self._current_view = "recommended"
         await self.page.goto(
             "https://www.instahyre.com/candidate/opportunities/?matching=true", wait_until="domcontentloaded"
         )
@@ -156,12 +172,23 @@ class InstahyrePlatform(BaseJobPlatform):
             timeout_ms=2500,
         )
 
-        # Target skills strictly tailored to Node.js and Python (no React.js in search filter)
-        prof_name = (profile.name or "").lower()
-        if any(k in prof_name for k in ["ai", "machine learning", "ml"]):
-            target_skills = ["Python"]
-        else:
-            target_skills = ["Node.js", "Python"]
+        # Target skills: Configured skill set (Python, Node.js, React.js, TypeScript, FastAPI, Next.js, Generative AI, LLMs, AWS)
+        inst_cfg = getattr(self.config, "instahyre", None) if self.config else None
+        target_skills = (
+            inst_cfg.skills
+            if inst_cfg and inst_cfg.skills
+            else [
+                "Python",
+                "Node.js",
+                "React.js",
+                "TypeScript",
+                "FastAPI",
+                "Next.js",
+                "Generative AI",
+                "LLMs",
+                "AWS",
+            ]
+        )
 
         if skills_input:
             # Clear any pre-existing stale skill tags
@@ -170,7 +197,7 @@ class InstahyrePlatform(BaseJobPlatform):
                 for rem in remove_buttons:
                     try:
                         await rem.click()
-                        await human_pause(100, 300)
+                        await human_pause(100, 250)
                     except Exception:
                         pass
             except Exception:
@@ -179,12 +206,18 @@ class InstahyrePlatform(BaseJobPlatform):
             for skill in target_skills:
                 try:
                     await skills_input.click()
-                    await human_pause(200, 400)
+                    await human_pause(150, 300)
                     await skills_input.fill("")
                     await human_type(skills_input, skill)
-                    await human_pause(400, 600)
-                    await skills_input.press("Enter")
-                    await human_pause(400, 800)
+                    await human_pause(300, 500)
+
+                    # Click matching selectize dropdown option if visible, else press Enter
+                    opt_loc = self.page.locator(".selectize-dropdown .option.active, .selectize-dropdown .option").first
+                    if await opt_loc.count() > 0 and await opt_loc.is_visible():
+                        await opt_loc.click()
+                    else:
+                        await skills_input.press("Enter")
+                    await human_pause(250, 450)
                 except Exception as exc:
                     log.debug("instahyre.filters.skill_select_failed", skill=skill, error=str(exc))
 
@@ -198,7 +231,9 @@ class InstahyrePlatform(BaseJobPlatform):
             ],
             timeout_ms=2000,
         )
-        if profile.experience_years > 0:
+        if inst_cfg and inst_cfg.experience_years is not None:
+            exp_val = str(int(inst_cfg.experience_years))
+        elif profile.experience_years > 0:
             exp_val = str(int(profile.experience_years))
         elif profile.filters and profile.filters.experience and profile.filters.experience.max_years < 50:
             exp_val = str(int(profile.filters.experience.max_years))
@@ -524,31 +559,72 @@ class InstahyrePlatform(BaseJobPlatform):
         return jobs
 
     async def _switch_to_page(self, target_page: int) -> bool:
-        """Safely switch to target page in Instahyre search/reco feed using AngularJS nthPage."""
+        """Safely switch to target page in Instahyre search/reco feed using direct pagination element interaction."""
         try:
-            switched = await self.page.evaluate("""(target) => {
-                const pag = document.querySelector('div.pagination');
-                if (pag && window.angular) {
-                    const scope = window.angular.element(pag).scope();
-                    if (scope && typeof scope.nthPage === 'function') {
-                        scope.nthPage(target);
-                        scope.$evalAsync();
-                        return true;
-                    }
-                }
-                return false;
-            }""", target_page)
-            if switched:
+            pagination_div = self.page.locator("div.pagination").first
+            if await pagination_div.count() == 0:
+                return False
+
+            # Check if current page is already target_page
+            active_btn = pagination_div.locator("li.active").first
+            if await active_btn.count() > 0:
+                cur_text = (await safe_text(active_btn)).strip()
+                if cur_text == str(target_page):
+                    return True
+
+            # Scroll pagination into view
+            await pagination_div.scroll_into_view_if_needed()
+            await human_pause(200, 400)
+
+            # Locate the exact page number li
+            page_btn = pagination_div.locator("li").filter(has_text=re.compile(rf"^\s*{target_page}\s*$")).first
+            clicked = False
+            if await page_btn.count() > 0:
                 try:
-                    active_page = self.page.locator("div.pagination li.active").filter(has_text=re.compile(rf"^\s*{target_page}\s*$"))
-                    await active_page.wait_for(state="visible", timeout=4000)
+                    await page_btn.click(timeout=3000)
+                    clicked = True
                 except Exception:
-                    await human_pause(1500, 2500)
-                await human_pause(500, 1000)
-                await self.page.evaluate("window.scrollTo(0, 0)")
-                return True
-        except Exception:
-            pass
+                    await page_btn.evaluate("el => el.click()")
+                    clicked = True
+
+            if not clicked:
+                # If target page number is beyond current visible numbers, click Next
+                next_btn = pagination_div.locator("li:has-text('Next'):not(.hidden)").first
+                if await next_btn.count() > 0:
+                    try:
+                        await next_btn.click(timeout=3000)
+                        clicked = True
+                    except Exception:
+                        await next_btn.evaluate("el => el.click()")
+                        clicked = True
+
+            if not clicked:
+                return False
+
+            # Wait for active page indicator to update
+            active_target = pagination_div.locator("li.active").filter(has_text=re.compile(rf"^\s*{target_page}\s*$"))
+            try:
+                await active_target.wait_for(state="visible", timeout=5000)
+            except Exception:
+                await human_pause(1200, 2000)
+
+            # Wait for cards to be rendered on the feed
+            try:
+                await self.page.locator("div.employer-row").first.wait_for(state="visible", timeout=4000)
+            except Exception:
+                pass
+
+            await self.page.evaluate("window.scrollTo(0, 0)")
+            await human_pause(400, 800)
+
+            # Verify that the active page is indeed target_page
+            now_active = pagination_div.locator("li.active").first
+            if await now_active.count() > 0:
+                now_text = (await safe_text(now_active)).strip()
+                if now_text == str(target_page):
+                    return True
+        except Exception as exc:
+            log.debug("instahyre.pagination.switch_failed", target_page=target_page, error=str(exc))
         return False
 
     async def _ensure_modal_closed(self) -> None:
@@ -666,22 +742,23 @@ class InstahyrePlatform(BaseJobPlatform):
                     log.info("instahyre.apply.switching_page", from_page=current_page_num, to_page=target_page)
                     switched = await self._switch_to_page(target_page)
                     if not switched:
-                        await pagination_div.scroll_into_view_if_needed()
-                        page_btn = pagination_div.locator("li").filter(has_text=re.compile(rf"^\s*{target_page}\s*$")).first
-                        if await page_btn.count() > 0:
-                            try:
-                                await page_btn.click()
-                            except Exception:
-                                await page_btn.evaluate("el => el.click()")
-                            await human_pause(1500, 2500)
-                            await self.page.evaluate("window.scrollTo(0, 0)")
-                            await human_pause(500, 1000)
+                        log.warning("instahyre.apply.page_switch_unconfirmed", from_page=current_page_num, to_page=target_page)
 
             # Open modal from card — find by company or distinct title
             safe_title = job.title.replace("'", "\\'")
             safe_company = job.company.replace("'", "\\'")
 
             async def _find_card_on_current_view():
+                job_comp_lower = (job.company or "").lower().strip()
+                job_title_lower = (job.title or "").lower().strip()
+
+                async def _is_applied_card(row_loc) -> bool:
+                    try:
+                        applied_marker = row_loc.locator("button:has-text('Applied'), span:has-text('Applied'), div:has-text('Applied')").first
+                        return await applied_marker.count() > 0 and await applied_marker.is_visible()
+                    except Exception:
+                        return False
+
                 # 1. First priority: Card containing BOTH company name and title
                 if safe_company and safe_title:
                     try:
@@ -691,32 +768,29 @@ class InstahyrePlatform(BaseJobPlatform):
                     except Exception:
                         pass
 
-                # 2. Second priority: Card containing the company name selector
-                if safe_company:
-                    try:
-                        loc = self.page.locator(f"div.employer-row:has-text('{safe_company}')").first
-                        if await loc.count() > 0 and await loc.is_visible():
-                            return loc
-                    except Exception:
-                        pass
-
                 all_rows = await self.page.locator("div.employer-row").all()
-                job_comp_lower = (job.company or "").lower().strip()
-                job_title_lower = (job.title or "").lower().strip()
 
                 # Pass 1: both company and title match in row text
+                clean_comp = re.sub(r'\b(pvt|ltd|limited|private|technologies|inc|corp|labs)\b|[.\s]ai\b|[.\s]io\b', '', job_comp_lower).strip()
                 if job_comp_lower and job_title_lower:
                     for row in all_rows:
                         row_text = (await safe_text(row)).lower()
-                        if job_comp_lower in row_text and (job_title_lower in row_text or job_title_lower[:25] in row_text):
+                        comp_match = (job_comp_lower in row_text) or (len(clean_comp) >= 3 and clean_comp in row_text)
+                        title_match = (job_title_lower in row_text or job_title_lower[:25] in row_text)
+                        if comp_match and title_match:
                             return row
 
-                # Pass 2: exact company match in row text
+                # Pass 2: exact company match in row text WHERE the card is NOT already applied
+                unapplied_comp_row = None
                 if job_comp_lower:
                     for row in all_rows:
                         row_text = (await safe_text(row)).lower()
-                        if job_comp_lower in row_text:
-                            return row
+                        comp_match = (job_comp_lower in row_text) or (len(clean_comp) >= 3 and clean_comp in row_text)
+                        if comp_match:
+                            if not await _is_applied_card(row):
+                                return row
+                            if unapplied_comp_row is None:
+                                unapplied_comp_row = row
 
                 # Pass 3: distinctive title match (only if title is not overly generic)
                 generic_titles = {
@@ -731,11 +805,11 @@ class InstahyrePlatform(BaseJobPlatform):
                         if job_title_lower[:30] in row_text:
                             return row
 
-                return None
+                return unapplied_comp_row
 
             card = await _find_card_on_current_view()
 
-            # Dynamic pagination scan: if not on target_page, search across pages 1 to 8
+            # Dynamic pagination scan: if not on target_page, search across pages 1 to 10
             if not card and await pagination_div.count() > 0:
                 available_pages: list[int] = []
                 page_items = await pagination_div.locator("li").all()
@@ -744,23 +818,15 @@ class InstahyrePlatform(BaseJobPlatform):
                     if txt.isdigit():
                         available_pages.append(int(txt))
 
-                search_targets = [p for p in sorted(set(available_pages)) if p != target_page][:8]
+                search_targets = [p for p in sorted(set(available_pages)) if p != target_page][:10]
                 for search_p in search_targets:
                     log.info("instahyre.apply.searching_across_pages", page=search_p, job=f"{job.company} - {job.title}")
                     switched = await self._switch_to_page(search_p)
-                    if not switched:
-                        await pagination_div.scroll_into_view_if_needed()
-                        p_btn = pagination_div.locator("li").filter(has_text=re.compile(rf"^\s*{search_p}\s*$")).first
-                        if await p_btn.count() > 0:
-                            try:
-                                await p_btn.click()
-                            except Exception:
-                                await p_btn.evaluate("el => el.click()")
-                            await human_pause(1200, 2000)
-                            await self.page.evaluate("window.scrollTo(0, 0)")
-                    card = await _find_card_on_current_view()
-                    if card:
-                        break
+                    if switched:
+                        card = await _find_card_on_current_view()
+                        if card:
+                            log.info("instahyre.apply.card_found_on_page", page=search_p, job=f"{job.company} - {job.title}")
+                            break
 
             if not card:
                 return ApplyOutcome(ApplicationStatus.FAILED, detail=f"Job card for {job.company} - {job.title} not found on feed")
@@ -1057,6 +1123,10 @@ class InstahyrePlatform(BaseJobPlatform):
                 "text=You have applied",
                 "button:has-text('Applied')",
                 "button.btn-disabled:has-text('Applied')",
+                "button[class*='applied']",
+                "span[class*='applied']",
+                "div[class*='applied']",
+                "span.applied-badge",
                 "div.apply button:has-text('Applied')",
                 "div.apply[class*='disabled']",
                 "div.apply[class*='applied']",
@@ -1079,8 +1149,23 @@ class InstahyrePlatform(BaseJobPlatform):
                 is_modal_vis = await modal.is_visible()
                 if not is_modal_vis:
                     modal_closed_after_submit = True
+                else:
+                    # If modal is open but displays a different job/company, carousel advanced upon submission
+                    modal_title_el = modal.locator(".employer-job-name, .company-name, h3, h4").first
+                    if await modal_title_el.count() > 0:
+                        current_modal_text = (await safe_text(modal_title_el)).lower()
+                        if job.title.lower()[:20] not in current_modal_text and (not job.company or job.company.lower() not in current_modal_text):
+                            modal_closed_after_submit = True
             except Exception:
                 modal_closed_after_submit = True
+
+        if not confirmation and not modal_closed_after_submit and card:
+            try:
+                card_applied = card.locator("button:has-text('Applied'), span:has-text('Applied'), div:has-text('Applied'), [class*='applied']").first
+                if await card_applied.count() > 0 and await card_applied.is_visible():
+                    confirmation = card_applied
+            except Exception:
+                pass
 
         # Post-apply cleanup: Instahyre advances the carousel / pops the bulk
         # "apply to similar jobs" modal after an application — either can leave
@@ -1092,7 +1177,7 @@ class InstahyrePlatform(BaseJobPlatform):
             evidence = (
                 "Instahyre application success marker observed"
                 if confirmation
-                else "Instahyre modal closed upon application submission"
+                else "Instahyre modal closed or advanced upon application submission"
             )
             return ApplyOutcome(
                 ApplicationStatus.APPLIED,

@@ -273,8 +273,14 @@ class ApplyEngine:
                         pass
             
             if not clicked:
-                await apply_btn.scroll_into_view_if_needed(timeout=2_000)
-                await apply_btn.click(timeout=5_000)
+                try:
+                    await apply_btn.scroll_into_view_if_needed(timeout=2_000)
+                except Exception:
+                    pass
+                try:
+                    await apply_btn.click(timeout=3_000, delay=50, force=True)
+                except Exception:
+                    await apply_btn.evaluate("node => node.click()")
                 
         except Exception as exc:
             shot = await self.artifacts.capture_failure(self.page, "apply-click", profile, job.job_id)
@@ -322,7 +328,23 @@ class ApplyEngine:
                 shot = await self.artifacts.screenshot(self.page, "unanswered", profile, job.job_id)
                 return ApplyOutcome(status=ApplicationStatus.NEEDS_REVIEW, reason=SkipReason.UNANSWERED_QUESTION, detail="Unanswered screening question", screenshot_path=shot, questions_answered=result.answered, attempts=attempts)
 
+            is_page_confirmed = (
+                await self._fast_check(S.APPLY_SUCCESS)
+                or "applied" in self.page.url.lower()
+                or "confirmation" in (await self.page.title()).lower()
+                or await self.page.locator("meta[name='atdlayout'][content='jobapplied'], meta[atdlayout='jobapplied']").count() > 0
+            )
+
             if result.error:
+                if is_page_confirmed:
+                    return ApplyOutcome(
+                        status=ApplicationStatus.APPLIED,
+                        detail="Naukri submission confirmation observed",
+                        questions_answered=result.answered,
+                        attempts=attempts,
+                        confirmation_type="confirmation_page",
+                        confirmation_evidence="Apply Confirmation page or jobapplied layout observed",
+                    )
                 shot = await self.artifacts.capture_failure(self.page, "chatbot-error", profile, job.job_id)
                 return ApplyOutcome(status=ApplicationStatus.FAILED, detail=f"Chatbot error: {result.error}", screenshot_path=shot, questions_answered=result.answered, attempts=attempts)
 
@@ -340,7 +362,7 @@ class ApplyEngine:
                     attempts=attempts,
                 )
 
-            confirmed = result.completed or await self._fast_check(S.APPLY_SUCCESS)
+            confirmed = result.completed or is_page_confirmed
             if confirmed:
                 return ApplyOutcome(
                     status=ApplicationStatus.APPLIED,

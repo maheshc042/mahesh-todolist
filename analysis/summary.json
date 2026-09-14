@@ -1,22 +1,22 @@
 {
-  "profile": "AI / Python Engineer",
-  "run_id": 264,
-  "dry_run": true,
-  "duration_seconds": 0.24,
-  "generated_at": "2026-09-12T17:09:02.442912+00:00",
+  "profile": "Cutshort Unified (AI & Full Stack)",
+  "run_id": 279,
+  "dry_run": false,
+  "duration_seconds": 352.94,
+  "generated_at": "2026-09-14T09:20:06.972990+00:00",
   "plan_stats": {
-    "collected": 6,
-    "rejected": 4,
-    "eligible": 2,
-    "selected": 2,
+    "collected": 41,
+    "rejected": 30,
+    "eligible": 11,
+    "selected": 11,
     "overflow": 0,
     "rejection_reasons": {
-      "filter_title": 1,
-      "filter_experience": 3
+      "filter_title": 26,
+      "filter_experience": 4
     },
-    "top_score": 60.9,
-    "cutoff_score": 60.9
+    "top_score": 70.3,
+    "cutoff_score": 45.25
   },
-  "applied_count": 0,
-  "failed_count": 0
+  "applied_count": 10,
+  "failed_count": 1
 }

@@ -310,7 +310,7 @@ class Orchestrator:
                                 self.metrics,
                             )
                         elif p_name == "instahyre":
-                            platform = InstahyrePlatform(page, self.account, artifacts, self.policy)
+                            platform = InstahyrePlatform(page, self.account, artifacts, self.policy, config=self.config)
                         elif p_name == "cutshort":
                             if answers is None:
                                 answers = await self._build_answer_engine(profiles[0])
@@ -378,7 +378,17 @@ class Orchestrator:
                             self.metrics.resume_switch_s = time.perf_counter() - t_ref_0
 
                         platform_profiles = profiles
-                        if platform.platform_name != "naukri":
+                        if platform.platform_name == "instahyre":
+                            if not self.only_profiles:
+                                platform_profiles = [self.config.get_unified_instahyre_profile()]
+                            else:
+                                platform_profiles = self.config.active_profiles(self.only_profiles, account=None)[:1]
+                        elif platform.platform_name == "cutshort":
+                            if not self.only_profiles:
+                                platform_profiles = [self.config.get_unified_cutshort_profile()]
+                            else:
+                                platform_profiles = self.config.active_profiles(self.only_profiles, account=None)[:1]
+                        elif platform.platform_name != "naukri":
                             platform_profiles = self.config.active_profiles(self.only_profiles, account=None)
 
                         for profile in platform_profiles:
@@ -887,8 +897,14 @@ class Orchestrator:
             )
 
             # Session may have silently expired mid-flow.
-            if outcome.status == ApplicationStatus.FAILED and await first_visible(
-                page, S.LOGGED_OUT_MARKERS, timeout_ms=2_000
+            logged_out_markers = getattr(platform, "logged_out_markers", None)
+            if logged_out_markers is None and platform.platform_name == "naukri":
+                logged_out_markers = S.LOGGED_OUT_MARKERS
+
+            if (
+                outcome.status == ApplicationStatus.FAILED
+                and logged_out_markers
+                and await first_visible(page, logged_out_markers, timeout_ms=2_000)
             ):
                 log.warning("job.session_lost_retrying", job_id=job.job_id)
                 if not await platform.ensure_logged_in():

@@ -72,8 +72,9 @@ DISJOINT_SPECIALIZATIONS = (
     "big data", "etl developer", "etl engineer",
     "data warehouse", "data warehousing", "snowflake developer", "snowflake engineer",
     "databricks developer", "databricks engineer", "bi developer", "business intelligence",
-    "desktop support", "it support", "helpdesk", "service desk", "it engineer", "systems engineer",
+    "it support", "helpdesk", "service desk", "it engineer", "systems engineer",
     "security engineer", "cyber security", "cybersecurity", "infosec", "soc analyst",
+    "react native", "android developer", "ios developer", "flutter developer",
 )
 
 
@@ -190,6 +191,21 @@ class FilterEngine:
         # 2. Mandatory Title Role Matching
         if rules.title_must_include_any:
             title_variants = [title]
+            tech_norm = _normalize_tech_text(job.title)
+            if tech_norm and tech_norm not in title_variants:
+                title_variants.append(tech_norm)
+            spaced_hyphen = re.sub(r"\s*-\s*", " ", title).strip()
+            if spaced_hyphen and spaced_hyphen not in title_variants:
+                title_variants.append(spaced_hyphen)
+            no_hyphen = re.sub(r"\s*-\s*", "", title).strip()
+            if no_hyphen and no_hyphen not in title_variants:
+                title_variants.append(no_hyphen)
+            if "software development engineer" in title or "software development engineer" in tech_norm:
+                sde_equiv = re.sub(r"\bsoftware development engineer\b", "software engineer", tech_norm)
+                if sde_equiv not in title_variants:
+                    title_variants.append(sde_equiv)
+                title_variants.extend(["sde", "software development engineer", "software engineer"])
+
             if "/" in job.title:
                 parts = [p.strip().lower() for p in re.split(r"\s*/\s*", job.title) if p.strip()]
                 if len(parts) >= 2:
@@ -215,6 +231,7 @@ class FilterEngine:
                 "software engineer", "software developer", "sde", "sde 1", "sde 2",
                 "sde-1", "sde-2", "sde i", "sde ii", "developer", "engineer", "programmer",
                 "member of technical staff", "associate software engineer",
+                "software development engineer", "software development engineer 1", "software development engineer 2",
             }
             is_broad_title = any(
                 _contains_any(title, [bt]) for bt in broad_generic_titles
@@ -234,7 +251,8 @@ class FilterEngine:
                     _contains_any(title, [tr])
                     for tr in (
                         "software engineer", "software developer", "sde", "associate software engineer",
-                        "junior software engineer", "full stack", "backend developer", "frontend developer"
+                        "junior software engineer", "full stack", "backend developer", "frontend developer",
+                        "software development engineer"
                     )
                 )
                 if has_card_content and not is_target_role:

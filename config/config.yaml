@@ -33,6 +33,28 @@ platforms:
   naukri: true
   wellfound: false
 
+linkedin:
+  days: 3
+
+instahyre:
+  skills:
+    - "Python"
+    - "Node.js"
+    - "React.js"
+    - "TypeScript"
+    - "FastAPI"
+    - "Next.js"
+    - "Generative AI"
+    - "LLMs"
+    - "JavaScript"
+    - "LangChain"
+    - "LangGraph"
+    - "MLOps"
+    - "MCP"
+    - "AWS Bedrock"
+    - "Hugging Face"
+  experience_years: 2
+
 browser:
   headless: true
   slow_mo_ms: 0
@@ -456,8 +478,8 @@ profiles:
 
     searches: []
     filters:
-      title_must_include_any: [full stack, fullstack, mern, react, reactjs, node, nodejs, nextjs, javascript, typescript, frontend, backend, web developer, software engineer, software developer, backend developer, backend engineer, frontend developer, frontend engineer, sde, sde 1, sde 2, sde-1, sde-2, sde i, sde ii, founding engineer, product engineer, software craftsperson, software craftsman, qa, automation, sdet, qa engineer, test engineer, manual testing, automation testing, next, cloud engineer, devops, devops engineer, platform engineer, database developer, sql developer, forward deploy, integration engineer, application engineer, associate engineer, junior engineer, fresher, technical support, technical support engineer, support engineer, product support, application support]
-      title_must_exclude_any: [lead, principal, staff, architect, manager, trainer, sales, bpo, php, wordpress, .net, dotnet, dot net, spring boot, asp.net, c#, c++, golang developer, golang engineer, go developer, go engineer, java, mainframe, sap, salesforce, drupal, magento, engineering manager, project manager, product manager, general manager, solution architect, enterprise architect, tech architect, technical architect, sr. manager, gis, oac, intershop, erp, pega, servicenow, intern, internship, desktop support, it support, helpdesk, service desk, it engineer, systems engineer, security engineer, cybersecurity, infosec, soc analyst, data scientist, etl, big data, snowflake, teradata, bi developer, powerbi, tableau, data warehousing, databricks, dba, database administrator, oracle dba, llm, ai engineer, machine learning, ml engineer, deep learning, nlp engineer, computer vision, prompt engineer, ai researcher, genai, generative ai, content writer, seo]
+      title_must_include_any: [full stack, fullstack, mern, react, reactjs, node, nodejs, nextjs, javascript, typescript, frontend, backend, web developer, software engineer, software developer, software development engineer, software development engineer 1, software development engineer 2, software development engineer in test, backend developer, backend engineer, frontend developer, frontend engineer, sde, sde 1, sde 2, sde-1, sde-2, sde i, sde ii, founding engineer, product engineer, software craftsperson, software craftsman, qa, automation, sdet, qa engineer, quality engineer, test engineer, manual testing, automation testing, next, cloud engineer, devops, devops engineer, platform engineer, database developer, sql developer, forward deploy, forward deployed engineer, integration engineer, implementation engineer, application engineer, associate engineer, junior engineer, fresher, technical support, technical support engineer, support engineer, product support, application support, desktop support, site reliability]
+      title_must_exclude_any: [lead, principal, staff, architect, manager, trainer, sales, presales, pre-sales, bpo, php, wordpress, .net, dotnet, dot net, spring boot, asp.net, c#, c++, golang developer, golang engineer, go developer, go engineer, java, mainframe, sap, salesforce, drupal, magento, engineering manager, project manager, product manager, general manager, solution architect, enterprise architect, tech architect, technical architect, sr. manager, gis, oac, intershop, erp, pega, servicenow, intern, internship, it support, helpdesk, service desk, it engineer, systems engineer, security engineer, cybersecurity, infosec, soc analyst, data scientist, etl, big data, snowflake, teradata, bi developer, powerbi, tableau, data warehousing, databricks, dba, database administrator, oracle dba, llm, ai engineer, machine learning, ml engineer, deep learning, nlp engineer, computer vision, prompt engineer, ai researcher, genai, generative ai, content writer, seo, android, ios, react native, mobile developer, mobile engineer, flutter, swift, kotlin, infrastructure engineer, phd, ph.d, research scientist]
       description_must_exclude_any: [
         "bpo", "commission only", "unpaid", "registration fee", "security deposit",
         "prefers women", "women diversity", "women-only", "women only", "female only", "female diversity", "diversity drive"
@@ -520,8 +542,8 @@ profiles:
     search_is_fallback_only: true
 
     filters:
-      title_must_include_any: [ai, artificial intelligence, machine learning, ml, python, llm, genai, generative ai, nlp, chatbot, prompt, agent, python developer, ai engineer, ml engineer, ai software engineer, full stack ai engineer, backend engineer, backend developer, full stack, fullstack, mern, web developer, sde, sde 1, sde 2, sde-1, sde-2, sde i, sde ii, founding engineer, product engineer, software craftsperson, software craftsman, software engineer, software developer, qa, automation, sdet, qa engineer, quality analyst, test automation, manual testing, automation testing, cloud engineer, devops, devops engineer, mlops, mlops engineer, platform engineer, database developer, sql developer, forward deploy, integration engineer, application engineer, associate engineer, junior engineer, fresher, customer success engineer, data analyst, technical support, technical support engineer, support engineer, product support, application support, junior data engineer, data engineer]
-      title_must_exclude_any: [lead, principal, staff, architect, manager, trainer, sales, bpo, php, wordpress, .net, dotnet, dot net, spring boot, asp.net, c#, c++, golang developer, golang engineer, go developer, go engineer, java, network, hardware, mainframe, sap, salesforce, drupal, magento, engineering manager, project manager, product manager, general manager, solution architect, enterprise architect, tech architect, technical architect, sr. manager, gis, oac, intershop, erp, pega, servicenow, intern, internship, desktop support, it support, helpdesk, service desk, it engineer, systems engineer, security engineer, cybersecurity, infosec, soc analyst, data scientist, etl, big data, snowflake, teradata, bi developer, powerbi, tableau, data warehousing, databricks, dba, database administrator, oracle dba, content writer, seo]
+      title_must_include_any: [ai, artificial intelligence, machine learning, ml, python, llm, genai, generative ai, nlp, chatbot, prompt, agent, python developer, ai engineer, ml engineer, ai software engineer, full stack ai engineer, backend engineer, backend developer, full stack, fullstack, mern, web developer, sde, sde 1, sde 2, sde-1, sde-2, sde i, sde ii, founding engineer, product engineer, software craftsperson, software craftsman, software engineer, software developer, software development engineer, software development engineer 1, software development engineer 2, software development engineer in test, qa, automation, sdet, qa engineer, quality analyst, quality engineer, test automation, manual testing, automation testing, cloud engineer, devops, devops engineer, mlops, mlops engineer, platform engineer, database developer, sql developer, forward deploy, forward deployed engineer, integration engineer, implementation engineer, application engineer, associate engineer, junior engineer, fresher, customer success engineer, data analyst, technical support, technical support engineer, support engineer, product support, application support, junior data engineer, data engineer, desktop support, site reliability engineer]
+      title_must_exclude_any: [lead, principal, staff, architect, manager, trainer, sales, presales, pre-sales, bpo, php, wordpress, .net, dotnet, dot net, spring boot, asp.net, c#, c++, golang developer, golang engineer, go developer, go engineer, java, network, hardware, mainframe, sap, salesforce, drupal, magento, engineering manager, project manager, product manager, general manager, solution architect, enterprise architect, tech architect, technical architect, sr. manager, gis, oac, intershop, erp, pega, servicenow, intern, internship, it support, helpdesk, service desk, it engineer, systems engineer, security engineer, cybersecurity, infosec, soc analyst, data scientist, etl, big data, snowflake, teradata, bi developer, powerbi, tableau, data warehousing, databricks, dba, database administrator, oracle dba, content writer, seo, android, ios, react native, mobile developer, mobile engineer, flutter, swift, kotlin, infrastructure engineer, phd, ph.d, research scientist, ai researcher]
       description_must_exclude_any: [
         "bpo", "commission only", "unpaid", "phd required", "registration fee", "security deposit",
         "prefers women", "women diversity", "women-only", "women only", "female only", "female diversity", "diversity drive"
