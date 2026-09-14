@@ -239,7 +239,7 @@ class TestCutshortUnifiedConfiguration(unittest.TestCase):
             "Python", "Generative AI", "Agentic AI", "Large Language Models (LLM)",
             "Retrieval Augmented Generation (RAG)", "Artificial Intelligence (AI)",
             "MLOps", "Large Language Models (LLM) tuning", "AWS Bedrock", "FastAPI",
-            "LangGraph", "Prompt engineering", "Vector database", "Docker"
+            "LangGraph", "Prompt engineering", "NodeJS (Node.js)", "TypeScript", "Javascript"
         ]:
             self.assertIn(expected, ai_exact)
 
@@ -247,8 +247,7 @@ class TestCutshortUnifiedConfiguration(unittest.TestCase):
         fs_exact = [s[1] if isinstance(s, tuple) else s for s in CUTSHORT_FULLSTACK_SKILLS]
         for expected in [
             "React.js", "NextJs (Next.js)", "Javascript", "NodeJS (Node.js)",
-            "TypeScript", "Python", "FastAPI", "Docker", "PostgreSQL",
-            "MongoDB", "GraphQL", "tailwindcss"
+            "TypeScript", "Python", "FastAPI"
         ]:
             self.assertIn(expected, fs_exact)
 
@@ -259,9 +258,10 @@ class TestCutshortUnifiedConfiguration(unittest.TestCase):
             "NodeJS (Node.js)", "Agentic AI", "Large Language Models (LLM)", "TypeScript",
             "FastAPI", "Retrieval Augmented Generation (RAG)", "Artificial Intelligence (AI)",
             "MLOps", "Large Language Models (LLM) tuning", "AWS Bedrock", "LangGraph",
-            "Prompt engineering", "Docker", "PostgreSQL"
+            "Prompt engineering"
         ]:
             self.assertIn(expected, unified_exact)
+
 
     def test_cutshort_unified_accepts_roles(self):
         """Verify unified profile accepts both AI and Full Stack roles gathered on Cutshort."""

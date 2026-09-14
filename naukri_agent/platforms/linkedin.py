@@ -218,9 +218,12 @@ class LinkedInPlatform(BaseJobPlatform):
         # 1. Block Non-Relevant Stacks, Senior Leadership & Non-Dev Roles in Title
         blocked_title_keywords = [
             "lead", "principal", "architect", "manager", "director", "head of", "intern", "internship",
+            "presales", "pre-sales", "sales", "bpo", "business analyst", "content writer", "seo",
             "java", "spring boot", "spring-boot", ".net", "dotnet", "dot net", "c#", "php", "wordpress",
-            "business analyst", "erp", "sap", "salesforce", "sales", "bpo", "gis", "oac", "oracle dba",
-            "mainframe", "teradata", "snowflake", "etl", "aem"
+            "erp", "sap", "salesforce", "gis", "oac", "oracle dba", "mainframe", "teradata", "snowflake", "etl", "aem",
+            "security engineer", "cybersecurity", "infosec", "soc analyst",
+            "data scientist", "bi developer", "powerbi", "tableau",
+            "it support", "helpdesk", "service desk",
         ]
         for blocked_kw in blocked_title_keywords:
             if re.search(rf"\b{re.escape(blocked_kw)}\b", title):
@@ -349,13 +352,14 @@ class LinkedInPlatform(BaseJobPlatform):
 
                 title = (await safe_text(title_el)).strip()
                 title = re.sub(r"\s+with verification\b", "", title, flags=re.IGNORECASE).strip()
+                title = re.sub(r"\bBe an early applicant\b", "", title, flags=re.IGNORECASE).strip()
                 half_len = len(title) // 2
                 if half_len > 3 and title[:half_len].strip() == title[half_len:].strip():
                     title = title[:half_len].strip()
                 company = (await safe_text(company_el)).strip()
                 location = (await safe_text(loc_el)).strip()
 
-                if not title or len(title) < 3:
+                if not title or len(title) < 3 or title.lower() in ("be an early applicant", "early applicant"):
                     continue
 
                 card_url = ""
@@ -437,11 +441,15 @@ class LinkedInPlatform(BaseJobPlatform):
 
             if page_idx == 0:
                 try:
-                    await self.page.goto(base_search_url, wait_until="domcontentloaded", timeout=35000)
-                    await human_pause(2500, 4000)
-                except Exception as exc:
-                    log.warning("linkedin.fetch.goto_error", page=1, error=str(exc))
-                    break
+                    await self.page.goto(base_search_url, wait_until="commit", timeout=25000)
+                    await human_pause(2000, 3500)
+                except Exception:
+                    try:
+                        await self.page.goto(base_search_url, timeout=25000)
+                        await human_pause(2000, 3500)
+                    except Exception as exc:
+                        log.warning("linkedin.fetch.goto_error", page=1, error=str(exc))
+                        break
 
                 page_added = await self._scroll_and_extract_cards(scrape_target, exclude_job_ids, seen_ids, jobs)
                 log.info("linkedin.fetch.page_done", page=1, added=page_added, total=len(jobs))
@@ -457,12 +465,18 @@ class LinkedInPlatform(BaseJobPlatform):
                     current_days = 7
                     base_search_url = self._get_search_url(profile, days=7)
                     try:
-                        await self.page.goto(base_search_url, wait_until="domcontentloaded", timeout=35000)
-                        await human_pause(2500, 4000)
+                        await self.page.goto(base_search_url, wait_until="commit", timeout=25000)
+                        await human_pause(2000, 3500)
                         fb_added = await self._scroll_and_extract_cards(scrape_target, exclude_job_ids, seen_ids, jobs)
                         log.info("linkedin.fetch.fallback_page_done", page=1, added=fb_added, total=len(jobs))
-                    except Exception as exc:
-                        log.warning("linkedin.fetch.fallback_goto_error", error=str(exc))
+                    except Exception:
+                        try:
+                            await self.page.goto(base_search_url, timeout=25000)
+                            await human_pause(2000, 3500)
+                            fb_added = await self._scroll_and_extract_cards(scrape_target, exclude_job_ids, seen_ids, jobs)
+                            log.info("linkedin.fetch.fallback_page_done", page=1, added=fb_added, total=len(jobs))
+                        except Exception as exc:
+                            log.warning("linkedin.fetch.fallback_goto_error", error=str(exc))
             else:
                 page_clicked = False
                 try:
@@ -503,11 +517,15 @@ class LinkedInPlatform(BaseJobPlatform):
                 if not page_clicked:
                     search_url = f"{base_search_url}&start={start_offset}"
                     try:
-                        await self.page.goto(search_url, wait_until="domcontentloaded", timeout=25000)
-                        await human_pause(2500, 4000)
-                    except Exception as exc:
-                        log.warning("linkedin.fetch.goto_error", page=target_page_num, error=str(exc))
-                        break
+                        await self.page.goto(search_url, wait_until="commit", timeout=25000)
+                        await human_pause(2000, 3500)
+                    except Exception:
+                        try:
+                            await self.page.goto(search_url, timeout=25000)
+                            await human_pause(2000, 3500)
+                        except Exception as exc:
+                            log.warning("linkedin.fetch.goto_error", page=target_page_num, error=str(exc))
+                            break
 
                 page_added = await self._scroll_and_extract_cards(scrape_target, exclude_job_ids, seen_ids, jobs)
                 log.info("linkedin.fetch.page_done", page=target_page_num, added=page_added, total=len(jobs))

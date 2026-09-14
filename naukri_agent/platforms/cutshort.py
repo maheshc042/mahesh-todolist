@@ -42,11 +42,9 @@ CUTSHORT_AI_SKILLS: list[str | tuple[str, str]] = [
     "MLOps",
     ("tuning", "Large Language Models (LLM) tuning"),
     ("Bedrock", "AWS Bedrock"),
-    "FastAPI",
+    ("FastAPI", "FastAPI"),
     "LangGraph",
     ("Prompt", "Prompt engineering"),
-    ("Vector", "Vector database"),
-    "Docker",
     ("Node", "NodeJS (Node.js)"),
     "TypeScript",
     "Javascript",
@@ -60,11 +58,6 @@ CUTSHORT_FULLSTACK_SKILLS: list[str | tuple[str, str]] = [
     "TypeScript",
     "Python",
     "FastAPI",
-    "Docker",
-    "PostgreSQL",
-    "MongoDB",
-    "GraphQL",
-    ("Tailwind", "tailwindcss"),
 ]
 
 # Unified automatically merges AI and Full Stack with zero duplication
@@ -716,11 +709,12 @@ class CutshortPlatform(BaseJobPlatform):
                     await radio.click(force=True)
                     await human_pause(200, 400)
 
-                # Set number input to 1
+                # Set number input to 1 week of active hiring to guarantee top-notch freshness
                 num_input = popover.locator("input[type='number']").first
                 if await num_input.is_visible():
                     await num_input.fill("1")
                     await human_pause(200, 400)
+
 
                 # If unit dropdown shows Months or Days, switch to Weeks
                 trigger = popover.locator(".component_select_trigger_wrapper").first
