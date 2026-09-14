@@ -388,8 +388,14 @@ class Orchestrator:
                                 platform_profiles = [self.config.get_unified_cutshort_profile()]
                             else:
                                 platform_profiles = self.config.active_profiles(self.only_profiles, account=None)[:1]
+                        elif platform.platform_name == "linkedin":
+                            if not self.only_profiles:
+                                platform_profiles = [self.config.get_unified_linkedin_profile()]
+                            else:
+                                platform_profiles = self.config.active_profiles(self.only_profiles, account=None)[:1]
                         elif platform.platform_name != "naukri":
                             platform_profiles = self.config.active_profiles(self.only_profiles, account=None)
+
 
                         for profile in platform_profiles:
                             try:

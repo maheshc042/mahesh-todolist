@@ -190,12 +190,15 @@ class LinkedInPlatform(BaseJobPlatform):
         effective_days = days if days is not None else self.days
         tpr_seconds = effective_days * 86400
         prof_name = (profile.name or "").lower()
-        if any(k in prof_name for k in ["ai", "python", "machine learning", "ml"]):
+        if "unified" in prof_name:
+            query = FULL_TARGET_QUERY
+        elif any(k in prof_name for k in ["ai", "python", "machine learning", "ml"]):
             query = AI_TARGET_QUERY
         elif any(k in prof_name for k in ["full stack", "web", "frontend", "react"]):
             query = FULLSTACK_TARGET_QUERY
         else:
             query = FULL_TARGET_QUERY
+
 
         encoded_keywords = urllib.parse.quote(query)
         encoded_loc = urllib.parse.quote(self.location)

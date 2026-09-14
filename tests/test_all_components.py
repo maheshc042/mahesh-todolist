@@ -342,7 +342,25 @@ class TestCutshortUnifiedConfiguration(unittest.TestCase):
             self.assertEqual(rel_path, "resumes/CV_Mahesh_Chitakoti_2026_1_.pdf")
             self.assertTrue((PROJECT_ROOT / rel_path).exists())
 
+    def test_linkedin_unified_profile(self):
+        """Verify LinkedIn unified profile combines AI and Full Stack queries and filters."""
+        from naukri_agent.platforms.linkedin import FULL_TARGET_QUERY, LinkedInPlatform
+        from unittest.mock import MagicMock
+
+        p = self.cfg.get_unified_linkedin_profile()
+        self.assertEqual(p.name, "LinkedIn Unified (AI & Full Stack)")
+        self.assertEqual(p.account, "primary")
+        self.assertEqual(p.platform_limits.get("linkedin"), 50)
+
+        # Mock platform to test _get_search_url query selection
+        platform = LinkedInPlatform(MagicMock(), MagicMock(), MagicMock(), MagicMock(), MagicMock(), config=self.cfg)
+        search_url = platform._get_search_url(p)
+        self.assertIn("Full%20Stack%20Developer", search_url)
+        self.assertIn("AI%20Engineer", search_url)
+
+
 
 if __name__ == "__main__":
     unittest.main()
+
 

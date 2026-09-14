@@ -998,6 +998,96 @@ class AgentConfig(_Model):
             answers=merged_answers,
         )
 
+    def get_unified_linkedin_profile(self) -> JobProfile:
+        """
+        Synthesize a single unified JobProfile for LinkedIn combining
+        Full Stack and AI/Python engineering tracks. LinkedIn only has one
+        candidate account, so this covers both job families in a single
+        morning session while enabling dynamic resume switching.
+        """
+        active = [p for p in self.profiles if p.enabled]
+        if not active:
+            raise ConfigError("No active profiles configured to synthesize LinkedIn profile.")
+
+        if len(active) == 1:
+            return active[0]
+
+        combined_includes: list[str] = []
+        seen_inc: set[str] = set()
+        for p in active:
+            if p.filters and p.filters.title_must_include_any:
+                for term in p.filters.title_must_include_any:
+                    t = term.strip().lower()
+                    if t and t not in seen_inc:
+                        seen_inc.add(t)
+                        combined_includes.append(t)
+
+        forbidden_tech_and_seniority = {
+            "lead", "principal", "staff", "architect", "manager", "trainer", "sales", "presales", "pre-sales", "bpo",
+            "php", "wordpress", ".net", "dotnet", "dot net", "spring boot", "asp.net", "c#", "c++",
+            "golang developer", "golang engineer", "go developer", "go engineer", "java",
+            "mainframe", "sap", "salesforce", "drupal", "magento", "engineering manager",
+            "project manager", "product manager", "general manager", "solution architect",
+            "enterprise architect", "tech architect", "technical architect", "sr. manager",
+            "gis", "oac", "intershop", "erp", "pega", "servicenow", "intern", "internship",
+            "it support", "helpdesk", "service desk", "it engineer",
+            "systems engineer", "security engineer", "cybersecurity", "infosec", "soc analyst",
+            "data scientist", "etl", "big data", "snowflake", "teradata", "bi developer",
+            "powerbi", "tableau", "data warehousing", "databricks", "dba", "database administrator",
+            "oracle dba", "content writer", "seo",
+            "android", "ios", "react native", "mobile developer", "mobile engineer",
+            "flutter", "swift", "kotlin",
+            "site reliability", "sre", "site reliability engineer", "infrastructure engineer",
+            "phd", "ph.d", "research scientist", "ai researcher",
+        }
+
+        c_skills = [
+            "python", "node", "react", "typescript", "fastapi", "nextjs", "aws",
+            "generative ai", "agentic ai", "llm", "rag", "mlops", "langgraph", "django", "mern", "frontend", "backend", "full stack"
+        ]
+        s_skills = [
+            "api", "rest", "graphql", "postgresql", "mongodb", "redis", "docker",
+            "kubernetes", "aws bedrock", "prompt engineering", "vector database", "qa", "automation", "sdet", "ci/cd", "microservices"
+        ]
+        b_skills = ["testing", "pytest", "jest", "git", "github", "jira", "agile", "scrum", "debugging"]
+
+        linkedin_limit = max((p.platform_limits.get("linkedin", 50) for p in active), default=50)
+
+        unified_filters = FilterRules(
+            title_must_include_any=combined_includes,
+            title_must_exclude_any=sorted(forbidden_tech_and_seniority),
+            description_must_exclude_any=[
+                "bpo", "commission only", "unpaid", "registration fee", "security deposit",
+                "prefers women", "women diversity", "women-only", "women only", "female only", "female diversity", "diversity drive"
+            ],
+            experience=ExperienceRange(min_years=0, max_years=3.5),
+            min_salary_lpa=5.0,
+            max_posted_days=5,
+            require_easy_apply=True,
+            skip_walkin=True,
+        )
+
+        merged_answers: dict[str, str] = {}
+        for p in reversed(active):
+            merged_answers.update(p.answers)
+
+        return JobProfile(
+            name="LinkedIn Unified (AI & Full Stack)",
+            enabled=True,
+            priority=1,
+            account="primary",
+            experience_years=2.5,
+            use_recommended=True,
+            platform_limits={"linkedin": linkedin_limit},
+            title_keywords=combined_includes[:30],
+            core_skills=c_skills,
+            secondary_skills=s_skills,
+            bonus_skills=b_skills,
+            filters=unified_filters,
+            answers=merged_answers,
+        )
+
+
     # ------------------------------------------------------------------ load
     @classmethod
     def load(cls, path: Path | str | None = None) -> AgentConfig:
