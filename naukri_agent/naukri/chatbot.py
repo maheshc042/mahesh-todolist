@@ -531,7 +531,7 @@ class ChatbotHandler:
             if not ok:
                 # Before raising failure, verify if the submission triggered page redirect to Apply Confirmation
                 is_confirmed = (
-                    await self._fast_check(S.APPLY_SUCCESS)
+                    await first_visible(self.page, S.APPLY_SUCCESS, timeout_ms=1_500) is not None
                     or "applied" in self.page.url.lower()
                     or "confirmation" in (await self.page.title()).lower()
                     or await self.page.locator("meta[name='atdlayout'][content='jobapplied'], meta[atdlayout='jobapplied']").count() > 0
@@ -556,7 +556,7 @@ class ChatbotHandler:
 
         if not result.completed and result.error is None:
             is_confirmed = (
-                await self._fast_check(S.APPLY_SUCCESS)
+                await first_visible(self.page, S.APPLY_SUCCESS, timeout_ms=1_500) is not None
                 or "applied" in self.page.url.lower()
                 or "confirmation" in (await self.page.title()).lower()
                 or await self.page.locator("meta[name='atdlayout'][content='jobapplied'], meta[atdlayout='jobapplied']").count() > 0

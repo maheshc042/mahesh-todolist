@@ -485,14 +485,26 @@ class WellfoundPlatform(BaseJobPlatform):
                     break
                 try:
                     await self.page.evaluate(
-                        "() => { document.scrollingElement?.scrollTo(0, document.scrollingElement.scrollHeight); }"
+                        """() => {
+                            window.scrollTo(0, document.body.scrollHeight);
+                            document.scrollingElement?.scrollTo(0, document.scrollingElement.scrollHeight);
+                            document.querySelectorAll('*').forEach(el => {
+                                if (el.scrollHeight > el.clientHeight && el.clientHeight > 300) {
+                                    el.scrollTop = el.scrollHeight;
+                                }
+                            });
+                        }"""
                     )
+                    more_btn = self.page.locator("button:has-text('Load more'), button:has-text('Show more'), button:has-text('View more')").first
+                    if await more_btn.count() > 0 and await more_btn.is_visible():
+                        await more_btn.click()
+                        await human_pause(1000, 1500)
                 except Exception:
                     pass
                 await self.page.keyboard.press("End")
                 await human_pause(800, 1200)
                 try:
-                    await self.page.mouse.wheel(0, 1200)
+                    await self.page.mouse.wheel(0, 1500)
                 except Exception:
                     pass
                 await human_pause(400, 700)

@@ -287,14 +287,14 @@ class Orchestrator:
                         platform_specs.append("naukri")
 
                     if self.account_key == "primary":
-                        if self.config.platforms.instahyre:
-                            platform_specs.append("instahyre")
+                        if self.config.platforms.linkedin:
+                            platform_specs.append("linkedin")
                         if self.config.platforms.cutshort:
                             platform_specs.append("cutshort")
                         if self.config.platforms.wellfound:
                             platform_specs.append("wellfound")
-                        if self.config.platforms.linkedin:
-                            platform_specs.append("linkedin")
+                        if self.config.platforms.instahyre:
+                            platform_specs.append("instahyre")
 
                 answers: AnswerEngine | None = None
                 total_timeout_s = self.config.run.run_timeout_minutes * 60

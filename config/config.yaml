@@ -71,6 +71,7 @@ browser:
 
 run:
   dedupe_window_days: 90
+  daily_application_cap: 80
   max_consecutive_failures: 5
   min_delay_between_applies_s: 8   # Human pacing with room for coffee (8-22s)
   max_delay_between_applies_s: 22  # Human pacing with room for coffee (8-22s)
@@ -261,6 +262,9 @@ answers:
   degree: "B.Tech"
   graduation year: "2023"
   any offer in hand: "No"
+  holding any offer: "No"
+  if you are holding any offer then mention offer amount: "No"
+  holding any offer then mention offer amount: "No"
   employment type: "FTE"
   type of employment: "FTE"
   job type: "FTE"
@@ -461,10 +465,10 @@ profiles:
     use_recommended: true
     platform_limits:
       naukri: 35
-      instahyre: 150
-      linkedin: 50
-      cutshort: 40
-      wellfound: 50
+      linkedin: 35
+      cutshort: 20
+      wellfound: 20
+      instahyre: 25
     resume_label: "Full Stack Engineer"
     resume_file: "resumes/CV_Mahesh_Chitakoti_2026_1_.pdf"
 
@@ -476,7 +480,7 @@ profiles:
     core_skills: ["react", "node", "javascript", "typescript", "python", "fastapi", "django", "frontend", "backend", "full stack", "mern", "ui", "aws", "docker", "nextjs"]
     secondary_skills: ["api", "rest", "graphql", "postgresql", "mongodb", "redis", "database", "gcp", "azure", "kubernetes", "ci/cd", "microservices", "html", "css", "tailwind", "qa", "automation", "selenium"]
     bonus_skills: ["testing", "pytest", "jest", "playwright", "cypress", "git", "github", "jira", "agile", "scrum", "code review", "debugging"]
- 
+
     filters:
       title_must_include_any: [full stack, fullstack, mern, react, reactjs, node, nodejs, nextjs, javascript, typescript, frontend, backend, web developer, software engineer, software developer, software development engineer, software development engineer 1, software development engineer 2, software development engineer in test, backend developer, backend engineer, frontend developer, frontend engineer, sde, sde 1, sde 2, sde-1, sde-2, sde i, sde ii, founding engineer, product engineer, software craftsperson, software craftsman, qa, automation, sdet, qa engineer, quality engineer, test engineer, manual testing, automation testing, next, cloud engineer, devops, devops engineer, platform engineer, database developer, sql developer, integration engineer, implementation engineer, application engineer, associate engineer, junior engineer, fresher, technical support, technical support engineer, support engineer, product support, application support, desktop support, site reliability]
       title_must_exclude_any: [lead, principal, staff, architect, manager, trainer, sales, presales, pre-sales, bpo, php, wordpress, .net, dotnet, dot net, spring boot, asp.net, c#, c++, golang developer, golang engineer, go developer, go engineer, java, mainframe, sap, salesforce, drupal, magento, engineering manager, project manager, product manager, general manager, solution architect, enterprise architect, tech architect, technical architect, sr. manager, gis, oac, intershop, erp, pega, servicenow, intern, internship, it support, helpdesk, service desk, it engineer, systems engineer, security engineer, cybersecurity, infosec, soc analyst, data scientist, etl, big data, snowflake, teradata, bi developer, powerbi, tableau, data warehousing, databricks, dba, database administrator, oracle dba, llm, ai engineer, machine learning, ml engineer, deep learning, nlp engineer, computer vision, prompt engineer, ai researcher, genai, generative ai, content writer, seo, android, ios, react native, mobile developer, mobile engineer, flutter, swift, kotlin, infrastructure engineer, phd, ph.d, research scientist]
@@ -523,10 +527,10 @@ profiles:
     use_recommended: true
     platform_limits:
       naukri: 35
-      instahyre: 150
-      linkedin: 50
-      cutshort: 40
-      wellfound: 50
+      linkedin: 35
+      cutshort: 20
+      wellfound: 20
+      instahyre: 25
     resume_label: "AI / Python Engineer"
     resume_file: "resumes/CV_Mahesh_Chitakoti_2026.pdf"
 

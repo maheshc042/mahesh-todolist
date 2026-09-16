@@ -351,7 +351,7 @@ class TestCutshortUnifiedConfiguration(unittest.TestCase):
         p = self.cfg.get_unified_linkedin_profile()
         self.assertEqual(p.name, "LinkedIn Unified (AI & Full Stack)")
         self.assertEqual(p.account, "primary")
-        self.assertEqual(p.platform_limits.get("linkedin"), 50)
+        self.assertEqual(p.platform_limits.get("linkedin"), 35)
 
         # Mock platform to test _get_search_url query selection
         platform = LinkedInPlatform(MagicMock(), MagicMock(), MagicMock(), MagicMock(), MagicMock(), config=self.cfg)
@@ -366,7 +366,7 @@ class TestCutshortUnifiedConfiguration(unittest.TestCase):
         p = self.cfg.get_unified_wellfound_profile()
         self.assertEqual(p.name, "Wellfound Unified (AI & Full Stack)")
         self.assertEqual(p.account, "primary")
-        self.assertEqual(p.platform_limits.get("wellfound"), 50)
+        self.assertEqual(p.platform_limits.get("wellfound"), 20)
         self.assertEqual(p.filters.max_posted_days, 7)
         self.assertEqual(MAX_POSTED_DAYS, 7)
 
