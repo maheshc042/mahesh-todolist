@@ -159,7 +159,9 @@ class Repository:
             log.warning("db.event_log_failed", error=str(exc), logged_event=event)
 
     # ------------------------------------------------------------------ jobs
-    async def upsert_job(self, job: Job, platform: str | Any = "naukri") -> None:
+    async def upsert_job(self, job: Job, platform: str | Any = "naukri") -> bool:
+        """Persist the parent job row. Returns False on failure so callers can
+        skip dependent writes instead of tripping FK violations silently."""
         try:
             platform_str = getattr(platform, "platform_name", str(platform))
             row = job.to_row()
@@ -197,8 +199,10 @@ class Repository:
                 row["source_keyword"],
                 platform_str,
             )
+            return True
         except Exception as exc:
             log.warning("db.upsert_job_failed", error=str(exc), job_id=job.job_id)
+            return False
 
     async def known_job_ids(
         self,
@@ -289,9 +293,9 @@ class Repository:
 
         return [j for j in jobs if not is_duplicate(j)]
 
-    async def applied_today(self, account: str = "primary") -> int:
+    async def applied_today(self, account: str = "primary", tz: str = "Asia/Kolkata") -> int:
         """
-        Applications submitted TODAY by THIS account (Asia/Kolkata calendar day).
+        Applications submitted TODAY by THIS account, in the given IANA timezone day.
         """
         try:
             row = await self._fetchrow_with_retry(
@@ -300,10 +304,11 @@ class Repository:
                   FROM applications
                  WHERE submitted_at IS NOT NULL
                    AND account = $1
-                   AND (submitted_at AT TIME ZONE 'Asia/Kolkata')::date
-                       = (now() AT TIME ZONE 'Asia/Kolkata')::date
+                   AND (submitted_at AT TIME ZONE $2)::date
+                       = (now() AT TIME ZONE $2)::date
                 """,
                 account,
+                tz,
             )
             return int(row["n"] or 0) if row else 0
         except Exception as exc:
@@ -318,22 +323,36 @@ class Repository:
         outcome: ApplyOutcome,
         account: str = "primary",
         platform: str | Any = "naukri",
+        rank_score: float | None = None,
     ) -> None:
         try:
             platform_str = getattr(platform, "platform_name", str(platform))
-            await self.upsert_job(job, platform=platform_str)
+            if not await self.upsert_job(job, platform=platform_str):
+                log.error(
+                    "db.record_outcome_parent_missing",
+                    job_id=job.job_id,
+                    detail="parent job row missing; outcome not recorded",
+                )
+                return
 
             await self._execute_with_retry(
                 """
                 INSERT INTO applications (
                     job_id, run_id, profile, status, reason, detail, attempts,
                     questions_answered, screenshot_path, account, platform,
-                    confirmation_type, confirmation_evidence, submitted_at
+                    confirmation_type, confirmation_evidence, submitted_at,
+                    rank_score
                 )
                 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,
-                        CASE WHEN $4 = 'applied' THEN now() ELSE NULL END)
+                        CASE WHEN $4 = 'applied' THEN now() ELSE NULL END,
+                        $14)
                 ON CONFLICT (job_id, profile, platform, account) DO UPDATE
-                   SET status = EXCLUDED.status,
+                   SET status = CASE
+                           WHEN applications.status = 'applied'
+                            AND EXCLUDED.status <> 'applied'
+                           THEN applications.status
+                           ELSE EXCLUDED.status
+                       END,
                        reason = EXCLUDED.reason,
                        detail = EXCLUDED.detail,
                        run_id = EXCLUDED.run_id,
@@ -343,7 +362,8 @@ class Repository:
                        screenshot_path = COALESCE(EXCLUDED.screenshot_path, applications.screenshot_path),
                        confirmation_type = COALESCE(EXCLUDED.confirmation_type, applications.confirmation_type),
                        confirmation_evidence = COALESCE(EXCLUDED.confirmation_evidence, applications.confirmation_evidence),
-                       submitted_at = COALESCE(applications.submitted_at, EXCLUDED.submitted_at)
+                       submitted_at = COALESCE(applications.submitted_at, EXCLUDED.submitted_at),
+                       rank_score = COALESCE(EXCLUDED.rank_score, applications.rank_score)
                 """,
                 job.job_id,
                 run_id,
@@ -358,9 +378,133 @@ class Repository:
                 platform_str,
                 outcome.confirmation_type,
                 outcome.confirmation_evidence[:500] if outcome.confirmation_evidence else None,
+                rank_score,
             )
         except Exception as exc:
             log.warning("db.record_outcome_failed", error=str(exc), job_id=job.job_id)
+
+    # ------------------------------------------------- post-apply outcomes
+    # What the recruiter did AFTER the apply. Recorded manually via
+    # `python -m naukri_agent outcome ...` (auto-detection from provider
+    # inboxes is a separate project). Joined with rank_score this calibrates
+    # ranking weights and the selection cutoff — the learning loop.
+    POST_APPLY_OUTCOMES = ("callback", "interview", "offer", "rejected", "ghost", "withdrawn")
+    POSITIVE_OUTCOMES = ("callback", "interview", "offer")
+
+    async def record_post_apply_outcome(
+        self,
+        *,
+        job_id: str,
+        profile: str,
+        platform: str,
+        account: str = "primary",
+        outcome: str,
+        note: str | None = None,
+        source: str = "manual",
+    ) -> dict[str, Any] | None:
+        """Upsert a recruiter outcome. Returns the row, or None on bad input."""
+        outcome = (outcome or "").strip().lower()
+        if outcome not in self.POST_APPLY_OUTCOMES:
+            return None
+        try:
+            row = await self._fetchrow_with_retry(
+                """
+                INSERT INTO application_outcomes
+                    (job_id, profile, platform, account, outcome, source, note, updated_at)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, now())
+                ON CONFLICT (job_id, profile, platform, account) DO UPDATE
+                   SET outcome = EXCLUDED.outcome,
+                       source = EXCLUDED.source,
+                       note = COALESCE(EXCLUDED.note, application_outcomes.note),
+                       updated_at = now()
+                RETURNING job_id, profile, platform, account, outcome, source, note
+                """,
+                job_id,
+                profile,
+                platform,
+                account,
+                outcome,
+                source,
+                (note or "").strip() or None,
+            )
+            return dict(row) if row else None
+        except Exception as exc:
+            log.warning("db.post_apply_outcome_failed", error=str(exc), job_id=job_id)
+            return None
+
+    async def find_applied(self, query: str, limit: int = 10) -> list[dict[str, Any]]:
+        """Find submitted applications by job-id fragment, title or company."""
+        like = f"%{query.strip()}%"
+        try:
+            rows = await self._fetch_with_retry(
+                """
+                SELECT a.job_id, a.profile, a.platform, a.account, a.rank_score,
+                       a.submitted_at, j.title, j.company,
+                       o.outcome AS recorded_outcome
+                  FROM applications a
+                  JOIN jobs j
+                    ON j.job_id = a.job_id AND j.platform = a.platform
+                  LEFT JOIN application_outcomes o
+                    ON o.job_id = a.job_id AND o.profile = a.profile
+                   AND o.platform = a.platform AND o.account = a.account
+                 WHERE a.status = 'applied'
+                   AND (a.job_id ILIKE $1 OR j.title ILIKE $1 OR j.company ILIKE $1)
+                 ORDER BY a.submitted_at DESC NULLS LAST
+                 LIMIT $2
+                """,
+                like,
+                limit,
+            )
+            return [dict(row) for row in rows]
+        except Exception as exc:
+            log.warning("db.find_applied_failed", error=str(exc))
+            return []
+
+    async def outcome_funnel(self) -> dict[str, Any]:
+        """Applied -> recruiter-response conversion, by platform/profile/score."""
+        try:
+            by_platform = await self._fetch_with_retry(
+                """
+                SELECT a.platform, a.profile,
+                       count(*) AS applied,
+                       count(*) FILTER (WHERE o.outcome IN ('callback','interview','offer')) AS positive,
+                       count(*) FILTER (WHERE o.outcome = 'interview' OR o.outcome = 'offer') AS deep,
+                       count(*) FILTER (WHERE o.outcome IS NULL) AS pending
+                  FROM applications a
+                  LEFT JOIN application_outcomes o
+                    ON o.job_id = a.job_id AND o.profile = a.profile
+                   AND o.platform = a.platform AND o.account = a.account
+                 WHERE a.status = 'applied'
+                 GROUP BY 1, 2
+                 ORDER BY 1, 2
+                """
+            )
+            by_score = await self._fetch_with_retry(
+                """
+                SELECT CASE
+                         WHEN a.rank_score IS NULL THEN 'unscored'
+                         WHEN a.rank_score < 45 THEN '<45'
+                         WHEN a.rank_score < 55 THEN '45-55'
+                         WHEN a.rank_score < 65 THEN '55-65'
+                         ELSE '65+'
+                       END AS bucket,
+                       count(*) AS applied,
+                       count(*) FILTER (WHERE o.outcome IN ('callback','interview','offer')) AS positive
+                  FROM applications a
+                  LEFT JOIN application_outcomes o
+                    ON o.job_id = a.job_id AND o.profile = a.profile
+                   AND o.platform = a.platform AND o.account = a.account
+                 WHERE a.status = 'applied'
+                 GROUP BY 1
+                """
+            )
+            return {
+                "by_platform": [dict(row) for row in by_platform],
+                "by_score": [dict(row) for row in by_score],
+            }
+        except Exception as exc:
+            log.warning("db.outcome_funnel_failed", error=str(exc))
+            return {"by_platform": [], "by_score": []}
 
 
     async def recent_applications(self, limit: int = 50) -> list[dict[str, Any]]:
@@ -422,7 +566,7 @@ class Repository:
             """
             INSERT INTO answer_kb (profile, pattern, answer, priority)
             VALUES ($1, $2, $3, 100)
-            ON CONFLICT (profile, pattern) DO UPDATE
+            ON CONFLICT ON CONSTRAINT answer_kb_profile_pattern_key DO UPDATE
                SET answer = EXCLUDED.answer, updated_at = now()
             """,
             records,

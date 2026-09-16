@@ -399,7 +399,42 @@ class ChatbotHandler:
             except Exception:
                 pass
 
-        return await self._answer_combobox(value)
+        if await self._answer_combobox(value):
+            return True
+
+        # Last resort: the drawer sometimes renders options as plain clickable
+        # text outside every known selector list. Click the first visible
+        # button/option/label whose text matches the resolved answer.
+        try:
+            drawer = await first_visible(self.page, S.CHATBOT_DRAWER, timeout_ms=1_500)
+            scope = drawer or self.page
+            wanted = (value or "").strip().lower()
+            if wanted:
+                for el in await scope.locator(
+                    "button, div[role='option'], div[role='radio'], label"
+                ).all():
+                    try:
+                        if not await el.is_visible():
+                            continue
+                        t = (await safe_text(el)).strip().lower()
+                    except Exception:
+                        continue
+                    if not t or t.endswith("?"):
+                        continue
+                    if t == wanted or (
+                        len(wanted) >= 6 and len(t) >= 4 and (wanted in t or t in wanted)
+                    ):
+                        try:
+                            self.policy.require_mutation("naukri.screening.answer")
+                            await el.click(force=True, timeout=2_500)
+                        except Exception:
+                            await el.evaluate("el => el.click()")
+                        await human_pause(200, 500)
+                        await self._submit()
+                        return True
+        except Exception:
+            pass
+        return False
 
     async def _submit(self) -> bool:
         await self._dismiss_blocking_overlays()

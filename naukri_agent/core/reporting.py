@@ -28,18 +28,24 @@ class ReportExporter:
         self.run_id = run_id
         self.output_dir.mkdir(parents=True, exist_ok=True)
 
-    def export_plan_reports(self, plan: ApplicationPlan, collected_jobs: list[Job], profile_name: str = "") -> None:
+    def _names(self, base: str, platform: str = "") -> Path:
+        """Per-platform filenames so phases stop overwriting each other."""
+        slug = "".join(ch if ch.isalnum() else "_" for ch in (platform or "").lower()).strip("_")
+        return self.output_dir / (f"{slug}_{base}" if slug else base)
+
+    def export_plan_reports(self, plan: ApplicationPlan, collected_jobs: list[Job], profile_name: str = "", platform: str = "") -> None:
         try:
-            with (self.output_dir / "collected_jobs.csv").open("w", encoding="utf-8", newline="") as f:
+            with self._names("collected_jobs.csv", platform).open("w", encoding="utf-8", newline="") as f:
                 w = csv.writer(f)
                 w.writerow(["job_id", "tab", "position", "total_jobs_in_tab", "company", "title", "url", "scraped_at"])
                 for j in collected_jobs:
-                    w.writerow([j.job_id, j.recommendation_tab, j.recommendation_position or "", j.total_jobs_in_tab or "", j.company, j.title, j.url, j.scraped_at.isoformat()])
+                    scraped = j.scraped_at.isoformat() if j.scraped_at else ""
+                    w.writerow([j.job_id, j.recommendation_tab, j.recommendation_position or "", j.total_jobs_in_tab or "", j.company, j.title, j.url, scraped])
 
-            self._write_ranked_jobs_csv(self.output_dir / "ranked_jobs.csv", plan.eligible_jobs)
-            self._write_ranked_jobs_csv(self.output_dir / "selected_jobs.csv", plan.selected_jobs)
+            self._write_ranked_jobs_csv(self._names("ranked_jobs.csv", platform), plan.eligible_jobs)
+            self._write_ranked_jobs_csv(self._names("selected_jobs.csv", platform), plan.selected_jobs)
 
-            with (self.output_dir / "rejected_jobs.csv").open("w", encoding="utf-8", newline="") as f:
+            with self._names("rejected_jobs.csv", platform).open("w", encoding="utf-8", newline="") as f:
                 w = csv.writer(f)
                 w.writerow(["job_id", "reason", "detail", "company", "title", "url"])
                 for rinfo in plan.rejected_jobs:
@@ -49,14 +55,14 @@ class ReportExporter:
         except Exception as exc:
             log.warning("reporting.plan_export_failed", error=str(exc)[:200])
 
-    def export_outcome_reports(self, applied: list[tuple[Job, ApplyOutcome]], failed: list[tuple[Job, ApplyOutcome]], profile_name: str = "") -> None:
+    def export_outcome_reports(self, applied: list[tuple[Job, ApplyOutcome]], failed: list[tuple[Job, ApplyOutcome]], profile_name: str = "", platform: str = "") -> None:
         try:
-            self._write_outcomes_csv(self.output_dir / "applied_jobs.csv", applied)
-            self._write_outcomes_csv(self.output_dir / "failed_jobs.csv", failed)
+            self._write_outcomes_csv(self._names("applied_jobs.csv", platform), applied)
+            self._write_outcomes_csv(self._names("failed_jobs.csv", platform), failed)
         except Exception as exc:
             log.warning("reporting.outcome_export_failed", error=str(exc)[:200])
 
-    def export_summary_json(self, plan: ApplicationPlan, applied_count: int, failed_count: int, profile_name: str, dry_run: bool, duration_seconds: float = 0.0) -> None:
+    def export_summary_json(self, plan: ApplicationPlan, applied_count: int, failed_count: int, profile_name: str, dry_run: bool, duration_seconds: float = 0.0, platform: str = "") -> None:
         try:
             summary_data: dict[str, Any] = {
                 "profile": profile_name,
@@ -77,7 +83,7 @@ class ReportExporter:
                 "applied_count": applied_count,
                 "failed_count": failed_count,
             }
-            summary_file = self.output_dir / "summary.json"
+            summary_file = self._names("summary.json", platform)
             summary_file.write_text(json.dumps(summary_data, indent=2), encoding="utf-8")
         except Exception as exc:
             log.warning("reporting.summary_json_export_failed", error=str(exc)[:200])

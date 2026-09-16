@@ -368,6 +368,59 @@ MIGRATIONS: list[tuple[str, str]] = [
             ON applications(account, platform, created_at DESC, job_id);
         """,
     ),
+    (
+        "0015_rank_score_and_post_apply_outcomes",
+        """
+        -- Learning-loop foundation: persist the ranking score that selected each
+        -- job, and track what recruiters did AFTER the apply (callback,
+        -- interview, offer...). Joining the two is what calibrates weights.
+        ALTER TABLE applications ADD COLUMN IF NOT EXISTS rank_score NUMERIC(5,2);
+
+        CREATE TABLE IF NOT EXISTS application_outcomes (
+            job_id      TEXT NOT NULL,
+            profile     TEXT NOT NULL,
+            platform    TEXT NOT NULL DEFAULT 'naukri',
+            account     TEXT NOT NULL DEFAULT 'primary',
+            outcome     TEXT NOT NULL,
+            source      TEXT NOT NULL DEFAULT 'manual',
+            note        TEXT,
+            recorded_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+            updated_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+            PRIMARY KEY (job_id, profile, platform, account)
+        );
+        CREATE INDEX IF NOT EXISTS application_outcomes_outcome_idx
+            ON application_outcomes(outcome, recorded_at DESC);
+        """,
+    ),
+    (
+        "0016_answer_kb_nullsafe_dedupe",
+        """
+        -- Global KB rows (profile IS NULL) never matched the plain
+        -- UNIQUE (profile, pattern) constraint (NULLs are distinct), so every
+        -- seed re-inserted them: 237 copies of core patterns, 30k junk rows.
+        -- Dedupe (merging hits), then enforce NULL-safe uniqueness so the
+        -- seed upsert actually fires.
+        UPDATE answer_kb keep
+           SET hits = keep.hits + COALESCE(
+               (SELECT sum(dup.hits) FROM answer_kb dup
+                 WHERE dup.id > keep.id
+                   AND dup.profile IS NOT DISTINCT FROM keep.profile
+                   AND dup.pattern = keep.pattern), 0)
+          FROM (SELECT min(id) AS id FROM answer_kb GROUP BY profile, pattern) first
+         WHERE keep.id = first.id;
+
+        DELETE FROM answer_kb a
+         USING answer_kb b
+         WHERE a.id > b.id
+           AND a.profile IS NOT DISTINCT FROM b.profile
+           AND a.pattern = b.pattern;
+
+        ALTER TABLE answer_kb DROP CONSTRAINT IF EXISTS answer_kb_profile_pattern_key;
+        ALTER TABLE answer_kb
+            ADD CONSTRAINT answer_kb_profile_pattern_key
+            UNIQUE NULLS NOT DISTINCT (profile, pattern);
+        """,
+    ),
 ]
 
 

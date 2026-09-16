@@ -202,22 +202,9 @@ def _exponential_decay(diff: float, lambda_param: float) -> float:
 # ---------------------------------------------------------------------------
 # 1. Hard Filter
 # ---------------------------------------------------------------------------
-LEAD_ARCHITECT_EXCLUDES = (
-    "lead", "principal", "staff", "architect",
-    "manager", "head", "director", "vp", "president",
-)
-NON_DEV_TITLE_EXCLUDES = (
-    "aptitude trainer", "trainer", "desktop support", "it support",
-    "technical support", "helpdesk", "service desk", "customer support",
-    "salesforce", "sap", "mainframe", "teradata",
-    "data engineer", "data analyst", "etl", "snowflake", "bi developer",
-    "powerbi", "tableau", "data warehousing", "databricks",
-)
-DEDICATED_AI_KEYWORDS = (
-    "machine learning", "ml engineer", "ml developer", "data scientist",
-    "deep learning", "nlp engineer", "computer vision", "ai engineer",
-    "ai developer", "ai/ml", "ai ml", "artificial intelligence engineer",
-)
+# NOTE: title/stack blocklists live in ONE place — core/filters.py
+# (DISJOINT_SPECIALIZATIONS etc., word-boundary matched). Do not add local
+# tuples here; HardFilter delegates to FilterEngine so both paths agree.
 
 
 class HardFilter:
@@ -265,7 +252,7 @@ class RuleBasedResumeMatcher(BaseResumeMatcher):
         # 1. Role / Title Match (Max role_title_weight, e.g. 20.0)
         matched_titles: list[str] = []
         for kw in self.candidate.title_keywords:
-            if _exact_word_match(kw, norm_title) or _normalize_tech_text(kw) in norm_title:
+            if _exact_word_match(kw, norm_title):
                 matched_titles.append(kw)
 
         if len(matched_titles) >= 2:
@@ -281,7 +268,7 @@ class RuleBasedResumeMatcher(BaseResumeMatcher):
         # 2. Core Skills Match (Max core_skill_weight, e.g. 18.0)
         matched_core: list[str] = []
         for skill in self.candidate.core_skills:
-            if _exact_word_match(skill, haystack) or _normalize_tech_text(skill) in haystack:
+            if _exact_word_match(skill, haystack):
                 matched_core.append(skill)
         num_core = len(matched_core)
         if num_core >= 4:
@@ -302,7 +289,7 @@ class RuleBasedResumeMatcher(BaseResumeMatcher):
         # 3. Secondary Skills Match (Max secondary_skill_weight, e.g. 8.0)
         matched_secondary: list[str] = []
         for skill in self.candidate.secondary_skills:
-            if _exact_word_match(skill, haystack) or _normalize_tech_text(skill) in haystack:
+            if _exact_word_match(skill, haystack):
                 matched_secondary.append(skill)
         num_sec = len(matched_secondary)
         if num_sec >= 3:
@@ -320,7 +307,7 @@ class RuleBasedResumeMatcher(BaseResumeMatcher):
         # 4. Bonus Skills Match (Max bonus_skill_weight, e.g. 4.0)
         matched_bonus: list[str] = []
         for skill in self.candidate.bonus_skills:
-            if _exact_word_match(skill, haystack) or _normalize_tech_text(skill) in haystack:
+            if _exact_word_match(skill, haystack):
                 matched_bonus.append(skill)
         num_bonus = len(matched_bonus)
         if num_bonus >= 2:
@@ -497,7 +484,11 @@ class RankingEngine:
     def _score_freshness(self, job: Job) -> tuple[float, str]:
         w = self.weights
         days = job.posted_days_ago
-        if days is None or days == 0:
+        if days is None:
+            # Unknown posting date is not "posted today": neutral partial score
+            # with an honest reason instead of full marks.
+            return round(w.freshness_max * 0.5, 2), "○ Posting date unknown"
+        if days == 0:
             return w.freshness_max, "✓ Posted today"
 
         decay = _exponential_decay(float(days), w.freshness_decay_lambda)

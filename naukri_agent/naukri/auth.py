@@ -86,7 +86,9 @@ class NaukriAuth:
 
     # ------------------------------------------------------------------- login
     async def _submit_login(self, page: Page) -> None:
-        log.info("auth.login_start", email=self.email.split("@")[0] + "@…")
+        local, _, _domain = self.email.partition("@")
+        masked = (local[:2] + "***") if local else "unset"
+        log.info("auth.login_start", email=f"{masked}@…")
         await page.goto(S.LOGIN_URL, wait_until="domcontentloaded", timeout=45_000)
         await dismiss_overlays(page)
         await self._detect_challenge(page)

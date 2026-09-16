@@ -10,6 +10,7 @@ Design Decisions:
 from __future__ import annotations
 
 import asyncio
+import html
 import re
 
 import httpx
@@ -22,35 +23,40 @@ log = get_logger(__name__)
 
 class TelegramListener:
     def __init__(self, bot_token: str, chat_id: str) -> None:
-        self.bot_token = bot_token.strip()
+        # Token stays out of instance state that could be logged: URLs are
+        # built per request from the raw token.
+        self._bot_token = bot_token.strip()
         self.chat_id = str(chat_id).strip()
-        self.base_url = f"https://api.telegram.org/bot{self.bot_token}"
         self.offset = 0
+
+    def _endpoint(self, method: str) -> str:
+        return f"https://api.telegram.org/bot{self._bot_token}/{method}"
 
     async def send_confirmation(self, text: str) -> None:
         """Sends a confirmation reply back to the Telegram chat."""
         try:
             async with httpx.AsyncClient(timeout=10.0) as client:
                 await client.post(
-                    f"{self.base_url}/sendMessage",
+                    self._endpoint("sendMessage"),
                     json={"chat_id": self.chat_id, "text": text, "parse_mode": "HTML"},
                 )
         except Exception as exc:
-            log.warning("telegram_listener.send_error", error=str(exc)[:150])
+            redacted = str(exc).replace(self._bot_token, "[redacted]") if self._bot_token else str(exc)
+            log.warning("telegram_listener.send_error", error=redacted[:150])
 
     async def poll_once(self, repo: Repository) -> int:
         """
         Polls Telegram getUpdates endpoint once and processes any pending replies.
         Returns the number of resolved questions.
         """
-        if not self.bot_token or not self.chat_id:
+        if not self._bot_token or not self.chat_id:
             return 0
 
         resolved_count = 0
         try:
             async with httpx.AsyncClient(timeout=15.0) as client:
                 resp = await client.get(
-                    f"{self.base_url}/getUpdates",
+                    self._endpoint("getUpdates"),
                     params={"offset": self.offset, "timeout": 2},
                 )
                 if resp.status_code != 200:
@@ -99,10 +105,10 @@ class TelegramListener:
                         success = await repo.resolve_review(review_id, answer_text)
                         if success:
                             resolved_count += 1
-                            log.info("telegram_listener.question_resolved", review_id=review_id, answer=answer_text)
+                            log.info("telegram_listener.question_resolved", review_id=review_id, answer_chars=len(answer_text))
                             await self.send_confirmation(
                                 f"✅ <b>Question [#{review_id}] Resolved!</b>\n"
-                                f"<b>Answer:</b> <code>{answer_text}</code>\n"
+                                f"<b>Answer:</b> <code>{html.escape(answer_text)}</code>\n"
                                 f"Saved to Answer KB & self-learning engine."
                             )
                         else:

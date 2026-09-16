@@ -152,6 +152,7 @@ def run(
         await run_migrations()
         targets = _resolve_accounts(account, all_accounts, settings)
         failures = 0
+        skipped = 0
         try:
             for key in targets:
                 # Fail fast per account, but keep going: account 2 being
@@ -160,7 +161,7 @@ def run(
                     settings.validate_for_run(key)
                 except ConfigError as exc:
                     console.print(f"[yellow]skipping {key}:[/yellow] {exc}")
-                    failures += 1
+                    skipped += 1
                     continue
 
                 orchestrator = Orchestrator(
@@ -179,8 +180,10 @@ def run(
         finally:
             await close_pool()
 
-        if failures and failures == len(targets):
+        if failures:
             raise typer.Exit(EXIT_RUN_FAILED)
+        if skipped and skipped == len(targets):
+            raise typer.Exit(EXIT_CONFIG)
 
     _run(_main())
 
@@ -252,7 +255,7 @@ def login(
 ) -> None:
     """
     Log in interactively (headed browser) and store the session in Postgres.
-    
+
     Supports: naukri, cutshort, wellfound, linkedin, instahyre, or all.
     Every subsequent headless CI run reuses the saved session.
     """
@@ -333,10 +336,19 @@ def login(
                         else:
                             console.print("[yellow]Please solve Cloudflare Turnstile / log in to Wellfound in the open browser...[/yellow]")
                             console.print("[dim]Waiting up to 120 seconds for login confirmation...[/dim]")
-                            try:
-                                await page.wait_for_selector(", ".join(auth_sel), timeout=120000)
-                                console.print("[green]✓ Wellfound login detected![/green]")
-                            except Exception:
+                            import time
+                            deadline = time.time() + 120
+                            logged_in = False
+                            while time.time() < deadline:
+                                try:
+                                    if await first_visible(page, auth_sel, timeout_ms=1500):
+                                        console.print("[green]✓ Wellfound login detected![/green]")
+                                        logged_in = True
+                                        break
+                                except Exception:
+                                    pass
+                                await asyncio.sleep(1)
+                            if not logged_in:
                                 console.print("[red]✗ Wellfound login timed out (120s).[/red]")
                                 continue
 
@@ -360,10 +372,19 @@ def login(
                         else:
                             console.print("[yellow]Please log in to LinkedIn / complete security checkpoint in the open browser...[/yellow]")
                             console.print("[dim]Waiting up to 120 seconds for login confirmation...[/dim]")
-                            try:
-                                await page.wait_for_selector(", ".join(auth_sel), timeout=120000)
-                                console.print("[green]✓ LinkedIn login detected![/green]")
-                            except Exception:
+                            import time
+                            deadline = time.time() + 120
+                            logged_in = False
+                            while time.time() < deadline:
+                                try:
+                                    if await first_visible(page, auth_sel, timeout_ms=1500):
+                                        console.print("[green]✓ LinkedIn login detected![/green]")
+                                        logged_in = True
+                                        break
+                                except Exception:
+                                    pass
+                                await asyncio.sleep(1)
+                            if not logged_in:
                                 console.print("[red]✗ LinkedIn login timed out (120s).[/red]")
                                 continue
 
@@ -397,10 +418,19 @@ def login(
                                 if submit:
                                     await submit.click()
 
-                            try:
-                                await page.wait_for_selector(", ".join(auth_sel), timeout=120000)
-                                console.print("[green]✓ Instahyre login detected![/green]")
-                            except Exception:
+                            import time
+                            deadline = time.time() + 120
+                            logged_in = False
+                            while time.time() < deadline:
+                                try:
+                                    if await first_visible(page, auth_sel, timeout_ms=1500):
+                                        console.print("[green]✓ Instahyre login detected![/green]")
+                                        logged_in = True
+                                        break
+                                except Exception:
+                                    pass
+                                await asyncio.sleep(1)
+                            if not logged_in:
                                 console.print("[red]✗ Instahyre login timed out (120s).[/red]")
                                 continue
 
@@ -1095,6 +1125,112 @@ async def _learn(
         console.print(f"[red]learn failed:[/red] {exc}")
         raise typer.Exit(1) from exc
 
+
+@app.command()
+def outcome(
+    query: str = typer.Argument(..., help="Job-id fragment, title or company of a submitted application."),
+    outcome: str = typer.Argument(..., help="callback | interview | offer | rejected | ghost | withdrawn"),
+    note: str = typer.Option("", "--note", "-m", help="Optional note, e.g. 'HR call scheduled Fri'."),
+    profile: str = typer.Option("", "--profile", "-p", help="Disambiguate when several profiles match."),
+    platform: str = typer.Option("", "--platform", help="Disambiguate when several platforms match."),
+    account: str = typer.Option("primary", "--account", "-a", help="Account that applied."),
+) -> None:
+    """Log what a recruiter did AFTER an apply — feeds the learning loop (`funnel`)."""
+
+    async def _main() -> None:
+        _settings_only()
+        want = outcome.strip().lower()
+        if want not in Repository.POST_APPLY_OUTCOMES:
+            console.print(f"[red]unknown outcome:[/red] {outcome} (expected one of {', '.join(Repository.POST_APPLY_OUTCOMES)})")
+            raise typer.Exit(2)
+        repo = await Repository.create()
+        try:
+            matches = await repo.find_applied(query)
+            if profile:
+                matches = [m for m in matches if m["profile"].lower() == profile.strip().lower()]
+            if platform:
+                matches = [m for m in matches if m["platform"].lower() == platform.strip().lower()]
+            if not matches:
+                console.print(f"[yellow]no submitted application matches {query!r}[/yellow]")
+                raise typer.Exit(1)
+            if len(matches) > 1:
+                table = Table(title="multiple matches — refine with --profile/--platform", header_style="bold")
+                for column in ("job", "profile", "platform", "score", "title", "company", "recorded"):
+                    table.add_column(column, overflow="fold")
+                for m in matches:
+                    table.add_row(
+                        str(m["job_id"])[-12:], str(m["profile"])[:20], str(m["platform"]),
+                        str(m["rank_score"] or "-"), str(m["title"])[:40], str(m["company"])[:24],
+                        str(m["recorded_outcome"] or "-"),
+                    )
+                console.print(table)
+                raise typer.Exit(1)
+            m = matches[0]
+            row = await repo.record_post_apply_outcome(
+                job_id=m["job_id"], profile=m["profile"], platform=m["platform"],
+                account=m.get("account") or account, outcome=want, note=note,
+            )
+            if row is None:
+                console.print("[red]could not record outcome[/red]")
+                raise typer.Exit(1)
+            console.print(f"[green]recorded {want}[/green] for {m['title'][:50]} @ {m['company'][:30]}")
+        finally:
+            await close_pool()
+
+    _run(_main())
+
+
+@app.command()
+def funnel() -> None:
+    """Applied -> recruiter-response conversion by platform, profile and score bucket."""
+
+    async def _main() -> None:
+        _settings_only()
+        repo = await Repository.create()
+        try:
+            data = await repo.outcome_funnel()
+            rows = data["by_platform"]
+            if not rows or sum(r["applied"] for r in rows) == 0:
+                console.print("[yellow]no submitted applications yet — nothing to calibrate[/yellow]")
+                return
+            table = Table(title="conversion by platform / profile", header_style="bold")
+            for column in ("platform", "profile", "applied", "callbacks+", "interviews+", "pending", "conv%"):
+                table.add_column(column, justify="right")
+            total_applied = total_pos = 0
+            for r in rows:
+                applied, pos = int(r["applied"]), int(r["positive"] or 0)
+                total_applied += applied
+                total_pos += pos
+                rate = f"{100.0 * pos / applied:.1f}" if applied else "-"
+                table.add_row(str(r["platform"]), str(r["profile"])[:24], str(applied), str(pos), str(r["deep"] or 0), str(r["pending"] or 0), rate)
+            console.print(table)
+
+            buckets = data["by_score"]
+            if buckets:
+                btable = Table(title="conversion by rank-score bucket", header_style="bold")
+                for column in ("score", "applied", "callbacks+", "conv%"):
+                    btable.add_column(column, justify="right")
+                for b in buckets:
+                    applied, pos = int(b["applied"]), int(b["positive"] or 0)
+                    rate = f"{100.0 * pos / applied:.1f}" if applied else "-"
+                    btable.add_row(str(b["bucket"]), str(applied), str(pos), rate)
+                console.print(btable)
+
+            # Advisory only — never auto-mutates config. Needs volume to mean anything.
+            if total_applied >= 10:
+                overall = 100.0 * total_pos / total_applied
+                console.print(f"[dim]overall callback rate: {overall:.1f}% over {total_applied} applies[/dim]")
+                scored = [b for b in buckets if b["bucket"] != "unscored" and int(b["applied"]) >= 5]
+                if scored:
+                    best = max(scored, key=lambda b: int(b["positive"] or 0) / max(1, int(b["applied"])))
+                    rate = 100.0 * int(best["positive"] or 0) / int(best["applied"])
+                    console.print(f"[dim]strongest bucket {best['bucket']} at {rate:.1f}% — if callbacks concentrate ≥60, consider raising min_rank_score[/dim]")
+            else:
+                console.print("[dim]log more outcomes (`outcome ...`) — advice unlocks at 10+ applies[/dim]")
+        finally:
+            await close_pool()
+
+    _run(_main())
 
 
 def main() -> None:  # console_scripts / python -m entrypoint

@@ -162,6 +162,7 @@ class ApplicationPlanner:
         Transform raw collected jobs into a structured, prioritized ApplicationPlan.
         """
         cap = custom_daily_limit if custom_daily_limit is not None else self.daily_limit
+        cap = max(0, int(cap))
         rejected_list: list[RejectedJobInfo] = []
         eligible_raw: list[Job] = []
         rejection_reasons_count: dict[str, int] = {}

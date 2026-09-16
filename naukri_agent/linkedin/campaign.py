@@ -48,18 +48,34 @@ SEARCH_URLS = [
 ]
 
 
+def _configured_resume_fallback(want_ai: bool, resume_dir: Path) -> Path:
+    """Resume file from config.yaml profiles. Callers verify existence before attaching."""
+    try:
+        config = AgentConfig.load()
+    except Exception:
+        return resume_dir
+    profiles = [p for p in (config.profiles or []) if p.enabled and getattr(p, "resume_file", None)]
+    for p in profiles:
+        is_ai = any(k in (p.name or "").lower() for k in ["ai", "python", "ml", "llm"])
+        if is_ai == want_ai:
+            return resume_dir / Path(p.resume_file).name
+    if profiles:
+        return resume_dir / Path(profiles[0].resume_file).name
+    return resume_dir
+
+
 def _get_resume_path(role: str, resume_dir: Path) -> Path:
-    """Find appropriate resume path for the classified role."""
+    """Find appropriate resume path for the classified role (glob first, config fallback)."""
     if "AI" in role or "Python" in role or "ML" in role:
         candidates = list(resume_dir.glob("*2026.pdf")) + list(resume_dir.glob("*AI*.pdf")) + list(resume_dir.glob("*Python*.pdf"))
         if candidates:
             return candidates[0]
-        return resume_dir / "CV_Mahesh_Chitakoti_2026.pdf"
+        return _configured_resume_fallback(want_ai=True, resume_dir=resume_dir)
     else:
         candidates = list(resume_dir.glob("*2026_1_*.pdf")) + list(resume_dir.glob("*FullStack*.pdf")) + list(resume_dir.glob("*Full_Stack*.pdf"))
         if candidates:
             return candidates[0]
-        return resume_dir / "CV_Mahesh_Chitakoti_2026_1_.pdf"
+        return _configured_resume_fallback(want_ai=False, resume_dir=resume_dir)
 
 
 async def run_campaign(
@@ -104,6 +120,13 @@ async def run_campaign(
     gemini_key = getattr(settings, "gemini_api_key", "") or os.getenv("GEMINI_API_KEY", "")
     hunter = LinkedInHunter(li_at_cookie=li_cookie, headless=headless)
     mailer = ColdEmailer(sender_email=gmail_user, app_password=gmail_pass, gemini_api_key=gemini_key)
+    if not dry_run and not mailer.verify_credentials():
+        # Bad app password: every send would fail — exit before hunting.
+        return 0
+    # In-run memory of attempted addresses: when the DB is unreachable,
+    # has_emailed/record_contacted go blind and the same lead would be
+    # re-emailed once per search (run 291 sent 4 attempts to one address).
+    attempted_this_run: set[str] = set()
     repo = await Repository.create()
 
     resume_dir = settings.resume_dir
@@ -178,9 +201,13 @@ async def run_campaign(
                         break
 
                     clean_email = target_email.strip().lower()
+                    if clean_email in attempted_this_run:
+                        continue
                     if await repo.has_emailed(clean_email, within_days=60):
                         log.info("linkedin.already_emailed", email=clean_email)
+                        attempted_this_run.add(clean_email)
                         continue
+                    attempted_this_run.add(clean_email)
 
                     if dry_run:
                         body_preview = mailer._generate_body(role_name=role, job_description=text)

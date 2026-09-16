@@ -38,7 +38,7 @@ from typing import Any
 from ..browser.artifacts import ArtifactStore
 from ..browser.manager import BrowserManager
 from ..browser.resilience import FatalAgentError, first_visible
-from ..config import PROJECT_ROOT, AgentConfig, JobProfile, NaukriAccount, Settings
+from ..config import PROJECT_ROOT, AgentConfig, ConfigError, JobProfile, NaukriAccount, Settings
 from ..core.answers import AnswerEngine
 from ..core.application_planner import ApplicationPlanner
 from ..core.filters import FilterEngine
@@ -53,7 +53,8 @@ from ..core.models import (
 )
 from ..core.reporting import ReportExporter
 from ..core.run_policy import RunPolicy
-from ..core.runtime_metrics import JobTiming, RuntimeMetrics
+from ..core.runtime_metrics import RuntimeMetrics
+from ..db.locks import advisory_lock_key
 from ..db.repository import Repository
 from ..logging_setup import bind_context, clear_context, get_logger
 from ..naukri import selectors as S
@@ -121,6 +122,12 @@ class Orchestrator:
         self.platform_time_budget_s = 0.0
         self.current_platform_name = ""
         self.applied_today = 0
+        self._profile_applied: dict[str, int] = {}
+        # Persistence outage breaker: applying without recording outcomes
+        # loses dedupe state and poisons metrics, so a blind run must stop.
+        self._persistence_failures = 0
+        self._run_lock_conn = None
+        self._run_lock_key: int | None = None
         self._background_tasks: set[asyncio.Task[Any]] = set()
         self.started_at = time.monotonic()
         self.notifier = build_notifier(
@@ -188,7 +195,50 @@ class Orchestrator:
         # Resolves + validates the credentials for THIS account only, so a run
         # targeting `secondary` fails loudly instead of silently using account 1.
         self.account = self.settings.validate_for_run(self.account_key)
+        # Fail closed on identity: with no literals in AgentConfig defaults, a
+        # config without name/email/phone must stop here, never apply blank.
+        missing_identity = [
+            field
+            for field in ("applicant_name", "applicant_email", "applicant_phone")
+            if not (getattr(self.config, field, "") or "").strip()
+        ]
+        if missing_identity:
+            raise ConfigError(
+                f"Applicant identity incomplete ({', '.join(missing_identity)}) — "
+                "fill them in config/config.yaml"
+            )
         self.repo = await Repository.create()
+        # Cross-process mutual exclusion: a scheduler tick overlapping a manual
+        # run on the same account double-applies from one IP. The lock is held
+        # for the whole run and released in the finally block below.
+        self._run_lock_key = advisory_lock_key("naukri-run", self.account_key)
+        lock_conn = None
+        try:
+            lock_conn = await self.repo.pool.acquire()
+            run_locked = bool(
+                await lock_conn.fetchval("SELECT pg_try_advisory_lock($1)", self._run_lock_key)
+            )
+        except Exception as exc:
+            log.warning("run.lock_unavailable_running_unlocked", error=str(exc)[:150])
+            run_locked = True
+            if lock_conn is not None:
+                try:
+                    await self.repo.pool.release(lock_conn)
+                except Exception:
+                    pass
+                lock_conn = None
+        if not run_locked:
+            log.warning("run.already_running_skipping", account=self.account_key)
+            self.stats.errors.append(
+                f"account {self.account_key} already has a live run — skipping duplicate"
+            )
+            if lock_conn is not None:
+                try:
+                    await self.repo.pool.release(lock_conn)
+                except Exception:
+                    pass
+            return self.stats
+        self._run_lock_conn = lock_conn
         try:
             await self.repo.prune_stale_data()
         except Exception as exc:
@@ -196,13 +246,16 @@ class Orchestrator:
         profiles = self.config.active_profiles(self.only_profiles, account=self.account_key)
         profile_names = [p.name for p in profiles]
         if not profile_names:
-            raise RuntimeError(
+            raise ConfigError(
                 f"No enabled profiles matched the selection for account '{self.account_key}'"
             )
 
         self.run_id = await self.repo.start_run(self.mode, profile_names, account=self.account_key)
         bind_context(run_id=self.run_id, account=self.account_key)
-        self.applied_today = await self.repo.applied_today(account=self.account_key)
+        self.applied_today = await self.repo.applied_today(
+            account=self.account_key, tz=self.config.schedule.timezone
+        )
+        self._profile_applied = {}
         log.info(
             "run.start",
             mode=self.mode,
@@ -316,7 +369,7 @@ class Orchestrator:
                                 answers = await self._build_answer_engine(profiles[0])
                             platform = CutshortPlatform(page, self.account, artifacts, answers, self.policy)
                         elif p_name == "wellfound":
-                            platform = WellfoundPlatform(page, self.account, artifacts, self.policy)
+                            platform = WellfoundPlatform(page, self.account, artifacts, self.policy, config=self.config, metrics=self.metrics)
                         elif p_name == "linkedin":
                             if answers is None:
                                 answers = await self._build_answer_engine(profiles[0])
@@ -393,8 +446,14 @@ class Orchestrator:
                                 platform_profiles = [self.config.get_unified_linkedin_profile()]
                             else:
                                 platform_profiles = self.config.active_profiles(self.only_profiles, account=None)[:1]
+                        elif platform.platform_name == "wellfound":
+                            if not self.only_profiles:
+                                platform_profiles = [self.config.get_unified_wellfound_profile()]
+                            else:
+                                platform_profiles = self.config.active_profiles(self.only_profiles, account=None)[:1]
                         elif platform.platform_name != "naukri":
                             platform_profiles = self.config.active_profiles(self.only_profiles, account=None)
+
 
 
                         for profile in platform_profiles:
@@ -403,9 +462,12 @@ class Orchestrator:
                             except StopRun as stop:
                                 log.warning("platform.stopped_early", platform=platform.platform_name, profile=profile.name, reason=str(stop))
                                 self.stats.errors.append(f"{platform.platform_name} ({profile.name}): {stop}")
-                                if "timeout" in str(stop).lower() or "budget" in str(stop).lower():
+                                stop_msg = str(stop).lower()
+                                if "timeout" in stop_msg or "budget" in stop_msg or "consecutive" in stop_msg:
                                     break
                                 continue
+                            except FatalAgentError:
+                                raise
                             except Exception as exc:
                                 log.exception("platform.profile_failed", platform=platform.platform_name, profile=profile.name)
                                 self.stats.errors.append(f"{platform.platform_name} failed for {profile.name}: {exc}")
@@ -427,10 +489,14 @@ class Orchestrator:
                 # waiting for an answer.
                 # =========================================================
                 message_platforms = [p for p in executed_platforms if hasattr(p, "handle_messages")]
-                if message_platforms and self.policy.may_mutate:
+                # The sweep and the cold-email campaign ran 14 minutes past the
+                # run timeout in run 291. Gate both on remaining budget.
+                sweep_budget_s = self.config.run.run_timeout_minutes * 60 - self.elapsed_s
+                if message_platforms and self.policy.may_mutate and sweep_budget_s >= 180:
                     log.info(
                         "run.questionnaire_sweep.start",
                         platforms=[p.platform_name for p in message_platforms],
+                        remaining_s=round(sweep_budget_s, 1),
                     )
                     await asyncio.sleep(15)  # settle time so auto-replies can fire
                     for m_platform in message_platforms:
@@ -459,19 +525,27 @@ class Orchestrator:
             # later runs the same day exit before launching a browser.
             # =========================================================
             if not self.only_platform and self.config.platforms.linkedin and self.settings.matched_outreach_enabled:
-                try:
-                    from ..linkedin.campaign import run_campaign
-
-                    campaign_dry_run = not self.policy.may_mutate
-                    sent = await run_campaign(dry_run=campaign_dry_run)
+                campaign_budget_s = self.config.run.run_timeout_minutes * 60 - self.elapsed_s
+                if campaign_budget_s < 300:
                     log.info(
-                        "run.linkedin_campaign_done",
-                        emails_sent=sent,
-                        dry_run=campaign_dry_run,
+                        "run.linkedin_campaign_skipped",
+                        reason="insufficient run budget",
+                        remaining_s=round(campaign_budget_s, 1),
                     )
-                except Exception as exc:
-                    log.warning("run.linkedin_campaign_failed", error=str(exc)[:200])
-                    self.stats.errors.append(f"linkedin campaign failed: {str(exc)[:120]}")
+                else:
+                    try:
+                        from ..linkedin.campaign import run_campaign
+
+                        campaign_dry_run = not self.policy.may_mutate
+                        sent = await run_campaign(dry_run=campaign_dry_run)
+                        log.info(
+                            "run.linkedin_campaign_done",
+                            emails_sent=sent,
+                            dry_run=campaign_dry_run,
+                        )
+                    except Exception as exc:
+                        log.warning("run.linkedin_campaign_failed", error=str(exc)[:200])
+                        self.stats.errors.append(f"linkedin campaign failed: {str(exc)[:120]}")
 
 
         except FatalAgentError as exc:
@@ -489,6 +563,19 @@ class Orchestrator:
             status = RunStatus.FAILED
             log.exception("run.crashed")
         finally:
+            if getattr(self, "_run_lock_conn", None) is not None:
+                try:
+                    await self._run_lock_conn.fetchval(
+                        "SELECT pg_advisory_unlock($1)", self._run_lock_key
+                    )
+                except Exception:
+                    pass
+                try:
+                    if self.repo is not None:
+                        await self.repo.pool.release(self._run_lock_conn)
+                except Exception:
+                    pass
+                self._run_lock_conn = None
             if self._background_tasks:
                 await asyncio.gather(*self._background_tasks, return_exceptions=True)
             # Detach popup listeners before the page dies.
@@ -569,6 +656,8 @@ class Orchestrator:
             result = await refresher.refresh()
         except FatalAgentError:
             raise
+        except StopRun:
+            raise
         except Exception as exc:
             log.warning("profile.refresh_crashed", error=str(exc)[:250])
             await self.repo.record_profile_refresh(
@@ -610,7 +699,6 @@ class Orchestrator:
         artifacts: ArtifactStore,
     ) -> None:
         assert self.repo is not None
-        self.platform_consecutive_failures = 0
         bind_context(profile=profile.name)
         log.info(
             "profile.start",
@@ -626,12 +714,17 @@ class Orchestrator:
             account=self.account_key,
             platform=platform.platform_name,
         )
-        applied_this_profile = 0
+        applied_this_profile = self._profile_applied.get(profile.name, 0)
 
         platform_limit = profile.platform_limits.get(platform.platform_name, profile.max_applications_per_run)
 
         def remaining() -> int:
-            return platform_limit - applied_this_profile
+            # Per-profile cap AND the global daily cap bind together: the run
+            # stops on whichever budget runs out first. `applied_today` counts
+            # this account's prior submits today plus this run's.
+            left_profile = platform_limit - applied_this_profile
+            left_daily = self.config.run.daily_application_cap - self.applied_today
+            return min(left_profile, left_daily)
 
         # Step 1: Collect Jobs from Platform
         collected_jobs: list[Job] = []
@@ -726,7 +819,7 @@ class Orchestrator:
         t_exp_0 = time.perf_counter()
         analysis_dir = PROJECT_ROOT / "analysis"
         exporter = ReportExporter(analysis_dir, run_id=self.run_id)
-        exporter.export_plan_reports(plan, collected_jobs, profile_name=profile.name)
+        exporter.export_plan_reports(plan, collected_jobs, profile_name=profile.name, platform=platform.platform_name)
         self.metrics.reporting_s += time.perf_counter() - t_exp_0
 
         # Step 4: Print Concise Summary & Full Application Plan Report
@@ -755,6 +848,7 @@ class Orchestrator:
                 profile_name=profile.name,
                 dry_run=True,
                 duration_seconds=duration,
+                platform=platform.platform_name,
             )
             return
 
@@ -768,6 +862,7 @@ class Orchestrator:
         candidate_queue = plan.eligible_jobs
         try:
             for rjob in candidate_queue:
+                self._check_global_limits()
                 self._check_platform_limits(platform.platform_name)
                 if remaining() <= 0:
                     log.info("profile.cap_reached", profile=profile.name, cap=platform_limit)
@@ -778,9 +873,12 @@ class Orchestrator:
 
                 try:
                     outcome = await self._process_job(
-                        job, profile, filters, platform, page, artifacts
+                        job, profile, filters, platform, page, artifacts,
+                        rank_score=rjob.score,
                     )
                 except FatalAgentError:
+                    raise
+                except StopRun:
                     raise
                 except Exception as exc:
                     log.exception("job.unhandled_processing_error", job_id=job.job_id, error=str(exc))
@@ -792,6 +890,7 @@ class Orchestrator:
                 if outcome.status == ApplicationStatus.APPLIED:
                     applied_this_profile += 1
                     self.applied_today += 1
+                    self._profile_applied[profile.name] = applied_this_profile
                     applied_outcomes.append((job, outcome))
                     if job.is_walkin:
                         loc = (job.location or "").lower()
@@ -830,7 +929,7 @@ class Orchestrator:
         # Step 7: Export Outcome Reports & Enriched Summary JSON
         duration = time.monotonic() - profile_start_time
         t_exp_out_0 = time.perf_counter()
-        exporter.export_outcome_reports(applied_outcomes, failed_outcomes, profile_name=profile.name)
+        exporter.export_outcome_reports(applied_outcomes, failed_outcomes, profile_name=profile.name, platform=platform.platform_name)
         exporter.export_summary_json(
             plan,
             applied_count=len(applied_outcomes),
@@ -838,6 +937,7 @@ class Orchestrator:
             profile_name=profile.name,
             dry_run=not self.policy.may_mutate,
             duration_seconds=duration,
+            platform=platform.platform_name,
         )
         self.metrics.reporting_s += time.perf_counter() - t_exp_out_0
         log.info("profile.done", profile=profile.name, applied=applied_this_profile)
@@ -851,6 +951,7 @@ class Orchestrator:
         platform: BaseJobPlatform,
         page,
         artifacts: ArtifactStore,
+        rank_score: float | None = None,
     ) -> ApplyOutcome:
         assert self.repo is not None
         bind_context(job_id=job.job_id)
@@ -891,16 +992,29 @@ class Orchestrator:
                 outcome,
                 account=self.account_key,
                 platform=platform.platform_name,
+                rank_score=rank_score,
             )
             return outcome
 
-        t_job_apply_0 = time.perf_counter()
         try:
             # Phase 2 runs INSIDE apply_to_job(): the platform loads the job page,
             # enriches description, then calls pre_submit_check before clicking Apply.
-            outcome = await platform.apply_to_job(
-                job, profile.name, pre_submit_check=filters.evaluate_detail
-            )
+            # A per-job cap bounds hung navigations (one job once ate 6 minutes).
+            try:
+                outcome = await asyncio.wait_for(
+                    platform.apply_to_job(
+                        job, profile.name, pre_submit_check=filters.evaluate_detail
+                    ),
+                    timeout=300.0,
+                )
+            except TimeoutError:
+                shot = await artifacts.capture_failure(page, "job-time-cap", profile.name, job.job_id)
+                log.warning("job.time_cap_exceeded", job_id=job.job_id, cap_s=300)
+                outcome = ApplyOutcome(
+                    status=ApplicationStatus.FAILED,
+                    detail="job time cap exceeded (300s)",
+                    screenshot_path=shot,
+                )
 
             # Session may have silently expired mid-flow.
             logged_out_markers = getattr(platform, "logged_out_markers", None)
@@ -924,6 +1038,8 @@ class Orchestrator:
 
         except FatalAgentError:
             raise
+        except StopRun:
+            raise
         except Exception as exc:
             shot = await artifacts.capture_failure(page, "job-crash", profile.name, job.job_id)
             log.exception("job.unexpected_error", job_id=job.job_id)
@@ -933,17 +1049,9 @@ class Orchestrator:
                 screenshot_path=shot,
             )
 
-        if outcome.status == ApplicationStatus.APPLIED:
-            dur = max(0.1, time.perf_counter() - t_job_apply_0)
-            self.metrics.job_timings.append(
-                JobTiming(
-                    job_id=job.job_id,
-                    title=job.title,
-                    total_s=dur,
-                )
-            )
-
-        await self._record(job, profile, outcome, platform.platform_name)
+        # NOTE: per-job timings are recorded once inside ApplyEngine.apply();
+        # a second totals-only row here doubled every applied job in the report.
+        await self._record(job, profile, outcome, platform.platform_name, rank_score=rank_score)
         return outcome
 
     async def _record(
@@ -952,6 +1060,7 @@ class Orchestrator:
         profile: JobProfile,
         outcome: ApplyOutcome,
         platform: str,
+        rank_score: float | None = None,
     ) -> None:
         assert self.repo is not None
 
@@ -1031,9 +1140,17 @@ class Orchestrator:
                 outcome,
                 account=self.account_key,
                 platform=getattr(platform, "platform_name", str(platform)),
+                rank_score=rank_score,
             )
+            self._persistence_failures = 0
         except Exception as exc:
             log.warning("repo.record_outcome_failed", error=str(exc), job_id=job.job_id)
+            self._persistence_failures += 1
+            if self._persistence_failures >= 5:
+                raise StopRun(
+                    f"persistence unavailable ({self._persistence_failures} consecutive "
+                    "record failures) — stopping blind run to protect dedupe state"
+                ) from exc
 
         task = asyncio.create_task(self._dispatch_recruiter_emails(job, profile, outcome))
         self._background_tasks.add(task)

@@ -125,8 +125,9 @@ async def retry_async(
             last_error = exc
             if attempt == attempts:
                 break
-            delay = min(max_delay, base_delay * (2 ** (attempt - 1)))
+            delay = base_delay * (2 ** (attempt - 1))
             delay *= random.uniform(0.75, 1.35)  # jitter avoids lockstep retries
+            delay = min(max_delay, delay)
             log.warning(
                 "retry.backoff",
                 label=label,
@@ -136,7 +137,12 @@ async def retry_async(
                 error=str(exc)[:200],
             )
             if on_retry:
-                await on_retry(attempt, exc)
+                try:
+                    await on_retry(attempt, exc)
+                except Exception as retry_exc:
+                    # A failing callback must not mask the original error or
+                    # abort the retry loop.
+                    log.warning("retry.on_retry_failed", label=label, error=str(retry_exc)[:150])
             await asyncio.sleep(delay)
     assert last_error is not None
     raise last_error

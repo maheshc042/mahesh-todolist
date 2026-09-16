@@ -105,7 +105,9 @@ Object.defineProperty(navigator, 'languages', { get: () => ['en-IN', 'en-US', 'e
 Object.defineProperty(navigator, 'hardwareConcurrency', { get: () => 8 });
 Object.defineProperty(navigator, 'deviceMemory', { get: () => 8 });
 
-// 7. Prevent automation detection via Error stack trace
+// 7. Scrub automation names from error stacks. The constructor is wrapped,
+// not replaced: statics (captureStackTrace, stackTraceLimit) and subclassing
+// keep working by copying all own properties from the original.
 const originalError = Error;
 Error = function(...args) {
     const error = new originalError(...args);
@@ -115,6 +117,14 @@ Error = function(...args) {
     }
     return error;
 };
+Object.setPrototypeOf(Error, originalError);
+for (const key of Object.getOwnPropertyNames(originalError)) {
+    try {
+        if (!(key in Error)) {
+            Object.defineProperty(Error, key, Object.getOwnPropertyDescriptor(originalError, key));
+        }
+    } catch (e) { /* non-configurable statics stay on the original */ }
+}
 Error.prototype = originalError.prototype;
 
 // 8. Override toString to prevent detection via function source
@@ -172,6 +182,18 @@ class BrowserManager:
 
     async def start(self) -> None:
         self._playwright = await async_playwright().start()
+        try:
+            await self._start_browser_locked()
+        except Exception:
+            # Never leak a headless Chromium when setup fails partway.
+            try:
+                await self.stop()
+            except Exception:
+                pass
+            raise
+
+    async def _start_browser_locked(self) -> None:
+        assert self._playwright is not None
         self._browser = await self._playwright.chromium.launch(
             headless=self.config.headless,
             slow_mo=self.config.slow_mo_ms,
@@ -203,7 +225,7 @@ class BrowserManager:
         )
         self._context.set_default_timeout(self.config.default_timeout_ms)
         self._context.set_default_navigation_timeout(self.config.navigation_timeout_ms)
-        setattr(self._context, "_headed", not self.config.headless)
+        self._context._headed = not self.config.headless
         await self._context.add_init_script(STEALTH_SCRIPT)
 
         if self.config.block_resources:

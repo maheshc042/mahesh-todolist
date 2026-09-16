@@ -99,47 +99,39 @@ class CutshortChatbot:
         norm_text = text.lower()
         needed_fields: list[tuple[str, str]] = []
         cfg = AgentConfig.load()
-        phone = cfg.applicant_phone or "9481777227"
-        email = cfg.applicant_email or "maheshchitkoti@gmail.com"
+        phone = (cfg.applicant_phone or "").strip()
+        email = (cfg.applicant_email or "").strip()
 
         # 1. Contact Number / Mobile / Phone / WhatsApp
-        if any(k in norm_text for k in ["contact number", "contact no", "mobile number", "mobile no", "phone number", "phone no", "whatsapp", "call you", "share your contact", "share your number", "share your phone"]):
+        if phone and any(k in norm_text for k in ["contact number", "contact no", "mobile number", "mobile no", "phone number", "phone no", "whatsapp", "call you", "share your contact", "share your number", "share your phone"]):
             needed_fields.append(("Contact Number", phone))
 
         # 2. Email Address
-        if any(k in norm_text for k in ["email address", "email id", "mail address", "mail id", "share your email", "share your mail"]):
+        if email and any(k in norm_text for k in ["email address", "email id", "mail address", "mail id", "share your email", "share your mail"]):
             needed_fields.append(("Email", email))
 
         # 3. Notice period / LWD
         if any(k in norm_text for k in ["notice period", "notice", "how soon", "when can you join", "joining time", "lwd", "last working"]):
             resolved = self.answers.resolve(ScreeningQuestion(text="notice period", kind="unknown", options=[]))
-            if resolved is None:
-                needed_fields.append(("Notice Period", "0 days (Immediate Joiner)"))
-            else:
+            if resolved is not None:
                 needed_fields.append(("Notice Period", resolved.value))
 
         # 4. Current CTC
         if any(k in norm_text for k in ["current ctc", "current salary", "cctc", "present ctc"]):
             resolved = self.answers.resolve(ScreeningQuestion(text="current ctc", kind="unknown", options=[]))
-            if resolved is None:
-                needed_fields.append(("Current CTC", "4 LPA"))
-            else:
+            if resolved is not None:
                 needed_fields.append(("Current CTC", resolved.value))
 
         # 5. Expected CTC
         if any(k in norm_text for k in ["expected ctc", "expected salary", "ectc"]):
             resolved = self.answers.resolve(ScreeningQuestion(text="expected ctc", kind="unknown", options=[]))
-            if resolved is None:
-                needed_fields.append(("Expected CTC", "7 LPA"))
-            else:
+            if resolved is not None:
                 needed_fields.append(("Expected CTC", resolved.value))
 
         # 6. Total Experience
         if any(k in norm_text for k in ["total experience", "overall experience", "total exp", "years of experience"]):
             resolved = self.answers.resolve(ScreeningQuestion(text="total experience", kind="unknown", options=[]))
-            if resolved is None:
-                needed_fields.append(("Total Experience", "2.5 years"))
-            else:
+            if resolved is not None:
                 needed_fields.append(("Total Experience", resolved.value))
 
         # 7. Relevant / Specific Skill Experience
@@ -154,9 +146,7 @@ class CutshortChatbot:
             resolved = self.answers.resolve(
                 ScreeningQuestion(text=text[:250], kind="unknown", options=[])
             )
-            if resolved is None:
-                needed_fields.append(("Location / Availability", "Bengaluru (Open to relocate)"))
-            else:
+            if resolved is not None:
                 needed_fields.append(("Location / Availability", resolved.value))
 
         if not needed_fields:
@@ -169,7 +159,7 @@ class CutshortChatbot:
         reply_lines = ["Hi,\n\nPlease find the requested details below:"]
         for key, val in needed_fields:
             reply_lines.append(f"• {key}: {val}")
-        reply_lines.append(f"\nPlease let me know if you need any additional information.\n\nBest regards,\n{cfg.applicant_name or 'Mahesh Chitakoti'}")
+        reply_lines.append(f"\nPlease let me know if you need any additional information.\n\nBest regards,\n{(cfg.applicant_name or '').strip() or 'Applicant'}")
         return "\n".join(reply_lines)
 
     async def run(self) -> tuple[bool, int, str]:
@@ -214,37 +204,49 @@ class CutshortChatbot:
                     q_label_low = q_label.lower()
 
                     if any(k in q_label_low for k in ["hardest", "challenging", "complex problem", "technical problem", "problems you have worked on"]):
-                        ta_ans = (
-                            "Architected and deployed an end-to-end agentic AI and LLM orchestration pipeline using FastAPI, LangChain, and PostgreSQL with pgvector. "
-                            "The primary challenge was unpredictable API latency and output validation during multi-step tool calls. "
-                            "I solved this by implementing asynchronous worker queues, semantic caching in Redis, and strict Pydantic JSON schema enforcement. "
-                            "This reduced end-to-end latency by 45%, eliminated schema drift, and ensured sub-second response times in production."
-                        )
+                        # Fail closed: answer only from user config, never a
+                        # hard-coded achievement narrative.
+                        _hard = self.answers.resolve(ScreeningQuestion(text=q_label[:200], kind="text"))
+                        ta_ans = str(_hard.value) if _hard and _hard.value else ""
                     elif any(k in q_label_low for k in ["technical skillset", "strong in", "strength", "skillsets do you consider"]):
-                        ta_ans = (
-                            "Strongest in Python, FastAPI, React/Node.js, PostgreSQL, and LLM application development (RAG, agent workflows, LangChain). "
-                            "Professional examples: designed scalable REST microservices handling high concurrency, built full-stack reactive dashboards with React and TypeScript, "
-                            "and optimized SQL query execution plans and Redis caching layers for production deployments."
-                        )
+                        # Fail closed: answer only from user config, never a
+                        # hard-coded skill/tenure claim.
+                        _stren = self.answers.resolve(ScreeningQuestion(text=q_label[:200], kind="text"))
+                        ta_ans = str(_stren.value) if _stren and _stren.value else ""
                     elif any(k in q_label_low for k in ["phone", "mobile", "contact number", "contact no", "whatsapp", "call you"]):
-                        ta_ans = AgentConfig.load().applicant_phone or "9481777227"
+                        ta_ans = (AgentConfig.load().applicant_phone or "").strip()
                     elif any(k in q_label_low for k in ["email", "mail id", "email address", "mail address"]):
-                        ta_ans = AgentConfig.load().applicant_email or "maheshchitkoti@gmail.com"
+                        ta_ans = (AgentConfig.load().applicant_email or "").strip()
                     elif any(k in q_label_low for k in ["ctc", "salary", "fixed", "variable", "in hand", "in-hand", "annual ctc", "compensation"]):
-                        ta_ans = "Current CTC: 4 LPA (Fixed: 3.8 LPA, Variable: 0 LPA). Expected CTC: 7 LPA. Notice Period: 0 days (Immediate Joiner)."
+                        ctc_parts = []
+                        for q_text, label in (("current ctc", "Current CTC"), ("expected ctc", "Expected CTC"), ("notice period", "Notice Period")):
+                            part = self.answers.resolve(ScreeningQuestion(text=q_text, kind="text"))
+                            if part and part.value:
+                                ctc_parts.append(f"{label}: {part.value}")
+                        ta_ans = ". ".join(ctc_parts)
                     elif any(k in q_label_low for k in ["docker", "kubernetes", "container"]):
-                        ta_ans = "Yes, 2+ years of hands-on experience containerizing microservices with Docker, creating optimized multi-stage builds, and orchestrating container workloads with Kubernetes and AWS."
+                        # Fail closed: answer only from user config, never a
+                        # hard-coded tenure claim.
+                        _dock = self.answers.resolve(ScreeningQuestion(text=q_label[:200], kind="text"))
+                        ta_ans = str(_dock.value) if _dock and _dock.value else ""
                     elif any(k in q_label_low for k in ["notice", "how soon", "when can you join", "joining date", "availability"]):
-                        ta_ans = "Available immediately (0-day notice period, already served notice)."
+                        notice_res = self.answers.resolve(ScreeningQuestion(text="notice period", kind="text"))
+                        ta_ans = notice_res.value if notice_res and notice_res.value else ""
                     elif any(k in q_label_low for k in ["location", "relocate", "relocation", "bangalore", "bengaluru", "mumbai", "hyderabad"]):
-                        ta_ans = "Currently based in Bengaluru, open to both onsite/hybrid work in Bengaluru and ready to relocate to other major tech hubs."
+                        loc_res = self.answers.resolve(ScreeningQuestion(text=q_label[:200], kind="text"))
+                        ta_ans = loc_res.value if loc_res and loc_res.value else ""
                     else:
                         resolved = self.answers.resolve(ScreeningQuestion(text=q_label[:200], kind="text"))
                         if resolved and resolved.value:
                             ta_ans = str(resolved.value)
                         else:
-                            ta_ans = "Experienced software engineer with 2.5+ years building scalable full-stack applications, microservices, and AI workflows using Python, FastAPI, and React."
+                            ta_ans = ""
 
+                    if not (ta_ans or "").strip():
+                        # Config holds no answer for this question: fail closed
+                        # instead of submitting a guessed or literal response.
+                        log.debug("cutshort.chatbot.no_config_answer", question=q_label[:60])
+                        continue
                     try:
                         await ta.scroll_into_view_if_needed()
                         await human_pause(200, 400)
@@ -499,15 +501,18 @@ class CutshortChatbot:
                         combined = f"{placeholder} {name_attr} {recruiter_text}".lower()
                         ans_val = None
                         if any(k in combined for k in ["phone", "mobile", "contact", "whatsapp"]):
-                            ans_val = AgentConfig.load().applicant_phone or "9481777227"
+                            ans_val = (AgentConfig.load().applicant_phone or "").strip()
                         elif any(k in combined for k in ["email", "mail id"]):
-                            ans_val = AgentConfig.load().applicant_email or "maheshchitkoti@gmail.com"
+                            ans_val = (AgentConfig.load().applicant_email or "").strip()
                         elif any(k in combined for k in ["notice", "how soon", "when can you join", "lwd"]):
-                            ans_val = "0 days (Immediate)"
+                            notice_res = self.answers.resolve(ScreeningQuestion(text="notice period", kind="text", options=[]))
+                            ans_val = notice_res.value if notice_res and notice_res.value else None
                         elif any(k in combined for k in ["expected ctc", "ectc"]):
-                            ans_val = "7 LPA"
+                            exp_res = self.answers.resolve(ScreeningQuestion(text="expected ctc", kind="text", options=[]))
+                            ans_val = exp_res.value if exp_res and exp_res.value else None
                         elif any(k in combined for k in ["current ctc", "cctc"]):
-                            ans_val = "4 LPA"
+                            cur_res = self.answers.resolve(ScreeningQuestion(text="current ctc", kind="text", options=[]))
+                            ans_val = cur_res.value if cur_res and cur_res.value else None
                         else:
                             resolved = self.answers.resolve(ScreeningQuestion(text=f"{placeholder} {recruiter_text}", kind="text", options=[]))
                             if resolved:
@@ -624,6 +629,41 @@ def _parse_cutshort_experience(text: str) -> tuple[float | None, float | None]:
         except ValueError:
             pass
     return None, None
+
+
+_POSTED_AGO_RE = re.compile(
+    r"(\d+)\s*(hours?|hrs?|h|days?|d|weeks?|w|months?|mos?|years?|y)\s*ago|\bjust now\b|\btoday\b|\byesterday\b",
+    re.IGNORECASE,
+)
+
+
+def _parse_cutshort_posted(text: str) -> int | None:
+    """Relative posted age on the card ('3d ago' -> 3). None when unstated.
+
+    Populates `posted_days_ago` so the configured `max_posted_days` gate
+    enforces freshness even if the feed's 1-week UI filter silently fails.
+    """
+    if not text:
+        return None
+    low = text.lower()
+    if any(k in low for k in ("just now", "few minutes", "today", "hour")):
+        return 0
+    if "yesterday" in low:
+        return 1
+    m = _POSTED_AGO_RE.search(low)
+    if not m or not m.group(1):
+        return None
+    n = int(m.group(1))
+    unit = (m.group(2) or "day").lower()
+    if unit.startswith("h"):
+        return 0
+    if unit.startswith("w"):
+        return n * 7
+    if unit.startswith("mo"):
+        return n * 30
+    if unit.startswith("y"):
+        return n * 365
+    return n
 
 
 class CutshortPlatform(BaseJobPlatform):
@@ -999,6 +1039,7 @@ class CutshortPlatform(BaseJobPlatform):
 
                 min_sal, max_sal = _parse_cutshort_salary(card_text)
                 min_exp, max_exp = _parse_cutshort_experience(card_text)
+                posted_days = _parse_cutshort_posted(f"{title} {card_text}")
 
                 match = re.search(r"-([a-zA-Z0-9]+)$", url)
                 job_id = f"cutshort-{match.group(1)}" if match else f"cutshort-{Job.stable_id(url, title, company)}"
@@ -1017,6 +1058,7 @@ class CutshortPlatform(BaseJobPlatform):
                         max_salary_lpa=max_sal,
                         min_experience=min_exp,
                         max_experience=max_exp,
+                        posted_days_ago=posted_days,
                         recommendation_tab="default" if profile.use_recommended else "all_jobs",
                         recommendation_position=len(jobs) + 1,
                         platform="cutshort",
@@ -1131,7 +1173,11 @@ class CutshortPlatform(BaseJobPlatform):
         # 3. Fallback or Dedicated Flow: If modal didn't open from feed card, navigate to job.url
         if not modal:
             if not (job.url and job.url.startswith("http")):
-                return ApplyOutcome(ApplicationStatus.FAILED, detail=f"No feed card or URL for {job.title} at {job.company}")
+                return ApplyOutcome(
+                    status=ApplicationStatus.SKIPPED,
+                    reason=SkipReason.STALE_JOB,
+                    detail=f"No feed card or URL for {job.title} at {job.company}",
+                )
 
             log.info("cutshort.apply.navigating_to_job_url", job_id=job.job_id, url=job.url)
             try:
@@ -1287,16 +1333,29 @@ class CutshortPlatform(BaseJobPlatform):
             text_for_resume = f"{job.title} {modal_text} {job.description}".lower()
             is_ai_job = any(k in text_for_resume for k in ["ai", "llm", "genai", "gpt", "machine learning", "ml", "rag", "agent", "prompt", "nlp", "chatbot", "fastapi"])
 
-            # Map to target resume tailored for this specific job track
+            # Map to target resume tailored for this specific job track.
+            # Filenames resolve from config.yaml per profile — never hardcoded.
+            profiles = [
+                p for p in (getattr(cfg, "profiles", []) or [])
+                if p.enabled and getattr(p, "resume_file", None)
+            ]
+
+            def _track_resume(want_ai: bool) -> str:
+                for p in profiles:
+                    is_ai = any(k in (p.name or "").lower() for k in ["ai", "python", "ml", "llm"])
+                    if is_ai == want_ai:
+                        return p.resume_file
+                return profiles[0].resume_file if profiles else ""
+
             if is_ai_job:
-                target_resume_rel = "resumes/CV_Mahesh_Chitakoti_2026.pdf"
+                target_resume_rel = _track_resume(True)
                 target_track = "AI / Python Engineer"
             else:
-                target_resume_rel = "resumes/CV_Mahesh_Chitakoti_2026_1_.pdf"
+                target_resume_rel = _track_resume(False)
                 target_track = "Full Stack Engineer"
 
-            resume_path = PROJECT_ROOT / target_resume_rel
-            if resume_path.exists():
+            resume_path = (PROJECT_ROOT / target_resume_rel) if target_resume_rel else None
+            if resume_path is not None and resume_path.exists():
                 target_stem = resume_path.stem.lower()
                 current_resume_text = (await safe_text(modal)).lower() if modal else ""
                 if target_stem not in current_resume_text:
@@ -1382,8 +1441,9 @@ class CutshortPlatform(BaseJobPlatform):
             core_specialty = "scalable backend and full-stack software systems"
             specific_achievement = "reliable, production-grade applications"
 
-        applicant_name = AgentConfig.load().applicant_name or "Mahesh"
-        exp_years_str = "2.5" if is_ai_job else "2.6"
+        from ..core.gemini_writer import applicant_snapshot
+        who = applicant_snapshot()
+        applicant_name = who.name if who.name != "a Software Engineer" else (AgentConfig.load().applicant_name or "").strip()
 
         modal_scope = modal or self.page
         textarea = await first_visible(
@@ -1408,8 +1468,8 @@ class CutshortPlatform(BaseJobPlatform):
             pitch = (
                 f"Hi {recruiter_name},\n\n"
                 f"I'm applying for the {actual_title} role at {actual_company}. "
-                f"With {exp_years_str}+ years of hands-on experience in {key_tech_stack}, I specialize in building {core_specialty}—recently delivering {specific_achievement}.\n\n"
-                f"My background matches the tech stack you're looking for, and as an immediate joiner (0-day notice), I can hit the ground running with minimal ramp-up time.\n\n"
+                f"With {who.experience_label} of hands-on experience in {key_tech_stack}, I specialize in building {core_specialty}—recently delivering {specific_achievement}.\n\n"
+                f"My background matches the tech stack you're looking for, and as an immediate joiner ({who.notice_label} notice), I can hit the ground running with minimal ramp-up time.\n\n"
                 f"Looking forward to discussing how I can contribute to the team!\n\n"
                 f"Best,\n"
                 f"{applicant_name}"

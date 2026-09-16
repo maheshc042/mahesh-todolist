@@ -46,9 +46,19 @@ class ConsoleNotifier(Notifier):
 
 class TelegramNotifier(Notifier):
     def __init__(self, bot_token: str, chat_id: str, timeout_s: float = 15.0) -> None:
-        self.url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
+        # Token is never embedded in a logged structure: the URL is built
+        # per request and redacted from any error text before logging.
+        self._bot_token = bot_token
         self.chat_id = chat_id
         self.timeout_s = timeout_s
+
+    @property
+    def _url(self) -> str:
+        return f"https://api.telegram.org/bot{self._bot_token}/sendMessage"
+
+    def _redacted(self, text: str) -> str:
+        token = self._bot_token or ""
+        return text.replace(token, "[redacted]") if token else text
 
     async def send(self, title: str, body: str, *, is_error: bool = False) -> None:
         prefix = "🚨 FAILED" if is_error else "🚀 SUCCESS"
@@ -69,7 +79,7 @@ class TelegramNotifier(Notifier):
         try:
             async with httpx.AsyncClient(timeout=self.timeout_s) as client:
                 response = await client.post(
-                    self.url,
+                    self._url,
                     json={
                         "chat_id": self.chat_id,
                         "text": text,
@@ -86,7 +96,7 @@ class TelegramNotifier(Notifier):
             else:
                 log.info("notify.telegram_sent", chars=len(text))
         except Exception as exc:
-            log.warning("notify.telegram_failed", error=str(exc)[:200])
+            log.warning("notify.telegram_failed", error=self._redacted(str(exc))[:200])
 
 
 class CompositeNotifier(Notifier):

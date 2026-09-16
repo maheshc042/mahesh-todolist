@@ -1,22 +1,23 @@
 {
-  "profile": "Cutshort Unified (AI & Full Stack)",
-  "run_id": 279,
+  "profile": "LinkedIn Unified (AI & Full Stack)",
+  "run_id": 296,
   "dry_run": false,
-  "duration_seconds": 352.94,
-  "generated_at": "2026-09-14T09:20:06.972990+00:00",
+  "duration_seconds": 559.19,
+  "generated_at": "2026-09-15T18:14:21.352431+00:00",
   "plan_stats": {
-    "collected": 41,
-    "rejected": 30,
-    "eligible": 11,
-    "selected": 11,
+    "collected": 76,
+    "rejected": 35,
+    "eligible": 41,
+    "selected": 41,
     "overflow": 0,
     "rejection_reasons": {
-      "filter_title": 26,
-      "filter_experience": 4
+      "filter_title": 24,
+      "filter_experience": 10,
+      "low_match_score": 1
     },
-    "top_score": 70.3,
-    "cutoff_score": 45.25
+    "top_score": 66.1,
+    "cutoff_score": 30.8
   },
-  "applied_count": 10,
-  "failed_count": 1
+  "applied_count": 7,
+  "failed_count": 2
 }

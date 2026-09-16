@@ -19,6 +19,7 @@ Design decisions:
 
 from __future__ import annotations
 
+import asyncio
 import csv
 import re
 import time
@@ -305,7 +306,12 @@ class JobSearcher:
             total_unique_jobs=after_default,
         )
 
-        # 3. Iterate and harvest every discovered recommendation tab
+        # 3. Iterate and harvest every discovered recommendation tab.
+        # Two guards bound the trawl: a per-tab time cap (a stalled parse
+        # once ate 9 minutes on one tab) and early exit after consecutive
+        # zero-yield tabs (Naukri orders tabs by relevance; the tail is
+        # duplicates of already-harvested content).
+        consecutive_empty = 0
         if tabs:
             for label, locator in tabs.items():
                 if len(collected) >= cfg.max_jobs:
@@ -315,27 +321,45 @@ class JobSearcher:
                 if label in tabs_visited:
                     continue
 
+                if len(tabs_visited) >= 6 and consecutive_empty >= 4:
+                    log.info(
+                        "reco.early_exit_empty_tabs",
+                        visited=len(tabs_visited),
+                        consecutive_empty=consecutive_empty,
+                        total_unique_jobs=len(collected),
+                    )
+                    break
+
                 tabs_visited.append(label)
                 log.info("reco.tab_start", tab=label)
                 if not await self._activate_tab(locator, label):
                     log.warning("reco.tab_activation_failed", tab=label)
+                    consecutive_empty += 1
                     continue
 
                 before_tab = len(collected)
                 t_tab_start = time.perf_counter()
                 tab_timing = TabTiming(tab_name=label)
-                await self._harvest(cfg, collected, exclude, raw_tab_label=label, tab_timing=tab_timing)
+                try:
+                    await asyncio.wait_for(
+                        self._harvest(cfg, collected, exclude, raw_tab_label=label, tab_timing=tab_timing),
+                        timeout=180.0,
+                    )
+                except TimeoutError:
+                    log.warning("reco.tab_time_cap_exceeded", tab=label, cap_s=180)
                 tab_timing.total_s = time.perf_counter() - t_tab_start
                 tab_timing.jobs_found = len(collected) - before_tab
                 if self.metrics:
                     self.metrics.tab_timings[label] = tab_timing
 
                 after_tab = len(collected)
+                new_jobs = after_tab - before_tab
+                consecutive_empty = consecutive_empty + 1 if new_jobs == 0 else 0
 
                 log.info(
                     "reco.tab_stats",
                     tab=label,
-                    new_jobs_collected=after_tab - before_tab,
+                    new_jobs_collected=new_jobs,
                     total_unique_jobs=after_tab,
                 )
 

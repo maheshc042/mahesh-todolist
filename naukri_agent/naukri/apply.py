@@ -23,7 +23,7 @@ from ..browser.resilience import (
 )
 from ..core.answers import AnswerEngine
 from ..core.models import ApplicationStatus, ApplyOutcome, FilterDecision, Job, SkipReason
-from ..core.run_policy import RunPolicy
+from ..core.run_policy import RunPolicy, SideEffectBlocked
 from ..core.runtime_metrics import JobTiming, RuntimeMetrics
 from ..logging_setup import get_logger
 from . import selectors as S
@@ -112,7 +112,7 @@ class ApplyEngine:
             )
             if form_links:
                 job.form_links = list(dict.fromkeys(form_links))
-                log.info("job.form_links_found", job_id=job.job_id, links=job.form_links)
+                log.info("job.form_links_found", job_id=job.job_id, count=len(job.form_links))
 
             # Extract Recruiter Emails
             raw_emails = re.findall(r"([a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+)", description)
@@ -126,7 +126,7 @@ class ApplyEngine:
                 ]
                 if valid_emails:
                     job.recruiter_emails = list(dict.fromkeys(valid_emails))
-                    log.info("job.recruiter_emails_found", job_id=job.job_id, emails=job.recruiter_emails)
+                    log.info("job.recruiter_emails_found", job_id=job.job_id, count=len(job.recruiter_emails))
 
     async def apply(self, job: Job, profile: str, pre_submit_check: Callable[[Job], FilterDecision] | None = None) -> ApplyOutcome:
         t_job_start = time.perf_counter()
@@ -242,50 +242,81 @@ class ApplyEngine:
     async def _submit(self, job: Job, profile: str, attempts: int, jt: JobTiming) -> ApplyOutcome:
         t_btn_0 = time.perf_counter()
         apply_btn = await first_visible(self.page, ["button#apply-button", *S.JD_APPLY_BUTTON], timeout_ms=4_000)
+        if apply_btn is None:
+            # Transient render race (React re-hydration, late overlay): one cheap
+            # re-resolve before giving up. Pre-click, so zero double-apply risk.
+            await dismiss_overlays(self.page)
+            await human_pause(500, 1_000)
+            apply_btn = await first_visible(self.page, ["button#apply-button", *S.JD_APPLY_BUTTON], timeout_ms=4_000)
         jt.btn_detect_s += time.perf_counter() - t_btn_0
 
         if apply_btn is None:
             shot = await self.artifacts.capture_failure(self.page, "apply-btn-gone", profile, job.job_id)
-            return ApplyOutcome(status=ApplicationStatus.FAILED, detail="Apply button vanished", screenshot_path=shot, attempts=attempts)
+            return ApplyOutcome(status=ApplicationStatus.SKIPPED, reason=SkipReason.STALE_JOB, detail="Apply button vanished (filled/expired between collect and apply)", screenshot_path=shot, attempts=attempts)
 
         t_click_0 = time.perf_counter()
-        try:
-            # Defense in depth: enforce immediately before the irreversible click,
-            # even if a future caller bypasses apply() or policy wiring regresses.
-            self.policy.require_mutation("naukri.application.submit")
+        # Pre-click micro-retry: a transient overlay or React re-render can break
+        # exactly one click attempt. Retrying here is safe — nothing has been
+        # submitted yet. Post-click outcomes below are deliberately never retried.
+        click_exc: Exception | None = None
+        for click_attempt in (1, 2):
+            try:
+                # Defense in depth: enforce immediately before the irreversible click,
+                # even if a future caller bypasses apply() or policy wiring regresses.
+                self.policy.require_mutation("naukri.application.submit")
             
-            import asyncio
-            await asyncio.sleep(1.5)  # Wait for React hydration / event listeners to attach
-            
-            # Try to click all visible apply buttons in case the first is a dummy/sticky header
-            clicked = False
-            for btn in await self.page.locator("button#apply-button").all():
-                if await btn.is_visible():
-                    try:
-                        await btn.scroll_into_view_if_needed(timeout=2_000)
+                await asyncio.sleep(1.5)  # Wait for React hydration / event listeners to attach
+
+                # Try to click all visible apply buttons in case the first is a dummy/sticky header
+                clicked = False
+                for btn in await self.page.locator("button#apply-button").all():
+                    if await btn.is_visible():
                         try:
-                            await btn.click(timeout=3_000, delay=50, force=True)
+                            await btn.scroll_into_view_if_needed(timeout=2_000)
+                            try:
+                                await btn.click(timeout=3_000, delay=50, force=True)
+                            except Exception:
+                                # Fallback to pure JS click
+                                await btn.evaluate("node => node.click()")
+                            clicked = True
                         except Exception:
-                            # Fallback to pure JS click
-                            await btn.evaluate("node => node.click()")
-                        clicked = True
+                            pass
+
+                if not clicked:
+                    try:
+                        await apply_btn.scroll_into_view_if_needed(timeout=2_000)
                     except Exception:
                         pass
-            
-            if not clicked:
-                try:
-                    await apply_btn.scroll_into_view_if_needed(timeout=2_000)
-                except Exception:
-                    pass
-                try:
-                    await apply_btn.click(timeout=3_000, delay=50, force=True)
-                except Exception:
-                    await apply_btn.evaluate("node => node.click()")
-                
-        except Exception as exc:
+                    try:
+                        await apply_btn.click(timeout=3_000, delay=50, force=True)
+                    except Exception:
+                        await apply_btn.evaluate("node => node.click()")
+
+                click_exc = None
+                break
+            except SideEffectBlocked as exc:
+                jt.click_s += time.perf_counter() - t_click_0
+                return ApplyOutcome(
+                    status=ApplicationStatus.SKIPPED,
+                    reason=SkipReason.DRY_RUN,
+                    detail=f"submission blocked by run policy: {str(exc)[:100]}",
+                    attempts=attempts,
+                )
+            except Exception as exc:
+                click_exc = exc
+                if click_attempt == 1:
+                    # One transient failure: clear overlays, re-resolve the button
+                    # (the old locator may be detached after a re-render), retry once.
+                    await dismiss_overlays(self.page)
+                    await human_pause(500, 1_000)
+                    fresh_btn = await first_visible(self.page, ["button#apply-button", *S.JD_APPLY_BUTTON], timeout_ms=4_000)
+                    if fresh_btn is not None:
+                        apply_btn = fresh_btn
+                    continue
+        if click_exc is not None:
             shot = await self.artifacts.capture_failure(self.page, "apply-click", profile, job.job_id)
             jt.click_s += time.perf_counter() - t_click_0
-            return ApplyOutcome(status=ApplicationStatus.FAILED, detail=f"Click failed: {str(exc)[:100]}", screenshot_path=shot, attempts=attempts)
+            return ApplyOutcome(status=ApplicationStatus.FAILED, detail=f"Click failed after 2 attempts: {str(click_exc)[:100]}", screenshot_path=shot, attempts=attempts)
         jt.click_s += time.perf_counter() - t_click_0
 
         t_qdet_0 = time.perf_counter()

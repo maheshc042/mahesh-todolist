@@ -27,3 +27,8 @@ venv/
 artifacts/
 logs/
 scratch/
+analysis/
+*.db
+*.db-journal
+.pytest_cache/
+.mypy_cache/

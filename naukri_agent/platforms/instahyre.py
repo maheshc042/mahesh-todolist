@@ -829,7 +829,13 @@ class InstahyrePlatform(BaseJobPlatform):
                             break
 
             if not card:
-                return ApplyOutcome(ApplicationStatus.FAILED, detail=f"Job card for {job.company} - {job.title} not found on feed")
+                # Feed churn (filled/expired between collect and apply), not an
+                # agent failure: skip without tripping the failure breaker.
+                return ApplyOutcome(
+                    status=ApplicationStatus.SKIPPED,
+                    reason=SkipReason.STALE_JOB,
+                    detail=f"Job card for {job.company} - {job.title} no longer on feed",
+                )
 
             try:
                 # Click the opportunity card / view button to trigger openApplyModal(opp)
@@ -1019,6 +1025,7 @@ class InstahyrePlatform(BaseJobPlatform):
             log.info("instahyre.apply.external_site_detected", job_id=job.job_id)
             return ApplyOutcome(
                 ApplicationStatus.EXTERNAL,
+                reason=SkipReason.EXTERNAL_APPLY,
                 external_url=job.url,
                 detail="Instahyre external apply requires company website application",
             )

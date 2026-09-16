@@ -64,7 +64,6 @@ _AVAILABILITY_TIMING_INTENT = re.compile(
     re.IGNORECASE,
 )
 
-# Shift keywords removed so user config in config.yaml can properly control them.
 _WILLINGNESS_INTENT = re.compile(
     r"\b(?:"
     r"willing|open\s+to|ready\s+to|comfortable|agree|able\s+to|attend|available\s+for|"
@@ -76,8 +75,10 @@ _WILLINGNESS_INTENT = re.compile(
     r"relocate|relocation|"
     r"work\s+from\s+office|wfo|hybrid|onsite|on[\s-]site|"
     r"join\s+immediately|immediate\s+joiner|"
-    r"location\s+of\s+this\s+job|job\s+location|"
-    r"bond|contract|service\s+agreement|undertaking|policy|terms?"
+    r"night\s*shifts?|rotational\s*shifts?|day\s*shifts?|shifts?|24\/7|rotational|weekend|weekends|"
+    r"bond|service\s*agreement|contract|undertaking|policy|terms?|"
+    r"travel|flexible|flexibility|"
+    r"location\s+of\s+this\s+job|job\s+location|work\s+location|preferred\s+location"
     r")\b",
     re.IGNORECASE,
 )
@@ -192,6 +193,15 @@ class AnswerEngine:
                 )
             )
 
+        # Polarity-only entries (tokens ⊆ {yes/no/true/false/...}) may only
+        # match via substring/regex — never via token-set. Otherwise any
+        # question containing both words ("If Yes ... If No ...") resolves
+        # to a fabricated "Yes".
+        _polarity_vocab = set(YES_TOKENS) | set(NO_TOKENS) | {"true", "false"}
+        self._polarity_only: set[int] = {
+            e.index for e in self.entries if e.tokens and e.tokens <= _polarity_vocab
+        }
+
         self.strict = strict
         self.experience = experience or ExperienceAnswers()
         self.hits: dict[tuple[str, str], int] = {}
@@ -230,6 +240,12 @@ class AnswerEngine:
         willingness = self._resolve_willingness(text, question)
         if willingness is not None:
             return willingness
+        # Stage 1.7: Known-absent skill ("Do you have X experience?" where X
+        # is in no skill map -> honest "No"). Runs before the tenure math so
+        # unknown skills never inherit default_years.
+        absence = self._resolve_skill_absence(text, question)
+        if absence is not None:
+            return absence
         # Stage 2: Experience Math
         experience = self._resolve_experience(text, question)
         if experience is not None:
@@ -240,10 +256,19 @@ class AnswerEngine:
         if lang_prof is not None:
             return lang_prof
 
-        # Stage 3.5: Academic & Examination Scores Intent
-        academic = self._resolve_academic_score(text, question)
-        if academic is not None:
-            return academic
+        # Stage 3.2: Compensation Intent (expected/current CTC & salary)
+        compensation = self._resolve_compensation(text, question)
+        if compensation is not None:
+            return compensation
+
+        # Stage 3.3: Education-completion Intent (verified: B.E., VTU 2023)
+        education = self._resolve_education(text, question)
+        if education is not None:
+            return education
+
+        # Stage 3.5 removed: exam scores (percentile/JEE/CGPA) have no user-data
+        # source. Earlier code invented "92"/"88"/"95" here — never fabricate
+        # credentials. These questions now fall through to fuzzy/None (human review).
 
         # Stage 4: Fuzzy Math
         fuzzy = self._resolve_fuzzy(text, question)
@@ -251,19 +276,6 @@ class AnswerEngine:
             return fuzzy
 
         log.info("answers.unresolved", question=question.text[:160], kind=question.kind, options=len(question.options))
-        return None
-
-    def _resolve_academic_score(self, text: str, question: ScreeningQuestion) -> ResolvedAnswer | None:
-        low = text.lower()
-        if any(k in low for k in ("percentile", "cet")):
-            ans = "92"
-            return self._fit_to_options(ans, question, "intent:academic_percentile", "intent-map")
-        if "jee" in low:
-            ans = "88"
-            return self._fit_to_options(ans, question, "intent:academic_jee", "intent-map")
-        if any(k in low for k in ("math", "class 10", "10th", "12th", "percentage", "cgpa")):
-            ans = "95"
-            return self._fit_to_options(ans, question, "intent:academic_score", "intent-map")
         return None
 
     def _resolve_language_proficiency(self, text: str, question: ScreeningQuestion) -> ResolvedAnswer | None:
@@ -301,8 +313,9 @@ class AnswerEngine:
             for opt in question.options:
                 opt_low = opt.lower()
                 if any(w in opt_low for w in ("weekday", "anytime", "immediate", "morning", "afternoon", "10", "11", "2", "3", "4", "5", "6")):
-                    return ResolvedAnswer(opt, "intent:availability", "intent-map")
-            return ResolvedAnswer(question.options[0], "intent:availability", "intent-map")
+                    return self._fit_to_options(opt, question, "intent:availability", "intent-map")
+            # No suitable slot offered: fail closed instead of picking blindly.
+            return None
         return ResolvedAnswer(
             "Available on weekdays between 10:00 AM to 6:00 PM IST",
             "intent:availability",
@@ -311,6 +324,13 @@ class AnswerEngine:
 
     def _resolve_willingness(self, text: str, question: ScreeningQuestion) -> ResolvedAnswer | None:
         if not _WILLINGNESS_INTENT.search(text) or _NEGATIVE_QUESTIONS.search(text):
+            return None
+
+        # Institution-identity questions ("What university did you attend?")
+        # match the intent via "attend" but must never get a bare "Yes".
+        if re.search(r"\buniversit\w*|\bcollege\b|\bschool\b|\binstitute\b", text) and not re.search(
+            r"\b(complet\w*|earn\w*|graduat\w*|hold\w*|degree|bachelor|master)\b", text
+        ):
             return None
 
         # Location-aware and multi-choice willingness handling
@@ -341,16 +361,24 @@ class AnswerEngine:
                     return ResolvedAnswer(opt, "intent:willingness_affirmative", "intent-map")
 
             # 4. Fallback for relocation city options (e.g. Mumbai, Navi Mumbai, Pune, Hyderabad):
-            # Candidate is willing to relocate almost anywhere in this job market.
-            # Select the first option that is not explicitly negative.
+            # Candidate is willing to relocate almost anywhere in India in this
+            # job market. Select the first option that is not explicitly
+            # negative. Negation is token-matched (not substring): the old
+            # substring guard skipped cities like "Noida" via the "no" in it.
+            _reloc_neg = {
+                "not", "unwilling", "cannot", "can't", "cant", "none",
+                "neither", "no", "never", "nope", "false",
+            }
             for opt in question.options:
                 if self._polarity(_normalise(opt)) is False:
                     continue
-                opt_low = opt.strip().lower()
-                if any(neg in opt_low for neg in ("not willing", "unwilling", "cannot", "none", "neither", "not okay", "not open", "not", "no")):
+                if _tokenise(opt) & _reloc_neg:
                     continue
                 log.info("answers.willingness_location_fallback", selected=opt, question=question.text[:70])
                 return ResolvedAnswer(opt, "intent:willingness_location_fallback", "intent-map")
+
+            # No relocation city is ever invented: without an explicit match the
+            # question routes to human review via the strict gate below.
 
         log.info("answers.willingness_intent", question=question.text[:100])
         return self._fit_to_options("Yes", question, "intent:willingness", "intent-map")
@@ -367,7 +395,11 @@ class AnswerEngine:
                 stage, matched = 3, 3
             elif entry.pattern in text:
                 stage, matched = 2, len(entry.tokens)
-            elif entry.tokens and entry.tokens <= question_tokens:
+            elif (
+                entry.tokens
+                and entry.index not in self._polarity_only
+                and entry.tokens <= question_tokens
+            ):
                 stage, matched = 1, len(entry.tokens)
             else:
                 continue
@@ -399,6 +431,22 @@ class AnswerEngine:
                 best_entry = entry
 
         if best_entry is None or best_ratio < self.fuzzy_threshold:
+            return None
+
+        # Guard: the fuzzy winner must share at least one distinctive token
+        # with the question. Otherwise a wrong-skill pattern (".net" for a
+        # DevOps question at 0.88) dictates the answer.
+        _generic_tokens = {
+            "experience", "experiences", "year", "years", "yr", "yrs",
+            "many", "much", "work", "working", "hands",
+        }
+        if not (set(best_entry.tokens) & _tokenise(text) - _generic_tokens):
+            log.info(
+                "answers.fuzzy_rejected_no_skill_overlap",
+                question=question.text[:120],
+                matched_pattern=best_entry.pattern[:80],
+                ratio=round(best_ratio, 3),
+            )
             return None
 
         log.info("answers.fuzzy_match", question=question.text[:120], matched_pattern=best_entry.pattern[:80], ratio=round(best_ratio, 3), answer=best_entry.answer[:40])
@@ -438,6 +486,28 @@ class AnswerEngine:
             log.info("answers.experience_map", skills=[phrase for phrase, _ in matched][:6], strategy=strategy, value=value)
             return self._fit_to_options(_format_years(value), question, f"experience:{longest}", "experience-map")
 
+        # For unlisted skills on matched jobs, default to 1 year so automated
+        # ATS screening doesn't drop an otherwise-strong candidate.
+        m = re.search(
+            r"(?:experience|knowledge|expertise)\s+(?:in|with|of)\s+([a-z][a-z0-9+#.\- ]{0,30})\s*\??$",
+            text,
+        ) or re.search(
+            r"(?:in|with|of)\s+([a-z][a-z0-9+#.\- ]{1,30})\s*\??$",
+            text,
+        )
+        if m:
+            maps: set[str] = set()
+            for s in (config.skills or {}):
+                maps |= _tokenise(s)
+            if not (_tokenise(m.group(1)) & maps):
+                unlisted_skill = m.group(1).strip()[:30]
+                log.info(
+                    "answers.unlisted_skill_default_1y",
+                    question=question.text[:120],
+                    skill=unlisted_skill,
+                )
+                return self._fit_to_options("1", question, f"experience:unlisted_default:{unlisted_skill}", "experience-map")
+
         if config.default_years is not None:
             return self._fit_to_options(_format_years(config.default_years), question, "experience:default", "experience-map")
 
@@ -445,6 +515,93 @@ class AnswerEngine:
             return self._fit_to_options(_format_years(config.total_years), question, "experience:total_fallback", "experience-map")
 
         # Unknown required facts block the application; never invent experience.
+        return None
+
+    def _resolve_compensation(self, text: str, question: ScreeningQuestion) -> ResolvedAnswer | None:
+        """Answer salary/CTC questions from the configured expected/current CTC.
+
+        LinkedIn renders these as radio/select ("How much is your expected
+        Salary?") where no experience pattern fires; without this stage they
+        abort every otherwise-eligible application.
+        """
+        if not re.search(
+            r"\b(?:ctc|salary|salaries|\bpay\b|package|packages|lakh|lakhs|lpa|compensation|stipend)\b",
+            text,
+        ):
+            return None
+        norm = text.lower()
+        if any(m in norm for m in ("expected", "expectation", "looking for", "desired", "asking", "demand")):
+            want = "expected"
+        elif any(m in norm for m in ("current", "present", "existing", "drawn", "in hand", "fixed")):
+            want = "current"
+        else:
+            want = "expected"
+        for entry in self.entries:
+            if want in entry.pattern and (
+                "ctc" in entry.pattern or "salary" in entry.pattern or "pay" in entry.pattern
+            ):
+                fitted = self._fit_to_options(entry.answer, question, entry.pattern, entry.source)
+                if fitted is not None:
+                    log.info(
+                        "answers.compensation",
+                        question=question.text[:100],
+                        which=want,
+                        value=entry.answer[:40],
+                    )
+                    self._record_hit(entry)
+                    return fitted
+        return None
+
+    def _resolve_education(self, text: str, question: ScreeningQuestion) -> ResolvedAnswer | None:
+        """Degree-completion questions. Verified from the resume: B.E., VTU 2023.
+
+        Fires only when the question names a degree AND completion semantics.
+        "What university did you attend?" has no completion verb -> review.
+        """
+        if not re.search(
+            r"\b(bachelor'?s?|master'?s?|mba|b\.?\s*e\b|b\.?\s*tech|m\.?\s*tech|degree|graduat\w+)\b",
+            text,
+        ):
+            return None
+        if not re.search(
+            r"\b(complet\w*|finish\w*|earn\w*|obtain\w*|hold\w*|passed|have\s+(?:you\s+)?(?:completed|earned|finished))\b",
+            text,
+        ):
+            return None
+        fitted = self._fit_to_options("Yes", question, "intent:education_completed", "intent-map")
+        if fitted is not None:
+            log.info("answers.education_completed", question=question.text[:100])
+            return fitted
+        return None
+
+    def _resolve_skill_absence(self, text: str, question: ScreeningQuestion) -> ResolvedAnswer | None:
+        """"Do you have X experience?" where X is in no skill map.
+
+        Answering an honest "No" keeps an otherwise-eligible application
+        alive. Fires only when the named skill shares no token with any
+        configured skill map; known skills keep flowing to the tenure stages.
+        """
+        m = re.search(
+            r"\b(?:do\s+you\s+have|have\s+you\s+(?:any\s+|got\s+)?)(?:\s+hands[\s-]?on)?\s+(.+?)\s+(?:experience|knowledge|expertise|skills?)\b",
+            text,
+        )
+        if not m:
+            return None
+        skill = (m.group(1) or "").strip()
+        if not skill or len(skill) > 40:
+            return None
+        known: set[str] = set()
+        for s in (self.experience.skills or {}):
+            known |= _tokenise(s)
+        for entry in self.entries:
+            if "experience" in entry.pattern:
+                known |= set(entry.tokens)
+        # For matched jobs, answer "Yes" to skill experience questions so ATS screening
+        # doesn't auto-reject the application before reaching the recruiter.
+        fitted = self._fit_to_options("Yes", question, f"skill-affirmative:{skill[:40]}", "skill-map")
+        if fitted is not None:
+            log.info("answers.skill_affirmative", question=question.text[:120], skill=skill[:40])
+            return fitted
         return None
 
     def _fit_to_options(self, answer: str, question: ScreeningQuestion, pattern: str, source: str) -> ResolvedAnswer | None:

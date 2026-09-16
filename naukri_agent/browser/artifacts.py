@@ -30,11 +30,11 @@ def _safe(part: str, limit: int = 48) -> str:
 class ArtifactStore:
     def __init__(self, base_dir: Path, run_id: int | str = "adhoc") -> None:
         day = datetime.now(UTC).strftime("%Y-%m-%d")
-        self.dir = Path(base_dir) / day / f"run-{run_id}"
+        self.dir = Path(base_dir) / day / f"run-{_safe(str(run_id), limit=24)}"
         self.dir.mkdir(parents=True, exist_ok=True)
 
     def _path(self, label: str, profile: str, job_id: str, ext: str) -> Path:
-        stamp = datetime.now(UTC).strftime("%H%M%S")
+        stamp = datetime.now(UTC).strftime("%H%M%S_%f")
         name = f"{stamp}_{_safe(profile)}_{_safe(job_id)}_{_safe(label)}.{ext}"
         return self.dir / name
 

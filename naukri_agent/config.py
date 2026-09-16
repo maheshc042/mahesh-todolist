@@ -122,6 +122,9 @@ class Settings(BaseSettings):
     telegram_bot_token: str = ""
     telegram_chat_id: str = ""
     gemini_api_key: str = ""
+    # Single pinned Gemini model for all AI copy. Overridable via GEMINI_MODEL
+    # env var; there is exactly one serving model per run so logs stay truthful.
+    gemini_model: str = "gemini-3-flash-preview"
     browser_session_secret: str = ""
 
 
@@ -167,6 +170,14 @@ class Settings(BaseSettings):
         if key not in ACCOUNT_KEYS:
             raise ValueError(f"DEFAULT_ACCOUNT must be one of {ACCOUNT_KEYS}, got {value!r}")
         return key
+
+    @field_validator("gemini_model")
+    @classmethod
+    def _non_empty_model(cls, value: str) -> str:
+        model = str(value or "").strip()
+        if not model:
+            raise ValueError("GEMINI_MODEL must be a non-empty model name")
+        return model
 
     @model_validator(mode="after")
     def _pool_sizes(self) -> Settings:
@@ -370,6 +381,20 @@ class ScheduleConfig(_Model):
     timezone: str = "Asia/Kolkata"
     jitter_seconds: int = Field(default=600, ge=0, le=7_200)
     run_on_start: bool = False
+
+    @field_validator("timezone")
+    @classmethod
+    def _valid_timezone(cls, value: str) -> str:
+        from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+
+        zone = str(value or "").strip()
+        if not zone:
+            raise ValueError("schedule.timezone must be a non-empty IANA timezone")
+        try:
+            ZoneInfo(zone)
+        except ZoneInfoNotFoundError as exc:
+            raise ValueError(f"schedule.timezone is not a known IANA timezone: {zone!r}") from exc
+        return zone
 
     @field_validator("cron_by_account")
     @classmethod
@@ -735,14 +760,15 @@ class AgentConfig(_Model):
     experience: ExperienceConfig = Field(default_factory=ExperienceConfig)
     profiles: list[JobProfile] = Field(default_factory=list)
 
-    # User Identity & Contacts
-    applicant_name: str = "Mahesh Chitakoti"
-    applicant_location: str = "Bengaluru, Karnataka, India"
-    applicant_email: str = "maheshchitkoti@gmail.com"
-    applicant_phone: str = "9481777227"
-    applicant_linkedin: str = "https://www.linkedin.com/in/maheshchitakoti"
-    applicant_github: str = "https://github.com/maheshchitakoti"
-    applicant_portfolio: str = "https://github.com/maheshchitakoti"
+    # User Identity & Contacts — no literals: empty means unconfigured and the
+    # run must fail closed via validate_for_run() instead of applying as someone.
+    applicant_name: str = ""
+    applicant_location: str = ""
+    applicant_email: str = ""
+    applicant_phone: str = ""
+    applicant_linkedin: str = ""
+    applicant_github: str = ""
+    applicant_portfolio: str = ""
 
     @field_validator("answers", mode="before")
     @classmethod
@@ -900,6 +926,7 @@ class AgentConfig(_Model):
             experience_years=2.5,
             use_recommended=True,
             platform_limits={"instahyre": instahyre_limit},
+            min_rank_score=0.0,
             title_keywords=combined_includes[:30],
             core_skills=c_skills,
             secondary_skills=s_skills,
@@ -990,6 +1017,7 @@ class AgentConfig(_Model):
             experience_years=2.5,
             use_recommended=True,
             platform_limits={"cutshort": cutshort_limit},
+            min_rank_score=0.0,
             title_keywords=combined_includes[:30],
             core_skills=c_skills,
             secondary_skills=s_skills,
@@ -1079,6 +1107,7 @@ class AgentConfig(_Model):
             experience_years=2.5,
             use_recommended=True,
             platform_limits={"linkedin": linkedin_limit},
+            min_rank_score=0.0,
             title_keywords=combined_includes[:30],
             core_skills=c_skills,
             secondary_skills=s_skills,
@@ -1086,6 +1115,105 @@ class AgentConfig(_Model):
             filters=unified_filters,
             answers=merged_answers,
         )
+
+    def get_unified_wellfound_profile(self) -> JobProfile:
+        """
+        Synthesize a single unified JobProfile for Wellfound combining
+        Full Stack and AI/Python engineering tracks. Wellfound only has one
+        candidate account, so this covers both job families in a single
+        session while enforcing strict 7-day (past week) freshness.
+        """
+        active = [p for p in self.profiles if p.enabled]
+        if not active:
+            raise ConfigError("No active profiles configured to synthesize Wellfound profile.")
+
+        if len(active) == 1:
+            return active[0]
+
+        combined_includes: list[str] = []
+        seen_inc: set[str] = set()
+        for p in active:
+            if p.filters and p.filters.title_must_include_any:
+                for term in p.filters.title_must_include_any:
+                    t = term.strip().lower()
+                    if t and t not in seen_inc:
+                        seen_inc.add(t)
+                        combined_includes.append(t)
+
+        # Remove any QA/Testing keywords from title includes for engineering candidate
+        combined_includes = [
+            t for t in combined_includes
+            if not any(k in t for k in ("qa", "test", "sdet", "quality", "manual testing"))
+        ]
+
+        forbidden_tech_and_seniority = {
+            "senior", "sr.", "sr ", "lead", "principal", "staff", "architect", "manager", "director", "head of",
+            "qa", "qa engineer", "sdet", "test engineer", "testing", "manual testing", "automation tester",
+            "quality analyst", "quality engineer", "trainer", "sales", "presales", "pre-sales", "bpo",
+            "php", "wordpress", ".net", "dotnet", "dot net", "spring boot", "asp.net", "c#", "c++",
+            "golang developer", "golang engineer", "go developer", "go engineer", "java",
+            "mainframe", "sap", "salesforce", "drupal", "magento", "engineering manager",
+            "project manager", "product manager", "general manager", "solution architect",
+            "enterprise architect", "tech architect", "technical architect", "sr. manager",
+            "gis", "oac", "intershop", "erp", "pega", "servicenow", "intern", "internship",
+            "it support", "helpdesk", "service desk", "it engineer",
+            "systems engineer", "security engineer", "cybersecurity", "infosec", "soc analyst",
+            "data scientist", "etl", "big data", "snowflake", "teradata", "bi developer",
+            "powerbi", "tableau", "data warehousing", "databricks", "dba", "database administrator",
+            "oracle dba", "content writer", "seo",
+            "android", "ios", "react native", "mobile developer", "mobile engineer",
+            "flutter", "swift", "kotlin",
+            "site reliability", "sre", "site reliability engineer", "infrastructure engineer",
+            "phd", "ph.d", "research scientist", "ai researcher",
+        }
+
+        c_skills = [
+            "python", "node", "react", "typescript", "fastapi", "nextjs", "aws",
+            "generative ai", "agentic ai", "llm", "rag", "mlops", "langgraph", "django", "mern", "frontend", "backend", "full stack"
+        ]
+        s_skills = [
+            "api", "rest", "graphql", "postgresql", "mongodb", "redis", "docker",
+            "kubernetes", "aws bedrock", "prompt engineering", "vector database", "ci/cd", "microservices"
+        ]
+        b_skills = ["testing", "pytest", "jest", "git", "github", "jira", "agile", "scrum", "debugging"]
+
+        wellfound_limit = max((p.platform_limits.get("wellfound", 50) for p in active), default=50)
+
+        unified_filters = FilterRules(
+            title_must_include_any=combined_includes,
+            title_must_exclude_any=sorted(forbidden_tech_and_seniority),
+            description_must_exclude_any=[
+                "bpo", "commission only", "unpaid", "registration fee", "security deposit",
+                "prefers women", "women diversity", "women-only", "women only", "female only", "female diversity", "diversity drive"
+            ],
+            experience=ExperienceRange(min_years=0, max_years=3.5),
+            min_salary_lpa=5.0,
+            max_posted_days=7,
+            require_easy_apply=False,
+            skip_walkin=True,
+        )
+
+        merged_answers: dict[str, str] = {}
+        for p in reversed(active):
+            merged_answers.update(p.answers)
+
+        return JobProfile(
+            name="Wellfound Unified (AI & Full Stack)",
+            enabled=True,
+            priority=1,
+            account="primary",
+            experience_years=2.5,
+            use_recommended=True,
+            platform_limits={"wellfound": wellfound_limit},
+            min_rank_score=0.0,
+            title_keywords=combined_includes[:30],
+            core_skills=c_skills,
+            secondary_skills=s_skills,
+            bonus_skills=b_skills,
+            filters=unified_filters,
+            answers=merged_answers,
+        )
+
 
 
     # ------------------------------------------------------------------ load

@@ -77,30 +77,27 @@ DISJOINT_SPECIALIZATIONS = (
     "react native", "android developer", "ios developer", "flutter developer",
 )
 
+# Wanted families gated by level (gate 7b): QA / DevOps / support /
+# data-developer roles are in-scope only below ~2y stated minimum.
+JUNIOR_FAMILY_KEYWORDS = (
+    "qa", "automation", "sdet", "quality analyst", "quality engineer",
+    "test engineer", "manual testing", "automation testing",
+    "devops", "devops engineer", "platform engineer", "cloud engineer",
+    "site reliability", "sre",
+    "database developer", "sql developer", "data engineer", "data analyst",
+    "technical support", "support engineer", "application support",
+    "desktop support", "customer success",
+)
 
-def experience_matches(
-    candidate_years: float,
-    job_min: float | None,
-    job_max: float | None,
-    is_dedicated_ai: bool = False,
-    is_data_role: bool = False,
-) -> bool:
-    """Centralized experience window evaluation (P1-1)."""
-    # Candidate has 6 months AI / limited data engineering experience: cap min_experience at 2.0y
-    if (is_dedicated_ai or is_data_role) and job_min is not None and job_min > 2.0:
-        return False
-    if job_min is not None:
-        if job_min > 3.5:
-            return False
-        if job_min > candidate_years + 1.0:
-            return False
-    if job_max is not None:
-        if job_max < max(0.0, candidate_years - 1.5):
-            return False
-        max_ceiling = 8.5 if (job_min is not None and job_min <= 3.5) else 6.0
-        if job_max > max_ceiling:
-            return False
-    return True
+# Same keyword set the LinkedIn card scraper uses to impute 5.0y/10.0y when no
+# stated range exists. An imputed number corroborated by the title itself is
+# trustworthy; one triggered by stray card text is not.
+_IMPUTED_SENIORITY_MARKERS = ("senior", "sr.", "sr ", "lead", "principal", "staff")
+
+
+def _title_suggests_senior(title: str) -> bool:
+    low = f" {(title or '').lower()} "
+    return any(marker in low for marker in _IMPUTED_SENIORITY_MARKERS)
 
 
 TECH_ALIASES = (
@@ -236,13 +233,14 @@ class FilterEngine:
             is_broad_title = any(
                 _contains_any(title, [bt]) for bt in broad_generic_titles
             )
-            specialized_tech_in_title = any(
-                s in title for s in (
+            specialized_tech_in_title = _contains_any(
+                title,
+                [
                     "react", "node", "python", "mern", "frontend", "backend", "full stack",
                     "fullstack", "ai", "ml", "fastapi", "django", "llm", "genai", "qa",
                     "automation", "sdet", "devops", "cloud", "database", "sql",
-                )
-            )
+                ],
+            ) is not None
             if is_broad_title and not specialized_tech_in_title:
                 # Do NOT reject if description/tags are not loaded (e.g. search cards)
                 # or if the title is explicitly a target software role requested in title_must_include_any
@@ -260,7 +258,7 @@ class FilterEngine:
                     core_skills = getattr(self.candidate, "core_skills", [])
                     sec_skills = getattr(self.candidate, "secondary_skills", [])
                     has_core_match = any(
-                        _exact_word_match(s, haystack) or _normalize_tech_text(s) in haystack
+                        _exact_word_match(s, haystack)
                         for s in list(core_skills) + list(sec_skills)
                     )
                     if not has_core_match:
@@ -306,9 +304,17 @@ class FilterEngine:
         # Candidate has 2.5y total software experience, but specifically 6 months of commercial AI
         # and limited domain experience in pure Data Engineering. Recruiters for dedicated AI or
         # Data Engineering roles requiring > 2.0 years will immediately reject candidate for lack of tenure.
+        #
+        # Provenance guard: `experience_imputed` numbers are scraper guesses, not
+        # recruiter statements. They gate only when the title itself corroborates
+        # seniority; otherwise the job flows to ranking/suitability scoring, which
+        # still down-weights it via experience decay. Unknown data never rejects.
         is_ai_role = any(term in title for term in DEDICATED_AI_KEYWORDS)
         is_data_role = any(term in title for term in DATA_ROLES_KEYWORDS)
-        if (is_ai_role or is_data_role) and job.min_experience is not None and job.min_experience > 2.0:
+        exp_trusted = job.min_experience is not None and (
+            not job.experience_imputed or _title_suggests_senior(job.title)
+        )
+        if (is_ai_role or is_data_role) and exp_trusted and job.min_experience > 2.0:
             role_type = "AI/ML" if is_ai_role else "Data Engineering"
             return FilterDecision(
                 False,
@@ -316,9 +322,21 @@ class FilterEngine:
                 f"{role_type} role requires {job.min_experience}y > candidate's 6m AI / domain experience (recruiter will reject)",
             )
 
-        # 8. Numeric experience bounds
+        # 7b. Junior-family level gate (QA / DevOps / support / data-developer).
+        # These families are wanted, but only below ~2y: with 2.5y total and
+        # 6m AI, a 3y+ QA/DevOps requisition is a wasted slot. Same provenance
+        # guard as gate 7: trusted numbers only, unknown flows to ranking.
+        is_junior_family = _contains_any(title, JUNIOR_FAMILY_KEYWORDS) is not None
+        if is_junior_family and exp_trusted and job.min_experience > 2.0:
+            return FilterDecision(
+                False,
+                SkipReason.FILTER_EXPERIENCE,
+                f"junior-family role requires {job.min_experience}y > 2.0y cap (low-probability slot)",
+            )
+
+        # 8. Numeric experience bounds (provenance-guarded: see gate 7)
         exp = rules.experience
-        if job.min_experience is not None:
+        if exp_trusted and job.min_experience is not None:
             if job.min_experience > 3.5:
                 return FilterDecision(
                     False,
@@ -331,7 +349,7 @@ class FilterEngine:
                     SkipReason.FILTER_EXPERIENCE,
                     f"requires {job.min_experience}y > max {exp.max_years}y",
                 )
-        if job.max_experience is not None:
+        if exp_trusted and job.max_experience is not None:
             # Recruiter dummy values (e.g. >= 20 yrs on job boards indicate "no upper cap")
             is_dummy_unbounded = job.max_experience >= 20.0
             if not is_dummy_unbounded:

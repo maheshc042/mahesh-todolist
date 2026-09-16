@@ -31,7 +31,8 @@ platforms:
   cutshort: true
   linkedin: true
   naukri: true
-  wellfound: false
+  wellfound: true
+
 
 linkedin:
   days: 3
@@ -475,10 +476,9 @@ profiles:
     core_skills: ["react", "node", "javascript", "typescript", "python", "fastapi", "django", "frontend", "backend", "full stack", "mern", "ui", "aws", "docker", "nextjs"]
     secondary_skills: ["api", "rest", "graphql", "postgresql", "mongodb", "redis", "database", "gcp", "azure", "kubernetes", "ci/cd", "microservices", "html", "css", "tailwind", "qa", "automation", "selenium"]
     bonus_skills: ["testing", "pytest", "jest", "playwright", "cypress", "git", "github", "jira", "agile", "scrum", "code review", "debugging"]
-
-    searches: []
+ 
     filters:
-      title_must_include_any: [full stack, fullstack, mern, react, reactjs, node, nodejs, nextjs, javascript, typescript, frontend, backend, web developer, software engineer, software developer, software development engineer, software development engineer 1, software development engineer 2, software development engineer in test, backend developer, backend engineer, frontend developer, frontend engineer, sde, sde 1, sde 2, sde-1, sde-2, sde i, sde ii, founding engineer, product engineer, software craftsperson, software craftsman, qa, automation, sdet, qa engineer, quality engineer, test engineer, manual testing, automation testing, next, cloud engineer, devops, devops engineer, platform engineer, database developer, sql developer, forward deploy, forward deployed engineer, integration engineer, implementation engineer, application engineer, associate engineer, junior engineer, fresher, technical support, technical support engineer, support engineer, product support, application support, desktop support, site reliability]
+      title_must_include_any: [full stack, fullstack, mern, react, reactjs, node, nodejs, nextjs, javascript, typescript, frontend, backend, web developer, software engineer, software developer, software development engineer, software development engineer 1, software development engineer 2, software development engineer in test, backend developer, backend engineer, frontend developer, frontend engineer, sde, sde 1, sde 2, sde-1, sde-2, sde i, sde ii, founding engineer, product engineer, software craftsperson, software craftsman, qa, automation, sdet, qa engineer, quality engineer, test engineer, manual testing, automation testing, next, cloud engineer, devops, devops engineer, platform engineer, database developer, sql developer, integration engineer, implementation engineer, application engineer, associate engineer, junior engineer, fresher, technical support, technical support engineer, support engineer, product support, application support, desktop support, site reliability]
       title_must_exclude_any: [lead, principal, staff, architect, manager, trainer, sales, presales, pre-sales, bpo, php, wordpress, .net, dotnet, dot net, spring boot, asp.net, c#, c++, golang developer, golang engineer, go developer, go engineer, java, mainframe, sap, salesforce, drupal, magento, engineering manager, project manager, product manager, general manager, solution architect, enterprise architect, tech architect, technical architect, sr. manager, gis, oac, intershop, erp, pega, servicenow, intern, internship, it support, helpdesk, service desk, it engineer, systems engineer, security engineer, cybersecurity, infosec, soc analyst, data scientist, etl, big data, snowflake, teradata, bi developer, powerbi, tableau, data warehousing, databricks, dba, database administrator, oracle dba, llm, ai engineer, machine learning, ml engineer, deep learning, nlp engineer, computer vision, prompt engineer, ai researcher, genai, generative ai, content writer, seo, android, ios, react native, mobile developer, mobile engineer, flutter, swift, kotlin, infrastructure engineer, phd, ph.d, research scientist]
       description_must_exclude_any: [
         "bpo", "commission only", "unpaid", "registration fee", "security deposit",
@@ -538,9 +538,6 @@ profiles:
     secondary_skills: ["react", "node", "javascript", "typescript", "frontend", "backend", "api", "rest", "postgresql", "mongodb", "aws", "docker", "kubernetes", "vector database", "pinecone", "chromadb", "embeddings", "semantic retrieval", "computer vision", "agent", "qa", "automation", "playwright", "selenium"]
     bonus_skills: ["testing", "pytest", "jest", "git", "github", "jira", "agile", "scrum", "debugging"]
 
-    searches: []
-    search_is_fallback_only: true
-
     filters:
       title_must_include_any: [ai, artificial intelligence, machine learning, ml, python, llm, genai, generative ai, nlp, chatbot, prompt, agent, python developer, ai engineer, ml engineer, ai software engineer, full stack ai engineer, backend engineer, backend developer, full stack, fullstack, mern, web developer, sde, sde 1, sde 2, sde-1, sde-2, sde i, sde ii, founding engineer, product engineer, software craftsperson, software craftsman, software engineer, software developer, software development engineer, software development engineer 1, software development engineer 2, software development engineer in test, qa, automation, sdet, qa engineer, quality analyst, quality engineer, test automation, manual testing, automation testing, cloud engineer, devops, devops engineer, mlops, mlops engineer, platform engineer, database developer, sql developer, forward deploy, forward deployed engineer, integration engineer, implementation engineer, application engineer, associate engineer, junior engineer, fresher, customer success engineer, data analyst, technical support, technical support engineer, support engineer, product support, application support, junior data engineer, data engineer, desktop support, site reliability engineer]
       title_must_exclude_any: [lead, principal, staff, architect, manager, trainer, sales, presales, pre-sales, bpo, php, wordpress, .net, dotnet, dot net, spring boot, asp.net, c#, c++, golang developer, golang engineer, go developer, go engineer, java, network, hardware, mainframe, sap, salesforce, drupal, magento, engineering manager, project manager, product manager, general manager, solution architect, enterprise architect, tech architect, technical architect, sr. manager, gis, oac, intershop, erp, pega, servicenow, intern, internship, it support, helpdesk, service desk, it engineer, systems engineer, security engineer, cybersecurity, infosec, soc analyst, data scientist, etl, big data, snowflake, teradata, bi developer, powerbi, tableau, data warehousing, databricks, dba, database administrator, oracle dba, content writer, seo, android, ios, react native, mobile developer, mobile engineer, flutter, swift, kotlin, infrastructure engineer, phd, ph.d, research scientist, ai researcher]
@@ -593,3 +590,5 @@ profiles:
       notice period: "0 days"
       last working day: "30/04/2026"
       reason for job change: "Transitioning fully into AI/Python engineering after building AI features on top of my full-stack work."
+      are you an ex-infosys employee: "NA"
+      ex-employee: "No"

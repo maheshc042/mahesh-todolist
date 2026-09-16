@@ -3,13 +3,14 @@ Unit tests for core components, filter engine, LinkedIn platform, and answers.
 """
 import unittest
 from unittest.mock import MagicMock
-from naukri_agent.config import AgentConfig, FilterRules
-from naukri_agent.core.models import Job
-from naukri_agent.core.ranking import CandidateProfile
+
+from naukri_agent.config import AgentConfig
 from naukri_agent.core.filters import FilterEngine
-from naukri_agent.core.answers import AnswerEngine
-from naukri_agent.platforms.linkedin import LinkedInPlatform, AI_TARGET_QUERY, FULLSTACK_TARGET_QUERY
+from naukri_agent.core.models import Job
 from naukri_agent.naukri.chatbot import ChatbotHandler
+from naukri_agent.platforms.linkedin import (
+    LinkedInPlatform,
+)
 
 
 class TestFilterEngine(unittest.TestCase):
@@ -40,9 +41,9 @@ class TestFilterEngine(unittest.TestCase):
             "Software Development Engineer 2",
             "Software Development Engineer in Test",
             "Quality Engineer",
-            "Forward Deployed Engineer",
             "Implementation Engineer",
         ]:
+
             job = Job(
                 job_id=f"test-{title}",
                 title=title,
@@ -309,7 +310,6 @@ class TestCutshortUnifiedConfiguration(unittest.TestCase):
 
     def test_dynamic_resume_selection_logic(self):
         """Verify resume selection maps AI jobs to AI CV and Full Stack to Full Stack CV."""
-        from pathlib import Path
         from naukri_agent.config import PROJECT_ROOT
 
         ai_titles = [
@@ -344,8 +344,9 @@ class TestCutshortUnifiedConfiguration(unittest.TestCase):
 
     def test_linkedin_unified_profile(self):
         """Verify LinkedIn unified profile combines AI and Full Stack queries and filters."""
-        from naukri_agent.platforms.linkedin import FULL_TARGET_QUERY, LinkedInPlatform
         from unittest.mock import MagicMock
+
+        from naukri_agent.platforms.linkedin import LinkedInPlatform
 
         p = self.cfg.get_unified_linkedin_profile()
         self.assertEqual(p.name, "LinkedIn Unified (AI & Full Stack)")
@@ -358,9 +359,27 @@ class TestCutshortUnifiedConfiguration(unittest.TestCase):
         self.assertIn("Full%20Stack%20Developer", search_url)
         self.assertIn("AI%20Engineer", search_url)
 
+    def test_wellfound_unified_profile(self):
+        """Verify Wellfound unified profile enforces 7-day freshness and combined filters."""
+        from naukri_agent.platforms.wellfound import MAX_POSTED_DAYS, _parse_posted_days
+
+        p = self.cfg.get_unified_wellfound_profile()
+        self.assertEqual(p.name, "Wellfound Unified (AI & Full Stack)")
+        self.assertEqual(p.account, "primary")
+        self.assertEqual(p.platform_limits.get("wellfound"), 50)
+        self.assertEqual(p.filters.max_posted_days, 7)
+        self.assertEqual(MAX_POSTED_DAYS, 7)
+
+        # Freshness parsing checks
+        self.assertEqual(_parse_posted_days("Posted 2d ago"), 2)
+        self.assertEqual(_parse_posted_days("Active 1w ago"), 7)
+        self.assertEqual(_parse_posted_days("just now"), 0)
+        self.assertEqual(_parse_posted_days("Posted 2 weeks ago"), 14)
+        self.assertGreater(_parse_posted_days("Posted 2 weeks ago"), MAX_POSTED_DAYS)
 
 
 if __name__ == "__main__":
     unittest.main()
+
 
 

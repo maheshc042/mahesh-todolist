@@ -72,7 +72,11 @@ class SkipReason(str, Enum):
     PROFILE_CAP = "profile_cap"
     DRY_RUN = "dry_run"
     LOW_MATCH_SCORE = "low_match_score"
-    LOW_SCORE = "low_match_score"
+    FILTER_REJECTED = "filter_rejected"
+    COMPANY_BLACKLIST = "company_blacklist"
+    BLOCKED_LOCATION = "blocked_location"
+    STALE_JOB = "stale_job"
+    STUCK_FLOW = "stuck_flow"
 
 
 class RunStatus(str, Enum):
@@ -116,6 +120,10 @@ class Job:
     # --- Derived numeric fields, parsed lazily by the parser module ---------
     min_experience: float | None = None
     max_experience: float | None = None
+    # True when min/max were imputed from seniority keywords (no stated range
+    # found on the card). Imputed numbers inform ranking but must never
+    # hard-reject on their own: unknown data never rejects.
+    experience_imputed: bool = False
     min_salary_lpa: float | None = None
     max_salary_lpa: float | None = None
     posted_days_ago: int | None = None

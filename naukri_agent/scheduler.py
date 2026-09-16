@@ -169,7 +169,11 @@ class AgentScheduler:
 
         if schedule.run_on_start:
             log.info("schedule.run_on_start")
-            for account in accounts:
+            for i, account in enumerate(accounts):
+                if i > 0:
+                    # Same-IP logins seconds apart invite challenges: stagger
+                    # boot runs even though the per-account lock would allow overlap.
+                    await asyncio.sleep(120)
                 await self._run_account(account, "startup")
 
         try:

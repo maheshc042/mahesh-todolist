@@ -19,7 +19,7 @@ from pathlib import Path
 
 from ..config import AgentConfig
 from ..logging_setup import get_logger
-from .gemini_writer import GeminiWriter
+from .gemini_writer import GeminiWriter, applicant_snapshot
 
 log = get_logger(__name__)
 
@@ -36,6 +36,24 @@ class ColdEmailer:
         self.smtp_server = "smtp.gmail.com"
         self.smtp_port = 465
         self.gemini_writer = GeminiWriter(api_key=gemini_api_key)
+
+    def verify_credentials(self) -> bool:
+        """One-shot SMTP login check before a campaign burns minutes per recipient."""
+        if not self.sender_email or not self.app_password:
+            log.warning("mailer.unconfigured")
+            return False
+        try:
+            context = ssl.create_default_context()
+            server = smtplib.SMTP_SSL(self.smtp_server, self.smtp_port, context=context, timeout=30.0)
+            with server:
+                server.login(self.sender_email, self.app_password)
+            return True
+        except smtplib.SMTPAuthenticationError:
+            log.error("mailer.preflight_auth_failed", detail="Fix the Gmail App Password in .env — campaign skipped.")
+            return False
+        except (smtplib.SMTPServerDisconnected, TimeoutError, OSError) as exc:
+            log.warning("mailer.preflight_unreachable", error=str(exc)[:150])
+            return False
 
     def _generate_body(
         self,
@@ -64,22 +82,22 @@ class ColdEmailer:
             highlights = "architecting high-performance full-stack web applications and robust REST/GraphQL APIs"
 
         config = AgentConfig.load()
-        name = config.applicant_name or "Mahesh"
-        location = config.applicant_location or "Bengaluru, India"
+        who = applicant_snapshot()
+        name = who.name if who.name != "a Software Engineer" else (config.applicant_name or "").strip()
 
         return f"""Hi there,
 
 I came across your recent hiring post for the {role_name} role and would love to be considered.
 
-I have 2.6+ years of hands-on experience specializing in {tech_stack}. In my recent work, I have focused on {highlights}, consistently delivering robust and scalable solutions.
+I have {who.experience_label} of hands-on experience specializing in {tech_stack}. In my recent work, I have focused on {highlights}, consistently delivering robust and scalable solutions.
 
-As an immediate joiner (0-day notice period), I can hit the ground running with minimal ramp-up time. I have attached my resume for your review and would welcome the opportunity to discuss how my technical expertise aligns with your team's goals.
+As an immediate joiner ({who.notice_label} notice period), I can hit the ground running with minimal ramp-up time. I have attached my resume for your review and would welcome the opportunity to discuss how my technical expertise aligns with your team's goals.
 
 Thank you for your time and consideration!
 
 Best regards,
 {name}
-{location}
+{who.location}
 """
 
     def send_application(
@@ -108,14 +126,22 @@ Best regards,
             return False
 
         try:
-            # 1. Construct the email container
+            # 1. Construct the email container. Role/company come from scraped
+            # listings: strip CR/LF (header injection) and cap lengths.
             config = AgentConfig.load()
-            name = config.applicant_name or "Mahesh"
-            
+            name = (config.applicant_name or "").strip()
+
+            clean_role = " ".join(str(role_name or "").splitlines()).strip()[:150]
+            clean_company = " ".join(str(company_name or "").splitlines()).strip()[:150]
+            clean_target = str(target_email or "").strip()
+            if "@" not in clean_target or len(str(target_email or "").splitlines()) > 1:
+                log.warning("mailer.invalid_recipient", to=clean_target[:60])
+                return False
+
             msg = EmailMessage()
-            msg["Subject"] = f"Application: {role_name} - {name}"
+            msg["Subject"] = f"Application: {clean_role} - {name}"
             msg["From"] = self.sender_email
-            msg["To"] = target_email
+            msg["To"] = clean_target
 
             # 2. Add the body text (Gemini AI or template)
             body = self._generate_body(
@@ -136,24 +162,55 @@ Best regards,
                 filename=resume_file.name,
             )
 
-            # 4. Dispatch via Secure SMTP with 30s timeout and 3-attempt retry
+            # 4. Dispatch via Secure SMTP with 30s timeout. Connect/login retry
+            # (idempotent); the send itself runs ONCE — retrying after a
+            # disconnect that follows server-side acceptance would deliver
+            # duplicates. A failed send simply returns False and the next
+            # campaign run re-attempts it (contacted_recruiters is only
+            # written on success).
             context = ssl.create_default_context()
-            last_err = None
-            for attempt in range(1, 4):
-                try:
-                    with smtplib.SMTP_SSL(self.smtp_server, self.smtp_port, context=context, timeout=30.0) as server:
+            server = None
+            try:
+                last_err = None
+                for attempt in range(1, 4):
+                    try:
+                        server = smtplib.SMTP_SSL(self.smtp_server, self.smtp_port, context=context, timeout=30.0)
                         server.login(self.sender_email, self.app_password)
-                        server.send_message(msg)
-                    log.info("mailer.sent_success", to=target_email, role=role_name, attempt=attempt)
-                    return True
-                except (smtplib.SMTPServerDisconnected, TimeoutError, OSError) as exc:
-                    last_err = exc
-                    log.warning("mailer.smtp_transient_retry", attempt=attempt, error=str(exc), to=target_email)
-                    time.sleep(2.0 * attempt)
-
-            if last_err:
-                raise last_err
-            return False
+                        break
+                    except smtplib.SMTPAuthenticationError:
+                        # Wrong app password: retrying cannot help, and three
+                        # sleeps per recipient burned 11 minutes in run 291.
+                        log.error("mailer.auth_failed_no_retry", to=clean_target)
+                        try:
+                            if server is not None:
+                                server.close()
+                        except Exception:
+                            pass
+                        return False
+                    except (smtplib.SMTPServerDisconnected, TimeoutError, OSError) as exc:
+                        last_err = exc
+                        log.warning("mailer.smtp_connect_retry", attempt=attempt, error=str(exc), to=clean_target)
+                        try:
+                            if server is not None:
+                                server.close()
+                        except Exception:
+                            pass
+                        server = None
+                        time.sleep(2.0 * attempt)
+                if server is None:
+                    if last_err:
+                        raise last_err
+                    return False
+                with server:
+                    server.send_message(msg)
+                log.info("mailer.sent_success", to=clean_target, role=clean_role)
+                return True
+            finally:
+                try:
+                    if server is not None:
+                        server.close()
+                except Exception:
+                    pass
 
         except smtplib.SMTPAuthenticationError:
             log.error(

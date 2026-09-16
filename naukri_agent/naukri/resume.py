@@ -1,22 +1,22 @@
 """
-Per-profile resume switching.
+Per-profile resume switching — currently DISABLED by operator choice.
 
 Naukri attaches whatever resume is currently on the profile — there is no
-per-application resume picker in the Easy Apply flow. So "select the right
-resume for this profile" means: upload the profile's resume file to the account
-BEFORE applying with that profile, then apply.
+per-application resume picker in the Easy Apply flow. Automatic switching would
+mean: upload the profile's resume file to the account BEFORE applying with that
+profile, then apply.
 
-Design decisions:
+Design decisions (for when this is re-enabled):
 
 - **Switch once per profile, not per job.** Uploading is slow (~10s) and Naukri
-  rate-limits profile updates. The orchestrator calls `ensure_resume()` once when
-  it starts a profile; every job in that profile then inherits the right CV.
-- **Idempotent.** We read the currently-attached filename first and skip the
-  upload when it already matches, so a run that applies to 3 profiles performs at
-  most 3 uploads — often zero.
-- **Non-fatal.** A failed resume swap logs a warning and continues with the
-  existing resume rather than aborting the whole run; applying with a slightly
-  generic CV beats not applying at all. Set `strict_resume` to change that.
+  rate-limits profile updates.
+- **Idempotent.** Read the currently-attached filename first and skip the
+  upload when it already matches.
+- **Non-fatal.** A failed swap must log and continue, never abort the run.
+
+Current state: `ensure_resume()` is a deliberate no-op returning True.
+Resumes are managed manually on Naukri; each account already carries the right
+CV for its job family. Do not "fix" this method without asking the operator.
 """
 
 from __future__ import annotations

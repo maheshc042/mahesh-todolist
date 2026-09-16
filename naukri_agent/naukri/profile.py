@@ -133,7 +133,9 @@ class ProfileRefresher:
             return RefreshResult(ok=False, detail=f"could not open profile page: {str(exc)[:200]}")
 
         before_stamp = await self._read_last_updated()
-        log.info("profile.refresh_start", account=self.account, last_updated=before_stamp or "?")
+        # The stamp scrape carries the whole profile header (phone, email):
+        # log a short prefix, never the dump.
+        log.info("profile.refresh_start", account=self.account, last_updated=(before_stamp or "?")[:120])
 
         for strategy in self.strategies:
             result.attempted.append(strategy)
@@ -187,7 +189,7 @@ class ProfileRefresher:
                         "profile.refresh_unverified",
                         account=self.account,
                         strategy=result.strategy,
-                        last_updated=after_stamp,
+                        last_updated=(after_stamp or "?")[:120],
                     )
 
         log.info(
@@ -195,7 +197,7 @@ class ProfileRefresher:
             account=self.account,
             ok=result.ok,
             strategy=result.strategy,
-            last_updated=result.last_updated or "?",
+            last_updated=(result.last_updated or "?")[:120],
             detail=result.detail[:160],
         )
         return result

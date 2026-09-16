@@ -14,10 +14,13 @@ from ..core.answers import AnswerEngine
 from ..core.models import ApplyOutcome, FilterDecision, Job
 from ..core.run_policy import RunPolicy
 from ..core.runtime_metrics import RuntimeMetrics
+from ..logging_setup import get_logger
 from ..naukri.apply import ApplyEngine
 from ..naukri.auth import NaukriAuth
 from ..naukri.search import JobSearcher
 from .base import BaseJobPlatform
+
+log = get_logger(__name__)
 
 
 class NaukriPlatform(BaseJobPlatform):
