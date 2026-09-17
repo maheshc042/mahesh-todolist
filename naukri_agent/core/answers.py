@@ -72,9 +72,12 @@ _WILLINGNESS_INTENT = re.compile(
     r"does\s+this\s+work(?:\s+for\s+you)?|works?\s+for\s+you|"
     r"face[\s-]to[\s-]face|f2f|in[\s-]person|offline\s+interview|"
     r"rounds?\s+of\s+(?:technical\s+)?interviews?|technical\s+interviews?|interview\s+rounds?|"
+    r"interview\s+process|selection\s+process|hiring\s+process|"
     r"relocate|relocation|"
-    r"work\s+from\s+office|wfo|hybrid|onsite|on[\s-]site|"
+    r"work\s+from\s+office|wfo|onsite|on[\s-]site|"
+    r"hybrid\s+(?:work|model|mode|setup|policy)|"
     r"join\s+immediately|immediate\s+joiner|"
+    r"available\s+within\s+\d+\s*days?|join\s+within\s+\d+\s*days?|notice\s+period|"
     r"night\s*shifts?|rotational\s*shifts?|day\s*shifts?|shifts?|24\/7|rotational|weekend|weekends|"
     r"bond|service\s*agreement|contract|undertaking|policy|terms?|"
     r"travel|flexible|flexibility|"
@@ -525,7 +528,7 @@ class AnswerEngine:
         abort every otherwise-eligible application.
         """
         if not re.search(
-            r"\b(?:ctc|salary|salaries|\bpay\b|package|packages|lakh|lakhs|lpa|compensation|stipend)\b",
+            r"\b(?:ctc|salary|salaries|\bpay\b|package|packages|lakh|lakhs|lpa|compensation|stipend|ectc)\b",
             text,
         ):
             return None

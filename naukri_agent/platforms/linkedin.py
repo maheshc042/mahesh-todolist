@@ -15,8 +15,10 @@ Features:
 from __future__ import annotations
 
 import re
+import time as _time
 import urllib.parse
 from collections.abc import Callable
+from typing import Any
 
 from playwright.async_api import Locator, Page
 
@@ -112,6 +114,7 @@ class LinkedInPlatform(BaseJobPlatform):
         answers: AnswerEngine,
         policy: RunPolicy,
         config: AgentConfig | None = None,
+        metrics: Any | None = None,
         location: str = "India",
         days: int = 3,
     ):
@@ -120,6 +123,7 @@ class LinkedInPlatform(BaseJobPlatform):
         self.artifacts = artifacts
         self.answers = answers
         self.config = config or AgentConfig.load()
+        self._metrics = metrics
         self.location = location
         cfg_days = getattr(getattr(self.config, "linkedin", None), "days", None)
         self.days = cfg_days if cfg_days is not None else days
@@ -221,8 +225,12 @@ class LinkedInPlatform(BaseJobPlatform):
         score = 75
 
         # 1. Block Non-Relevant Stacks, Senior Leadership & Non-Dev Roles in Title
+        # NOTE: "lead" is deliberately NOT blocked on LinkedIn either (same as
+        # Cutshort): with 2.5y experience the candidate is offered full-stack
+        # lead roles, and seniority is guarded by the 0-3.5y ceiling, not the
+        # title blocklist.
         blocked_title_keywords = [
-            "lead", "principal", "architect", "manager", "director", "head of", "intern", "internship",
+            "principal", "architect", "manager", "director", "head of", "intern", "internship",
             "presales", "pre-sales", "sales", "bpo", "business analyst", "content writer", "seo",
             "java", "spring boot", "spring-boot", ".net", "dotnet", "dot net", "c#", "php", "wordpress",
             "erp", "sap", "salesforce", "gis", "oac", "oracle dba", "mainframe", "teradata", "snowflake", "etl", "aem",
@@ -553,6 +561,23 @@ class LinkedInPlatform(BaseJobPlatform):
     ) -> ApplyOutcome:
         """Executes full multi-step Easy Apply application in-page with 10/10 precision."""
         log.info("linkedin.apply.start", job_id=job.job_id, title=job.title, company=job.company)
+        t0 = _time.perf_counter()
+        jt = None
+        if self._metrics is not None:
+            try:
+                from ..core.runtime_metrics import JobTiming
+
+                jt = JobTiming(job_id=job.job_id, title=job.title)
+            except Exception:
+                jt = None
+
+        def _record_timing() -> None:
+            if jt is not None and self._metrics is not None:
+                jt.total_s = _time.perf_counter() - t0
+                try:
+                    self._metrics.job_timings.append(jt)
+                except Exception:
+                    pass
 
         # Locate and click job card in left pane
         raw_num_id = job.job_id.replace("linkedin-", "")
@@ -615,11 +640,13 @@ class LinkedInPlatform(BaseJobPlatform):
         suitable, reason, score = self.evaluate_job_suitability(job)
         if not suitable:
             log.info("linkedin.apply.skipped", job_id=job.job_id, reason=reason)
+            _record_timing()
             return ApplyOutcome(status=ApplicationStatus.SKIPPED, reason=SkipReason.LOW_MATCH_SCORE, detail=reason)
 
         if pre_submit_check:
             decision = pre_submit_check(job)
             if not decision.passed:
+                _record_timing()
                 return ApplyOutcome(
                     status=ApplicationStatus.SKIPPED,
                     reason=decision.reason or SkipReason.FILTER_REJECTED,
@@ -643,7 +670,9 @@ class LinkedInPlatform(BaseJobPlatform):
 
         if not apply_btn:
             if await first_visible(self.page, ["button:has-text('Applied')", "span:has-text('Applied')", "span:has-text('Application submitted')", "div:has-text('Application submitted')"], timeout_ms=800):
+                _record_timing()
                 return ApplyOutcome(status=ApplicationStatus.ALREADY_APPLIED, reason=SkipReason.ALREADY_APPLIED)
+            _record_timing()
             return ApplyOutcome(status=ApplicationStatus.SKIPPED, reason=SkipReason.EXTERNAL_APPLY, detail="No Easy Apply button; company-site apply only")
 
         log.info("linkedin.apply.clicking_button", job_id=job.job_id)
@@ -714,6 +743,7 @@ class LinkedInPlatform(BaseJobPlatform):
             )
 
         if not modal or not await modal.is_visible():
+            _record_timing()
             return ApplyOutcome(status=ApplicationStatus.FAILED, detail="Modal not visible")
 
         prev_step_signature = ""
@@ -796,6 +826,7 @@ class LinkedInPlatform(BaseJobPlatform):
                 )
                 if confirmation or submitted_badge or not modal_still_open:
                     log.info("linkedin.apply.submitted_successfully", job_id=job.job_id)
+                    _record_timing()
                     return ApplyOutcome(
                         status=ApplicationStatus.APPLIED,
                         detail="Submitted via LinkedIn Easy Apply",
@@ -807,6 +838,7 @@ class LinkedInPlatform(BaseJobPlatform):
                 err_txt = (await safe_text(error_el)).strip() if error_el else "Submission unconfirmed; modal remained open"
                 log.warning("linkedin.apply.submit_unconfirmed", job_id=job.job_id, error=err_txt)
                 await self._dismiss_modal()
+                _record_timing()
                 return ApplyOutcome(status=ApplicationStatus.FAILED, detail=f"Submission failed: {err_txt}")
 
             # Check if modal advanced (inspecting actual input counts and modal body text)
@@ -824,6 +856,7 @@ class LinkedInPlatform(BaseJobPlatform):
                     err_txt = (await safe_text(error_el)).strip() if error_el else "Required field unfilled"
                     log.warning("linkedin.apply.step_stuck", step=step, error=err_txt)
                     await self._dismiss_modal()
+                    _record_timing()
                     return ApplyOutcome(status=ApplicationStatus.FAILED, detail=f"Step {step} blocked: {err_txt}")
             else:
                 stuck_count = 0
@@ -862,6 +895,7 @@ class LinkedInPlatform(BaseJobPlatform):
                 break
 
         await self._dismiss_modal()
+        _record_timing()
         return ApplyOutcome(
             status=ApplicationStatus.NEEDS_REVIEW,
             reason=SkipReason.STUCK_FLOW,

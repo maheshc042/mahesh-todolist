@@ -131,9 +131,9 @@ answers:
   "how many years of ai backend developer?": "Yes"
   "are you comfortable attending interviews in person on weekdays?": "Yes"
   "how many years of experience do you have in .net core?": "0"
-  "how many years of experience do you have in html, css, javascript?": "2.6"
+  "how many years of experience do you have in html, css, javascript?": "3"
   "how many years of experience do you have in .net?": "0"
-  "experience in angular or react ?": "2.6"
+  "experience in angular or react ?": "3"
   "how many years of experience do you have in spring boot?": "0"
   # Notice Period & Availability
   serving notice: "Yes"
@@ -162,50 +162,68 @@ answers:
   fixed ctc: "3.8"
   variable ctc: "0"
 
-  # Experience — 2.5 years total career experience
-  total experience: "2.5"
-  relevant experience: "2.5"
-  experience in react: "2.5"
-  experience in node: "2.5"
-  experience in javascript: "2.5"
-  experience in html: "2.5"
-  experience in css: "2.5"
-  experience in html css: "2.5"
-  experience in html css javascript: "2.5"
-  experience in typescript: "2"
-  experience in full stack: "2.5"
-  experience in aws: "2.5"
-  experience in cloud: "2.5"
-  experience in testing: "2.5"
-  experience in software testing: "2.5"
-  experience in sql: "2.5"
-  experience in postgresql: "2.5"
-  experience in database: "2.5"
-  experience in devops: "2"
-  experience in docker: "2"
-  experience in ci/cd: "2"
+  # Experience — 3 years total career experience (full stack + cloud)
+  total experience: "3"
+  relevant experience: "3"
+  experience in react: "3"
+  experience in node: "3"
+  experience in javascript: "3"
+  experience in html: "3"
+  experience in css: "3"
+  experience in html css: "3"
+  experience in html css javascript: "3"
+  experience in typescript: "3"
+  experience in full stack: "3"
+  experience in aws: "3"
+  experience in cloud: "3"
+  experience in testing: "3"
+  experience in software testing: "3"
+  experience in sql: "3"
+  experience in postgresql: "3"
+  experience in database: "3"
+  experience in devops: "3"
+  experience in docker: "3"
+  experience in ci/cd: "3"
 
-  # AI / Python is the newer track: 6 months hands-on.
+  # AI / Python track: 2 years hands-on.
   experience in ai: "2"
   experience in artificial intelligence: "2"
   experience in machine learning: "2"
-  experience in python: "2.5"
+  experience in python: "2"
   experience in llm: "2"
   experience in generative ai: "2"
+  experience in genai: "2"
   experience in chatbot: "2"
+  experience in rag: "2"
+  experience in langchain: "2"
+  experience in langgraph: "2"
+  experience in fastapi: "2"
+  experience in mlops: "2"
+  experience in prompt engineering: "2"
+  experience in vector database: "2"
+  experience in embeddings: "2"
+  experience in hugging face: "2"
+  experience in pytorch: "2"
+  experience in deep learning: "2"
+  experience in openai: "2"
+  experience in transformers: "2"
+  experience in mcp: "2"
   experience in .net: "0"
   experience in java: "0"
+  experience in spring: "0"
+  experience in spring boot: "0"
+  experience in spring framework: "0"
 
   # Academic Details
   10th percentage: "67"
-  12th percentage: "75"
-  secondary percentage: "75"
+  12th percentage: "74"
+  secondary percentage: "74"
   sslc percentage: "67"
   puc percentage: "75"
   graduation percentage: "60"
   degree percentage: "60"
   ug percentage: "60"
-  cgpa: "6.5"
+  cgpa: "6"
   post graduation: "NA"
   pg percentage: "NA"
 
@@ -311,8 +329,8 @@ answers:
   "re:built and consumed restful apis|restful apis": "Yes"
   "re:jwt or oauth|oauth-based authentication": "Yes"
   "re:data privacy policy|privacy policy consent|privacy policy": "Yes"
-  "experience in sql development": "2.6"
-  "re:low level design": "2.6"
+  "experience in sql development": "3"
+  "re:low level design": "3"
   "re:best coding practice|code quality": "Writing modular code, following DRY and SOLID principles, strict typing, linting, unit testing, and structured logging."
   "re:comfortable with english": "I can speak and write"
   "re:what is your strength|your strength": "Backend Technologies"
@@ -325,91 +343,110 @@ answers:
 # Anything not listed falls back to `default_years`.
 # ---------------------------------------------------------------------------
 experience:
-  total_years: 2.5
+  total_years: 3
 
-  default_years: 2.0
+  default_years: 1
   multi_skill_strategy: max
   skills:
-    html: 2.5
-    css: 2.5
-    javascript: 2.5
-    js: 2.5
-    react: 2.5
-    node: 2.5
-    typescript: 2.5
-    full stack: 2.5
-    mern: 2.5
-    mern stack: 2.5
-    mean: 2.5
-    express: 2.5
-    express.js: 2.5
-    postgresql: 2.5
-    postgres: 2.5
-    mongodb: 2.5
-    mongo: 2.5
-    sql: 2.5
-    rest api: 2.5
-    restful api: 2.5
-    microservices: 2.5
-    git: 2.5
-    github: 2.5
+    html: 3
+    css: 3
+    javascript: 3
+    js: 3
+    react: 3
+    node: 3
+    typescript: 3
+    full stack: 3
+    mern: 3
+    mern stack: 3
+    mean: 3
+    express: 3
+    express.js: 3
+    postgresql: 3
+    postgres: 3
+    mongodb: 3
+    mongo: 3
+    sql: 3
+    rest api: 3
+    restful api: 3
+    microservices: 3
+    git: 3
+    github: 3
     c++: 0
     cpp: 0
     c: 0
-    docker: 2.5
-    next.js: 2.5
-    nextjs: 2.5
+    docker: 3
+    next.js: 3
+    nextjs: 3
     vue: 0
     angular: 0
-    testing: 2.5
-    software testing: 2.5
-    qa: 2.5
-    devops: 2.5
+    testing: 3
+    software testing: 3
+    qa: 3
+    devops: 3
     golang: 0
     go: 0
     .net: 0
     dotnet: 0
     dot net: 0
-    # AI / Python is the newer track: 6 months hands-on. Keep these honest —
-    # recruiters cross-check them against the resume.
+    java: 0
+    spring: 0
+    spring boot: 0
+    spring framework: 0
+    hibernate: 0
+    # AI / Python track: 2 years hands-on. Recruiters cross-check these
+    # against the resume, so anything outside this list falls back to
+    # default_years (1) — honest for new tools, never inflated.
     ai: 2
     artificial intelligence: 2
     agentic ai: 2
     agentic: 2
-    machine learning: 1
+    machine learning: 2
     python: 2
-    llm: 1
+    llm: 2
     generative ai: 2
-    nlp: 1
+    genai: 2
+    nlp: 2
     langchain: 2
+    langgraph: 2
     fastapi: 2
     chatbot: 2
     conversational ai: 2
     language models: 2
     ai engineer: 2
-    front end: 2.5
-    frontend: 2.5
-    back end: 2.5
-    backend: 2.5
-    ui: 2.5
-    ux: 2.5
-    ui/ux: 2.5
-    apis: 2.5
-    api: 2.5
-    rest: 2.5
-    agile: 2.5
-    use cases: 2.5
-    business processes: 2.5
-    customer engagement: 2.5
-    emerging technologies: 2.5
-    cloud services: 2.5
-    cloud platforms: 2.5
-    azure: 2.5
-    microsoft azure: 2.5
-    unix: 2.5
-    linux: 2.5
-    cloud: 2.5
-    aws: 2.5
+    rag: 2
+    mlops: 2
+    prompt engineering: 2
+    vector database: 2
+    embeddings: 2
+    hugging face: 2
+    pytorch: 2
+    deep learning: 2
+    openai: 2
+    transformers: 2
+    mcp: 2
+    front end: 3
+    frontend: 3
+    back end: 3
+    backend: 3
+    ui: 3
+    ux: 3
+    ui/ux: 3
+    apis: 3
+    api: 3
+    rest: 3
+    agile: 3
+    use cases: 3
+    business processes: 3
+    customer engagement: 3
+    emerging technologies: 3
+    cloud services: 3
+    cloud platforms: 3
+    azure: 3
+    microsoft azure: 3
+    unix: 3
+    linux: 3
+    cloud: 3
+    aws: 3
     aml: 0
     fircosoft: 0
 
@@ -461,7 +498,7 @@ profiles:
     enabled: true
     priority: 1
     account: secondary
-    experience_years: 2.6
+    experience_years: 3
     use_recommended: true
     platform_limits:
       naukri: 35
@@ -501,9 +538,9 @@ profiles:
       skip_walkin: true
 
     answers:
-      relevant experience: "2.6"
-      total experience: "2.6"
-      proficiency in python, typescript: "Proficient in Python and TypeScript with 2.6 years of commercial experience building web applications and APIs."
+      relevant experience: "3"
+      total experience: "3"
+      proficiency in python, typescript: "Proficient in Python and TypeScript with 3 years of commercial experience building web applications and APIs."
       proficiency in python: "Proficient in Python with hands-on experience in FastAPI, Django, and full-stack applications."
       proficiency in typescript: "Proficient in TypeScript with hands-on experience in modern React and Node.js."
       programming language: "Python, TypeScript, JavaScript"
@@ -517,13 +554,13 @@ profiles:
   # =========================================================================
   # ACCOUNT 1 (primary) — AI / Python Engineer.
   # The AI/Python resume must be the active CV on this Naukri profile.
-  # 2.6 years total engineering experience, 6 months of it in AI/Python.
+  # 3 years total engineering experience, 2 of it in AI/Python.
   # =========================================================================
   - name: "AI / Python Engineer"
     enabled: true
     priority: 2
     account: primary
-    experience_years: 2.5
+    experience_years: 2
     use_recommended: true
     platform_limits:
       naukri: 35
@@ -561,34 +598,41 @@ profiles:
       require_easy_apply: true
       skip_walkin: true
 
-    # Honest split: 2.6 years total, 6 months specifically in AI/Python.
+    # Honest split: 3 years total, 2 specifically in AI/Python.
     # Recruiters cross-check these against the resume, so they must match it.
     answers:
-      total experience: "2.5"
+      total experience: "3"
       relevant experience: "2"
       experience in ai: "2"
       experience in artificial intelligence: "2"
-      experience in machine learning: "1"
+      experience in machine learning: "0"
       experience in python: "2"
       experience in llm: "2"
       experience in generative ai: "2"
+      experience in genai: "2"
       hands-on experience in generative ai: "2"
       hands-on experience in generative ai/llm: "2"
       hands-on experience in generative ai/llm development: "2"
       experience in generative ai/llm: "2"
-      experience in llm development: "2"
+      experience in llm development: "0"
       generative ai/llm development: "2"
-      proficiency in python, typescript: "Proficient in Python and TypeScript with 2.5+ years of experience building APIs, backend services, and web applications."
+      proficiency in python, typescript: "Proficient in Python and TypeScript with 3 years of experience building APIs, backend services, and web applications."
       proficiency in python: "Proficient in Python with hands-on experience in FastAPI, Django, and AI applications."
       proficiency in typescript: "Proficient in TypeScript with hands-on experience in modern React and Node.js."
       programming language: "Python, TypeScript, JavaScript"
       programming languages: "Python, TypeScript, JavaScript"
-      experience in nlp: "1"
+      experience in nlp: "2"
       experience in langchain: "2"
+      experience in langgraph: "2"
       experience in fastapi: "2"
-      experience in tensorflow: "1"
-      experience in pytorch: "1"
-      experience in data science: "1"
+      experience in tensorflow: "0"
+      experience in pytorch: "2"
+      experience in transformers: "0"
+      experience in rag: "2"
+      experience in mlops: "2"
+      experience in hugging face: "2"
+      experience in openai: "2"
+      experience in data science: "0"
       current ctc: "4"
       expected ctc: "7"
       notice period: "0 days"

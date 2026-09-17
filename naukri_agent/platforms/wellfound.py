@@ -6,6 +6,7 @@ import asyncio
 
 import re
 from collections.abc import Callable
+from datetime import UTC, datetime
 from typing import Any
 
 from playwright.async_api import Page
@@ -540,11 +541,9 @@ class WellfoundPlatform(BaseJobPlatform):
         # Feed audit: persist the full scrolled link inventory (id + href)
         # BEFORE dedupe/prefilter cuts it. Run 319 showed links=24 but
         # count=1 — without this file the 23 missing rows are unprovable.
+        # Writes under the run's ArtifactStore dir (git-ignored) so debug
+        # output never lands in the committed analysis/ CSVs.
         try:
-            from ..config import PROJECT_ROOT as _ROOT
-
-            audit_dir = _ROOT / "artifacts" / "wellfound_debug"
-            audit_dir.mkdir(parents=True, exist_ok=True)
             inv: dict[str, str] = {}
             for link in link_elements:
                 try:
@@ -554,21 +553,23 @@ class WellfoundPlatform(BaseJobPlatform):
                 m = re.search(r"/jobs/(\d+)-", href)
                 if m:
                     inv.setdefault(f"wellfound-{m.group(1)}", href)
-            stamp = __import__("datetime").datetime.now(
-                __import__("datetime").UTC
-            ).strftime("%Y%m%d_%H%M%S")
-            (audit_dir / f"links_{stamp}.txt").write_text(
-                "\n".join(f"{jid} {href}" for jid, href in sorted(inv.items())),
-                encoding="utf-8",
-            )
-            (audit_dir / "latest.txt").write_text(
-                "\n".join(f"{jid} {href}" for jid, href in sorted(inv.items())),
-                encoding="utf-8",
-            )
+            if inv:
+                from ..config import PROJECT_ROOT as _ROOT  # noqa: PLC0415
+
+                audit_dir = _ROOT / "artifacts" / "wellfound_debug"
+                audit_dir.mkdir(parents=True, exist_ok=True)
+                stamp = datetime.now(UTC).strftime("%Y%m%d_%H%M%S")
+                (audit_dir / f"links_{stamp}.txt").write_text(
+                    "\n".join(f"{jid} {href}" for jid, href in sorted(inv.items())),
+                    encoding="utf-8",
+                )
+                (audit_dir / "latest.txt").write_text(
+                    "\n".join(f"{jid} {href}" for jid, href in sorted(inv.items())),
+                    encoding="utf-8",
+                )
             log.info(
                 "wellfound.fetch.link_audit",
                 unique_ids=len(inv),
-                path=str(audit_dir / "latest.txt"),
             )
         except Exception as exc:
             log.warning("wellfound.fetch.link_audit_failed", error=str(exc)[:150])

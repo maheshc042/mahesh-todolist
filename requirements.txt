@@ -1,5 +1,8 @@
 # Runtime dependencies for the Naukri Auto-Apply Agent (Python 3.11+)
-playwright==1.49.1
+# NOTE: for local runs prefer `uv sync` (pyproject.toml is the source of
+# truth). This file exists only for GitHub Actions (pip has no uv there) —
+# keep the pins identical to pyproject.toml or CI drifts from local.
+playwright==1.62.0
 pydantic==2.10.4
 pydantic-settings==2.7.0
 PyYAML==6.0.2

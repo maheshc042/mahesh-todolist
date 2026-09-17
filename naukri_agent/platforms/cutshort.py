@@ -1008,6 +1008,10 @@ class CutshortPlatform(BaseJobPlatform):
 
                 title = (await safe_text(anchor)).strip()
                 if not title:
+                    log.debug(
+                        "cutshort.fetch.empty_title_skipped",
+                        url=url[:120],
+                    )
                     continue
                 seen_urls.add(url.rstrip("/"))
 

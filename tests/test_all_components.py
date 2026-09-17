@@ -142,6 +142,7 @@ class TestInstahyreUnifiedConfiguration(unittest.TestCase):
             ("Tranzact", "Full Stack Developer - Python / Django / React.js"),
             ("Amazon", "Software Development Engineer 2"),
             ("Quince", "SDET II"),
+            ("Gravity", "Lead React/Next.js Developer"),
         ]
         for company, title in roles:
             job = Job(
@@ -156,11 +157,11 @@ class TestInstahyreUnifiedConfiguration(unittest.TestCase):
             self.assertTrue(decision.passed, f"Job {company} - {title} failed: {decision.reason}")
 
     def test_unified_profile_rejects_forbidden_roles(self):
-        """Unified Instahyre profile must reject Java, .NET, Lead, Manager, Architect."""
+        """Unified Instahyre profile must reject Java, .NET, Manager, Architect (lead is allowed)."""
         forbidden_roles = [
             ("Oracle", "Java Developer"),
             ("Microsoft", ".NET Backend Engineer"),
-            ("Infosys", "Senior Lead Architect"),
+            ("Infosys", "Senior Architect"),
             ("Accenture", "Engineering Manager"),
             ("TCS", "BPO Process Associate"),
         ]
@@ -274,6 +275,7 @@ class TestCutshortUnifiedConfiguration(unittest.TestCase):
             ("TopGrep Tech Private Limi", "FS MERN Developer"),
             ("CLOUDSUFI", "CloudSufi is Hiring! SSE-AI Full Stack"),
             ("IntelliSavvy", "Fullstack Developer"),
+            ("Gravity Engineering Services Pvt Ltd", "Lead React/Next.js Developer"),
         ]
         for company, title in roles:
             job = Job(
@@ -292,7 +294,7 @@ class TestCutshortUnifiedConfiguration(unittest.TestCase):
         forbidden = [
             ("SaaSify", "Pre-Sales Consultant"),
             ("InfraSys", "Presales Solution Specialist"),
-            ("Wipro", "Java Tech Lead"),
+            ("Wipro", "Java Developer"),
             ("TechM", ".NET Core Backend Developer"),
             ("Accenture", "Sales Manager"),
         ]

@@ -363,7 +363,7 @@ class Orchestrator:
                                 self.metrics,
                             )
                         elif p_name == "instahyre":
-                            platform = InstahyrePlatform(page, self.account, artifacts, self.policy, config=self.config)
+                            platform = InstahyrePlatform(page, self.account, artifacts, self.policy, config=self.config, metrics=self.metrics)
                         elif p_name == "cutshort":
                             if answers is None:
                                 answers = await self._build_answer_engine(profiles[0])
@@ -374,7 +374,7 @@ class Orchestrator:
                             if answers is None:
                                 answers = await self._build_answer_engine(profiles[0])
                             platform = LinkedInPlatform(
-                                page, self.account, artifacts, answers, self.policy, config=self.config
+                                page, self.account, artifacts, answers, self.policy, config=self.config, metrics=self.metrics
                             )
                         else:
                             continue

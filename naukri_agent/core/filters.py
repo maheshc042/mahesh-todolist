@@ -301,9 +301,9 @@ class FilterEngine:
                 return FilterDecision(False, SkipReason.WALKIN, f"walk-in drive outside Bangalore ({job.location})")
 
         # 7. AI / ML & Data Engineering Recruiter Reality Gate
-        # Candidate has 2.5y total software experience, but specifically 6 months of commercial AI
-        # and limited domain experience in pure Data Engineering. Recruiters for dedicated AI or
-        # Data Engineering roles requiring > 2.0 years will immediately reject candidate for lack of tenure.
+        # Candidate has 3y total software experience with 2y commercial AI.
+        # Recruiters for dedicated AI or Data Engineering roles requiring >
+        # 2.0 years will immediately reject for lack of tenure.
         #
         # Provenance guard: `experience_imputed` numbers are scraper guesses, not
         # recruiter statements. They gate only when the title itself corroborates
@@ -319,12 +319,12 @@ class FilterEngine:
             return FilterDecision(
                 False,
                 SkipReason.FILTER_EXPERIENCE,
-                f"{role_type} role requires {job.min_experience}y > candidate's 6m AI / domain experience (recruiter will reject)",
+                f"{role_type} role requires {job.min_experience}y > candidate's 2y AI / domain experience (recruiter will reject)",
             )
 
         # 7b. Junior-family level gate (QA / DevOps / support / data-developer).
-        # These families are wanted, but only below ~2y: with 2.5y total and
-        # 6m AI, a 3y+ QA/DevOps requisition is a wasted slot. Same provenance
+        # These families are wanted, but only below ~2y: with 3y total and
+        # 2y AI, a 2y+ QA/DevOps requisition is a wasted slot. Same provenance
         # guard as gate 7: trusted numbers only, unknown flows to ranking.
         is_junior_family = _contains_any(title, JUNIOR_FAMILY_KEYWORDS) is not None
         if is_junior_family and exp_trusted and job.min_experience > 2.0:

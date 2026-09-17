@@ -848,6 +848,11 @@ class AgentConfig(_Model):
         Full Stack and AI/Python engineering tracks. Instahyre only has one
         candidate account, so this prevents running twice and eliminates
         cross-profile false rejections.
+
+        NOTE: "lead" is deliberately NOT blocked here (same as Cutshort and
+        LinkedIn): with 3y experience the candidate is offered full-stack
+        lead roles, and seniority is guarded by the 0-3.5y experience gate,
+        not the title blocklist.
         """
         active = [p for p in self.profiles if p.enabled]
         if not active:
@@ -867,7 +872,7 @@ class AgentConfig(_Model):
                         combined_includes.append(t)
 
         forbidden_tech_and_seniority = {
-            "lead", "principal", "staff", "architect", "manager", "trainer", "sales", "presales", "pre-sales", "bpo",
+            "principal", "staff", "architect", "manager", "trainer", "sales", "presales", "pre-sales", "bpo",
             "php", "wordpress", ".net", "dotnet", "dot net", "spring boot", "asp.net", "c#", "c++",
             "golang developer", "golang engineer", "go developer", "go engineer", "java",
             "mainframe", "sap", "salesforce", "drupal", "magento", "engineering manager",
@@ -941,6 +946,11 @@ class AgentConfig(_Model):
         Full Stack and AI/Python engineering tracks. Cutshort only has one
         candidate account, so this prevents running twice and eliminates
         cross-profile false rejections while enabling dynamic resume selection.
+
+        NOTE: "lead" is deliberately NOT blocked here (unlike the other
+        unified profiles): with 2.5y experience the candidate is offered
+        full-stack lead roles, and seniority is guarded by the 0-3.5y
+        experience gate, not the title blocklist.
         """
         active = [p for p in self.profiles if p.enabled]
         if not active:
@@ -960,7 +970,7 @@ class AgentConfig(_Model):
                         combined_includes.append(t)
 
         forbidden_tech_and_seniority = {
-            "lead", "principal", "staff", "architect", "manager", "trainer", "sales", "presales", "pre-sales", "bpo",
+            "principal", "staff", "architect", "manager", "trainer", "sales", "presales", "pre-sales", "bpo",
             "php", "wordpress", ".net", "dotnet", "dot net", "spring boot", "asp.net", "c#", "c++",
             "golang developer", "golang engineer", "go developer", "go engineer", "java",
             "mainframe", "sap", "salesforce", "drupal", "magento", "engineering manager",
@@ -1032,6 +1042,10 @@ class AgentConfig(_Model):
         Full Stack and AI/Python engineering tracks. LinkedIn only has one
         candidate account, so this covers both job families in a single
         morning session while enabling dynamic resume switching.
+        NOTE: "lead" is deliberately NOT blocked here (same as Cutshort):
+        with 2.5y experience the candidate is offered full-stack lead roles,
+        and seniority is guarded by the 0-3.5y experience gate, not the title
+        blocklist.
         """
         active = [p for p in self.profiles if p.enabled]
         if not active:
@@ -1051,7 +1065,7 @@ class AgentConfig(_Model):
                         combined_includes.append(t)
 
         forbidden_tech_and_seniority = {
-            "lead", "principal", "staff", "architect", "manager", "trainer", "sales", "presales", "pre-sales", "bpo",
+            "principal", "staff", "architect", "manager", "trainer", "sales", "presales", "pre-sales", "bpo",
             "php", "wordpress", ".net", "dotnet", "dot net", "spring boot", "asp.net", "c#", "c++",
             "golang developer", "golang engineer", "go developer", "go engineer", "java",
             "mainframe", "sap", "salesforce", "drupal", "magento", "engineering manager",

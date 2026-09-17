@@ -4,7 +4,9 @@ Instahyre Platform Implementation (Pagination & Modal-Swiper Engine).
 from __future__ import annotations
 
 import re
+import time as _time
 from collections.abc import Callable
+from typing import Any
 
 from playwright.async_api import Page
 
@@ -32,12 +34,14 @@ class InstahyrePlatform(BaseJobPlatform):
         artifacts: ArtifactStore,
         policy: RunPolicy,
         config: AgentConfig | None = None,
+        metrics: Any | None = None,
     ):
         super().__init__(page, account.key, policy)
         self.account = account
         self.artifacts = artifacts
         self.policy = policy
         self.config = config
+        self._metrics = metrics
         self._current_view: str = "recommended"
         self._current_profile: JobProfile | None = None
         self.logged_out_markers = [
@@ -688,6 +692,23 @@ class InstahyrePlatform(BaseJobPlatform):
     ) -> ApplyOutcome:
         self.require_mutation("application.apply_flow")
         log.info("instahyre.apply.start", job_id=job.job_id)
+        t0 = _time.perf_counter()
+        jt = None
+        if self._metrics is not None:
+            try:
+                from ..core.runtime_metrics import JobTiming
+
+                jt = JobTiming(job_id=job.job_id, title=job.title)
+            except Exception:
+                jt = None
+
+        def _record_timing() -> None:
+            if jt is not None and self._metrics is not None:
+                jt.total_s = _time.perf_counter() - t0
+                try:
+                    self._metrics.job_timings.append(jt)
+                except Exception:
+                    pass
 
         # 1. Check if Modal is ALREADY open (carousel swiper mode)
         modal = await first_visible(
@@ -831,6 +852,7 @@ class InstahyrePlatform(BaseJobPlatform):
             if not card:
                 # Feed churn (filled/expired between collect and apply), not an
                 # agent failure: skip without tripping the failure breaker.
+                _record_timing()
                 return ApplyOutcome(
                     status=ApplicationStatus.SKIPPED,
                     reason=SkipReason.STALE_JOB,
@@ -859,6 +881,7 @@ class InstahyrePlatform(BaseJobPlatform):
                         await card.evaluate("node => node.click()")
                 await human_pause(1500, 2500)
             except Exception as exc:
+                _record_timing()
                 return ApplyOutcome(ApplicationStatus.FAILED, detail=f"Failed to click job card: {exc!s}")
 
             modal = await first_visible(
@@ -938,6 +961,7 @@ class InstahyrePlatform(BaseJobPlatform):
                     log.debug("instahyre.apply.angular_open_failed", error=str(exc))
 
             if not modal:
+                _record_timing()
                 return ApplyOutcome(ApplicationStatus.FAILED, detail="Modal did not open after clicking card")
 
             # Wait for AngularJS candidateOpportunityCtrl to render the action bar
@@ -1008,6 +1032,7 @@ class InstahyrePlatform(BaseJobPlatform):
                         await human_pause(800, 1500)
                     except Exception:
                         pass
+                _record_timing()
                 return ApplyOutcome(ApplicationStatus.SKIPPED, reason=decision.reason, detail=decision.detail)
 
         # 3. Fast Apply Action inside Modal (No description scraping delay)
@@ -1023,6 +1048,7 @@ class InstahyrePlatform(BaseJobPlatform):
         )
         if external_btn:
             log.info("instahyre.apply.external_site_detected", job_id=job.job_id)
+            _record_timing()
             return ApplyOutcome(
                 ApplicationStatus.EXTERNAL,
                 reason=SkipReason.EXTERNAL_APPLY,
@@ -1073,7 +1099,9 @@ class InstahyrePlatform(BaseJobPlatform):
                 log.debug("instahyre.html_dump_failed", error=str(exc))
 
             if await first_visible(self.page, ["text=Applied", "button.btn-disabled:has-text('Applied')"]):
+                _record_timing()
                 return ApplyOutcome(ApplicationStatus.ALREADY_APPLIED, reason=SkipReason.ALREADY_APPLIED)
+            _record_timing()
             return ApplyOutcome(ApplicationStatus.FAILED, detail="Apply button not found in modal")
 
 
@@ -1102,6 +1130,7 @@ class InstahyrePlatform(BaseJobPlatform):
                 await apply_btn.click(force=True)
             await human_pause(1000, 2000)
         except Exception as exc:
+            _record_timing()
             return ApplyOutcome(ApplicationStatus.FAILED, detail=f"Click apply failed: {exc!s}")
 
 
@@ -1186,11 +1215,13 @@ class InstahyrePlatform(BaseJobPlatform):
                 if confirmation
                 else "Instahyre modal closed or advanced upon application submission"
             )
+            _record_timing()
             return ApplyOutcome(
                 ApplicationStatus.APPLIED,
                 confirmation_type="dom_marker",
                 confirmation_evidence=evidence,
             )
+        _record_timing()
         return ApplyOutcome(
             ApplicationStatus.FAILED,
             detail="Submission clicked but no Instahyre success confirmation was observed",
