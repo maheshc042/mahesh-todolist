@@ -97,6 +97,10 @@ jobs:
           GMAIL_USER: ${{ secrets.GMAIL_USER }}
           GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
           MATCHED_OUTREACH_ENABLED: ${{ secrets.MATCHED_OUTREACH_ENABLED || 'true' }}
+          # Hunter auth for the LinkedIn content search (persistent browser
+          # profiles don't exist on fresh CI runners, so the li_at cookie is
+          # the only session the hunter gets here; absent = 0 leads, silently).
+          LINKEDIN_LI_AT: ${{ secrets.LINKEDIN_LI_AT }}
 
           # --- Multi-Platform Credentials ---
           INSTAHYRE_EMAIL: ${{ secrets.INSTAHYRE_EMAIL }}

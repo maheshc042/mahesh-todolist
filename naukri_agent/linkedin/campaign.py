@@ -121,7 +121,17 @@ async def run_campaign(
     hunter = LinkedInHunter(li_at_cookie=li_cookie, headless=headless)
     mailer = ColdEmailer(sender_email=gmail_user, app_password=gmail_pass, gemini_api_key=gemini_key)
     if not dry_run and not mailer.verify_credentials():
-        # Bad app password: every send would fail — exit before hunting.
+        # Bad app password: every send would fail — exit before hunting, LOUDLY.
+        # (Sept 18-19 went silent here: 0 emails, 0 hunts, 0 alerts.)
+        log.error(
+            "linkedin.gmail_auth_failed",
+            detail="Gmail App Password rejected — regenerate at Google Account > Security > App passwords and update GMAIL_APP_PASSWORD in .env.",
+        )
+        await notifier.send(
+            "🚨 Cold outreach DOWN: Gmail auth failed",
+            "Gmail App Password was rejected. No cold emails can send until GMAIL_APP_PASSWORD is refreshed in .env.",
+            is_error=True,
+        )
         return 0
     # In-run memory of attempted addresses: when the DB is unreachable,
     # has_emailed/record_contacted go blind and the same lead would be
