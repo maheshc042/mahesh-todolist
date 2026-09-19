@@ -99,6 +99,25 @@ def _normalize_title(title: str) -> str:
     return re.sub(r"\s+", " ", key).strip()
 
 
+async def _internet_available(timeout_s: float = 3.0) -> bool:
+    """Best-effort connectivity probe (DNS + TCP, no HTTP). Used to skip
+    network-bound post-phases cleanly during an outage instead of burning
+    minutes on doomed navigations."""
+    import socket
+
+    loop = asyncio.get_running_loop()
+    try:
+        await asyncio.wait_for(
+            loop.run_in_executor(
+                None, lambda: socket.create_connection(("8.8.8.8", 53), timeout=timeout_s).close()
+            ),
+            timeout=timeout_s + 2.0,
+        )
+        return True
+    except Exception:
+        return False
+
+
 
 
 class Orchestrator:
@@ -264,6 +283,21 @@ class Orchestrator:
             await self.repo.prune_stale_data()
         except Exception as exc:
             log.debug("db.prune_ignored", error=str(exc))
+        # Stale-run reaper: holding the account advisory lock proves no other
+        # live process owns this account, so any older `running` row is a
+        # corpse (kill -9, power cut, dead network). Close it so dashboards
+        # stop showing phantom live runs. Never touches other accounts.
+        try:
+            reaped_rows = await self.repo.pool.fetch(
+                "UPDATE naukri.runs SET status = 'failed', finished_at = now(), "
+                "error = 'previous process died without finishing (reaped on next run)' "
+                "WHERE account = $1 AND status = 'running' RETURNING id",
+                self.account_key,
+            )
+            if reaped_rows:
+                log.warning("run.reaped_stale_rows", account=self.account_key, count=len(reaped_rows))
+        except Exception as exc:
+            log.debug("run.reaper_ignored", error=str(exc))
         profiles = self.config.active_profiles(self.only_profiles, account=self.account_key)
         profile_names = [p.name for p in profiles]
         if not profile_names:
@@ -515,7 +549,15 @@ class Orchestrator:
                 # The sweep and the cold-email campaign ran 14 minutes past the
                 # run timeout in run 291. Gate both on remaining budget.
                 sweep_budget_s = self.config.run.run_timeout_minutes * 60 - self.elapsed_s
+                sweep_online = False
                 if message_platforms and self.policy.may_mutate and sweep_budget_s >= 180:
+                    sweep_online = await _internet_available()
+                    if not sweep_online:
+                        log.warning("run.questionnaire_sweep.skipped_offline")
+                        self.stats.errors.append(
+                            "questionnaire sweep skipped: no internet connectivity"
+                        )
+                if sweep_online:
                     log.info(
                         "run.questionnaire_sweep.start",
                         platforms=[p.platform_name for p in message_platforms],
