@@ -50,25 +50,26 @@ _CARD_EXP_RE = re.compile(
 _SINGLE_EXP_RE = re.compile(r"(\d+(?:\.\d+)?)\s*\+\s*(?:yrs|years|yr)\b", re.IGNORECASE)
 
 # (label, pattern): labels surface in skip reasons, patterns do the matching.
+# User-first policy: this prefilter mirrors the base profiles, exactly like
+# the plan-stage FilterRules do. QA/testing, data-analyst, fresher and
+# lead/senior/sr titles are NOT blocked here — relevance is decided by the
+# title allowlist and seniority by the experience gates (unknown never
+# rejects; the detail page re-checks). Only off-stack families stay blocked.
 _BLOCKED_TITLES: tuple[tuple[str, str], ...] = (
     ("java", r"\bjava\b"), ("spring", r"\bspring\b"), (".net", r"\.net\b"),
     ("dotnet", r"\bdotnet\b"), ("php", r"\bphp\b"), ("wordpress", r"\bwordpress\b"),
     ("salesforce", r"\bsalesforce\b"), ("sap", r"\bsap\b"), ("oracle", r"\boracle\b"),
-    ("mainframe", r"\bmainframe\b"), ("lead", r"\blead\b"), ("principal", r"\bprincipal\b"),
+    ("mainframe", r"\bmainframe\b"), ("principal", r"\bprincipal\b"),
     ("staff", r"\bstaff\b"), ("architect", r"\barchitect\b"), ("manager", r"\bmanager\b"),
     ("director", r"\bdirector\b"), ("head of", r"\bhead of\b"), ("intern", r"\bintern\b"),
-    ("trainee", r"\btrainee\b"), ("fresher", r"\bfresher\b"), ("sales", r"\bsales\b"),
+    ("trainee", r"\btrainee\b"), ("sales", r"\bsales\b"),
     ("presales", r"\bpresales\b"), ("recruiter", r"\brecruiter\b"), ("hr", r"\bhr\b"),
     ("accountant", r"\baccountant\b"), ("designer", r"\bdesigner\b"),
     ("writer", r"\bwriter\b"), ("marketing", r"\bmarketing\b"),
     ("security engineer", r"\bsecurity engineer\b"), ("cybersecurity", r"\bcybersecurity\b"),
     ("infosec", r"\binfosec\b"), ("data scientist", r"\bdata scientist\b"),
-    ("data analyst", r"\bdata analyst\b"), ("it support", r"\bit support\b"),
+    ("it support", r"\bit support\b"),
     ("helpdesk", r"\bhelpdesk\b"), ("service desk", r"\bservice desk\b"),
-    ("senior", r"\bsenior\b"), ("sr", r"\bsr\.?\b"),
-    ("qa", r"\bqa\b"), ("sdet", r"\bsdet\b"),
-    ("tester", r"\btester\b"), ("testing", r"\btesting\b"),
-    ("quality", r"\bquality\b"),
 )
 _BLOCKED_TITLE_RES = tuple((label, re.compile(pat, re.IGNORECASE)) for label, pat in _BLOCKED_TITLES)
 _SPAM_RES = ("unpaid", "no salary", "without salary", "volunteer", "commission only", "survey")

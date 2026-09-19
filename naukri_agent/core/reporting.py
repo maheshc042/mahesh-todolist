@@ -16,7 +16,7 @@ from .ranking import RankedJob
 
 log = get_logger(__name__)
 
-RANKED_JOBS_CSV_HEADER = ["rank", "score", "job_id", "tab", "position", "company", "title", "url", "reasons"]
+RANKED_JOBS_CSV_HEADER = ["rank", "score", "job_id", "tab", "position", "company", "title", "url", "applicants", "reasons"]
 OUTCOME_JOBS_CSV_HEADER = ["job_id", "status", "company", "title", "url", "detail", "reason", "attempts"]
 
 def _now_utc() -> datetime:
@@ -37,10 +37,10 @@ class ReportExporter:
         try:
             with self._names("collected_jobs.csv", platform).open("w", encoding="utf-8", newline="") as f:
                 w = csv.writer(f)
-                w.writerow(["job_id", "tab", "position", "total_jobs_in_tab", "company", "title", "url", "scraped_at"])
+                w.writerow(["job_id", "tab", "position", "total_jobs_in_tab", "company", "title", "url", "applicants", "scraped_at"])
                 for j in collected_jobs:
                     scraped = j.scraped_at.isoformat() if j.scraped_at else ""
-                    w.writerow([j.job_id, j.recommendation_tab, j.recommendation_position or "", j.total_jobs_in_tab or "", j.company, j.title, j.url, scraped])
+                    w.writerow([j.job_id, j.recommendation_tab, j.recommendation_position or "", j.total_jobs_in_tab or "", j.company, j.title, j.url, j.applicant_count if j.applicant_count is not None else "", scraped])
 
             self._write_ranked_jobs_csv(self._names("ranked_jobs.csv", platform), plan.eligible_jobs)
             self._write_ranked_jobs_csv(self._names("selected_jobs.csv", platform), plan.selected_jobs)
@@ -94,7 +94,7 @@ class ReportExporter:
             writer.writerow(RANKED_JOBS_CSV_HEADER)
             for rj in ranked_jobs:
                 reasons_str = " | ".join(rj.reasons)
-                writer.writerow([rj.rank or "", f"{rj.score:.2f}", rj.job.job_id, rj.job.recommendation_tab or "", rj.job.recommendation_position or "", rj.job.company, rj.job.title, rj.job.url, reasons_str])
+                writer.writerow([rj.rank or "", f"{rj.score:.2f}", rj.job.job_id, rj.job.recommendation_tab or "", rj.job.recommendation_position or "", rj.job.company, rj.job.title, rj.job.url, rj.job.applicant_count if rj.job.applicant_count is not None else "", reasons_str])
 
     def _write_outcomes_csv(self, path: Path, items: list[tuple[Job, ApplyOutcome]]) -> None:
         with path.open("w", encoding="utf-8", newline="") as f:

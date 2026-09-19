@@ -75,6 +75,19 @@ DISJOINT_SPECIALIZATIONS = (
     "it support", "helpdesk", "service desk", "it engineer", "systems engineer",
     "security engineer", "cyber security", "cybersecurity", "infosec", "soc analyst",
     "react native", "android developer", "ios developer", "flutter developer",
+    # Hardware / embedded / core-engineering prefix class: a generic include
+    # term ("software engineer", "engineer") sitting inside one of these titles
+    # does not make it a software role (e.g. "Embedded Software Engineer").
+    "embedded", "embedded systems", "firmware", "vlsi", "hardware",
+    "mechanical", "electrical", "civil",
+)
+
+# Hybrid AI titles: full-stack/software markers that promote an AI-titled
+# posting to the general 3y software-tenure gate instead of the 2y pure-AI cap.
+HYBRID_AI_TITLE_MARKERS = (
+    "full stack", "fullstack", "mern", "mean", "frontend", "backend",
+    "react", "node", "sde", "software engineer", "software developer",
+    "web developer",
 )
 
 # Wanted families gated by level (gate 7b): QA / DevOps / support /
@@ -302,8 +315,14 @@ class FilterEngine:
 
         # 7. AI / ML & Data Engineering Recruiter Reality Gate
         # Candidate has 3y total software experience with 2y commercial AI.
-        # Recruiters for dedicated AI or Data Engineering roles requiring >
-        # 2.0 years will immediately reject for lack of tenure.
+        # Recruiters for DEDICATED AI or Data Engineering roles requiring >
+        # 2.0 years will immediately reject for lack of tenure — the 2.0y cap
+        # stays for pure AI/ML titles.
+        #
+        # HYBRID titles (full-stack/software markers alongside AI terms, e.g.
+        # "Applied AI Engineer with Fullstack") hire a software engineer first:
+        # they are judged on the 3y software tenure via the general gate below,
+        # not the 2y AI tenure.
         #
         # Provenance guard: `experience_imputed` numbers are scraper guesses, not
         # recruiter statements. They gate only when the title itself corroborates
@@ -311,15 +330,19 @@ class FilterEngine:
         # still down-weights it via experience decay. Unknown data never rejects.
         is_ai_role = any(term in title for term in DEDICATED_AI_KEYWORDS)
         is_data_role = any(term in title for term in DATA_ROLES_KEYWORDS)
+        is_hybrid_ai = is_ai_role and any(
+            term in title for term in HYBRID_AI_TITLE_MARKERS
+        )
         exp_trusted = job.min_experience is not None and (
             not job.experience_imputed or _title_suggests_senior(job.title)
         )
-        if (is_ai_role or is_data_role) and exp_trusted and job.min_experience > 2.0:
+        ai_cap = rules.dedicated_ai_max_years
+        if (is_ai_role or is_data_role) and not is_hybrid_ai and exp_trusted and job.min_experience > ai_cap:
             role_type = "AI/ML" if is_ai_role else "Data Engineering"
             return FilterDecision(
                 False,
                 SkipReason.FILTER_EXPERIENCE,
-                f"{role_type} role requires {job.min_experience}y > candidate's 2y AI / domain experience (recruiter will reject)",
+                f"{role_type} role requires {job.min_experience}y > candidate's {ai_cap:g}y AI / domain experience (recruiter will reject)",
             )
 
         # 7b. Junior-family level gate (QA / DevOps / support / data-developer).
@@ -327,11 +350,12 @@ class FilterEngine:
         # 2y AI, a 2y+ QA/DevOps requisition is a wasted slot. Same provenance
         # guard as gate 7: trusted numbers only, unknown flows to ranking.
         is_junior_family = _contains_any(title, JUNIOR_FAMILY_KEYWORDS) is not None
-        if is_junior_family and exp_trusted and job.min_experience > 2.0:
+        junior_cap = rules.junior_family_max_years
+        if is_junior_family and exp_trusted and job.min_experience > junior_cap:
             return FilterDecision(
                 False,
                 SkipReason.FILTER_EXPERIENCE,
-                f"junior-family role requires {job.min_experience}y > 2.0y cap (low-probability slot)",
+                f"junior-family role requires {job.min_experience}y > {junior_cap:g}y cap (low-probability slot)",
             )
 
         # 8. Numeric experience bounds (provenance-guarded: see gate 7)
@@ -359,8 +383,10 @@ class FilterEngine:
                         SkipReason.FILTER_EXPERIENCE,
                         f"caps at {job.max_experience}y < min {exp.min_years}y",
                     )
-                # Allow wide startup requisition bands up to 8.5y if min_experience <= 3.5y
-                max_ceiling = 8.5 if (job.min_experience is not None and job.min_experience <= 3.5) else 6.0
+                # Allow wide startup requisition bands up to the configured
+                # ceiling if min_experience <= 3.5y; bands starting above the
+                # general ceiling keep a fixed 6.0y safety net.
+                max_ceiling = rules.max_experience_band_ceiling if (job.min_experience is not None and job.min_experience <= 3.5) else 6.0
                 if job.max_experience > max_ceiling:
                     return FilterDecision(
                         False,

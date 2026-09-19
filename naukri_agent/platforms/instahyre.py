@@ -437,7 +437,30 @@ class InstahyrePlatform(BaseJobPlatform):
                     note_text = (await safe_text(note_loc)).strip()
 
                 url = "https://www.instahyre.com/candidate/opportunities/"
-                job_id = f"instahyre-{Job.stable_id(url, title, company)}"
+                # Real opportunity id from the card's AngularJS scope (same
+                # `opp` object the Apply button consumes). Falls back to the
+                # title+company hash only when Angular is not bootstrapped.
+                opp_id = ""
+                try:
+                    opp_id = (await card.evaluate("""(el) => {
+                        try {
+                            if (!window.angular) return '';
+                            let s = null;
+                            try { s = window.angular.element(el).scope(); } catch (e) { return ''; }
+                            for (let depth = 0; depth < 6 && s; depth++) {
+                                const o = s.opp || s.selectedOpp || s.opportunity || null;
+                                const v = o && (o.id || o.opportunity_id || o.job_id || o._id || o.opp_id || o.opportunityId);
+                                if (v) return String(v);
+                                s = s.$parent;
+                            }
+                            return '';
+                        } catch (e) { return ''; }
+                    }""") or "").strip()
+                    if opp_id:
+                        self._opp_ids_resolved = getattr(self, "_opp_ids_resolved", 0) + 1
+                except Exception as exc:
+                    log.debug("instahyre.fetch.opp_id_failed", error=str(exc))
+                job_id = f"instahyre-{opp_id}" if opp_id else f"instahyre-{Job.stable_id(url, title, company)}"
 
                 if job_id in exclude_job_ids or job_id in seen_ids:
                     continue
@@ -559,7 +582,12 @@ class InstahyrePlatform(BaseJobPlatform):
         except Exception as exc:
             log.warning("instahyre.fetch.error", url=feed_url, error=str(exc))
 
-        log.info("instahyre.fetch.done", count=len(jobs), current_view=self._current_view)
+        log.info(
+            "instahyre.fetch.done",
+            count=len(jobs),
+            current_view=self._current_view,
+            real_opp_ids=getattr(self, "_opp_ids_resolved", 0),
+        )
         return jobs
 
     async def _switch_to_page(self, target_page: int) -> bool:

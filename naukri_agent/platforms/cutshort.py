@@ -1227,7 +1227,7 @@ class CutshortPlatform(BaseJobPlatform):
             )
             if closed_marker:
                 log.info("cutshort.apply.job_closed_on_page", job_id=job.job_id)
-                return ApplyOutcome(ApplicationStatus.SKIPPED, reason=SkipReason.COMPANY_BLACKLIST, detail="Job posting is no longer active / closed on Cutshort")
+                return ApplyOutcome(ApplicationStatus.SKIPPED, reason=SkipReason.STALE_JOB, detail="Job posting is no longer active / closed on Cutshort")
 
             # Step 3A: On dedicated job page (cutshort.io/job/...), click primary in-viewport CTA button
             # The main job's primary CTA is 'Apply to this job' (in header & floating bar).

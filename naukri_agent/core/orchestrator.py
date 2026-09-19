@@ -31,6 +31,7 @@ from __future__ import annotations
 import asyncio
 import os
 import random
+import re
 import time
 from datetime import UTC, datetime
 from typing import Any
@@ -80,6 +81,24 @@ class _CapReached(Exception):
     """Internal signal: this profile hit its per-run cap; move to the next one."""
 
 
+_COMPANY_SUFFIX_RE = re.compile(
+    r"\b(pvt|ltd|limited|private|inc|corp|corporation|llp|llc|technologies|technology|solutions|services|consulting|group|labs)\b|[.,]",
+    re.IGNORECASE,
+)
+
+
+def _normalize_company(name: str) -> str:
+    """Collapse 'Soul Ai', 'Soul AI Pvt Ltd' etc. to one accounting key."""
+    key = _COMPANY_SUFFIX_RE.sub(" ", name or "").lower()
+    return re.sub(r"\s+", " ", key).strip()
+
+
+def _normalize_title(title: str) -> str:
+    """Collapse repost title variants ('React Developer', 'React Developer ') to one key."""
+    key = (title or "").lower().replace("-", " ").replace("/", " ")
+    return re.sub(r"\s+", " ", key).strip()
+
+
 
 
 class Orchestrator:
@@ -123,6 +142,8 @@ class Orchestrator:
         self.current_platform_name = ""
         self.applied_today = 0
         self._profile_applied: dict[str, int] = {}
+        self._company_applied: dict[str, int] = {}
+        self._seen_company_title: set[tuple[str, str]] = set()
         # Persistence outage breaker: applying without recording outcomes
         # loses dedupe state and poisons metrics, so a blind run must stop.
         self._persistence_failures = 0
@@ -256,6 +277,8 @@ class Orchestrator:
             account=self.account_key, tz=self.config.schedule.timezone
         )
         self._profile_applied = {}
+        self._company_applied = {}
+        self._seen_company_title = set()
         log.info(
             "run.start",
             mode=self.mode,
@@ -764,8 +787,11 @@ class Orchestrator:
 
         # =========================================================
         # STEP 1.5: Inject API Match Scores (Fast Pre-filter)
+        # Naukri-internal API: only meaningful for Naukri job IDs. Other
+        # platforms' IDs score nothing (fail-open keeps everything) while
+        # burning ~7 minutes per batch — so skip them entirely.
         # =========================================================
-        if self.api_client and collected_jobs:
+        if self.api_client and collected_jobs and platform.platform_name == "naukri":
             ms_cfg = self.config.match_score_prefilter
             log.info("match_score.fetching_batch", count=len(collected_jobs))
             job_ids = [j.job_id.replace("reco-", "") for j in collected_jobs]
@@ -871,6 +897,33 @@ class Orchestrator:
                 job = rjob.job
                 known.add(job.job_id)
 
+                # Per-company daily cap + same-run repost collapse. Reposts
+                # carry different job IDs, so job-level dedupe cannot see
+                # them; company-level accounting can.
+                company_key = _normalize_company(job.company)
+                title_key = _normalize_title(job.title)
+                if self._company_applied.get(company_key, 0) >= self.config.run.max_applications_per_company_per_day:
+                    outcome = ApplyOutcome(
+                        status=ApplicationStatus.SKIPPED,
+                        reason=SkipReason.DAILY_CAP,
+                        detail=f"company daily cap reached ({company_key}, max {self.config.run.max_applications_per_company_per_day}/day)",
+                    )
+                    await self._record(job, profile, outcome, platform.platform_name, rank_score=rjob.score)
+                    log.info("job.company_cap_reached", job_id=job.job_id, company=job.company[:40])
+                    failed_outcomes.append((job, outcome))
+                    continue
+                if (company_key, title_key) in self._seen_company_title:
+                    outcome = ApplyOutcome(
+                        status=ApplicationStatus.SKIPPED,
+                        reason=SkipReason.SEEN_RECENTLY,
+                        detail=f"same company+title already queued this run ({job.company[:40]} / {job.title[:40]})",
+                    )
+                    await self._record(job, profile, outcome, platform.platform_name, rank_score=rjob.score)
+                    log.info("job.repost_collapsed", job_id=job.job_id, company=job.company[:40])
+                    failed_outcomes.append((job, outcome))
+                    continue
+                self._seen_company_title.add((company_key, title_key))
+
                 try:
                     outcome = await self._process_job(
                         job, profile, filters, platform, page, artifacts,
@@ -891,6 +944,7 @@ class Orchestrator:
                     applied_this_profile += 1
                     self.applied_today += 1
                     self._profile_applied[profile.name] = applied_this_profile
+                    self._company_applied[_normalize_company(job.company)] = self._company_applied.get(_normalize_company(job.company), 0) + 1
                     applied_outcomes.append((job, outcome))
                     if job.is_walkin:
                         loc = (job.location or "").lower()

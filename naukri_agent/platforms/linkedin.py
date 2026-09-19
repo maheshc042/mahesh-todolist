@@ -104,6 +104,23 @@ MODAL_CONTAINER_SELECTORS = [
     "button[aria-label*='Dismiss' i]",
 ]
 
+_MONTH_NAMES = (
+    "january", "february", "march", "april", "may", "june",
+    "july", "august", "september", "october", "november", "december",
+)
+
+
+def _looks_like_option_dump(text: str) -> bool:
+    """True when a scraped 'label' is actually the dropdown's option list
+    (Month/Year selects) rather than the question — e.g. the Altraize
+    Month/Year fields whose container text is just months and years."""
+    low = (text or "").lower()
+    if not low:
+        return False
+    months = sum(1 for m in _MONTH_NAMES if m in low)
+    years = len(re.findall(r"\b(?:19|20)\d{2}\b", low))
+    return months >= 2 or years >= 3
+
 
 class LinkedInPlatform(BaseJobPlatform):
     def __init__(
@@ -280,9 +297,10 @@ class LinkedInPlatform(BaseJobPlatform):
 
         # 5. Technical Skills Recognition Across Tracks
         track_keywords = [
-            "python", "fastapi", "django", "llm", "genai", "generative ai", "langchain", "machine learning", "rag", "pytorch", "agent", "nlp", "chatbot",
+            "python", "fastapi", "django", "llm", "genai", "generative ai", "langchain", "machine learning", "rag", "pytorch", "ai agent", "agentic", "nlp", "chatbot",
             "react", "node", "javascript", "typescript", "full stack", "fullstack", "frontend", "backend", "next.js", "express", "postgresql", "mongodb", "rest api",
-            "qa", "testing", "automation", "playwright", "selenium", "pytest", "sdet", "test automation", "manual testing", "api testing",
+            "mean", "mean stack", "mern", "website", "forward deployment", "deployment",
+            "qa", "testing", "automation", "playwright", "selenium", "pytest", "sdet", "tester", "software tester", "test automation", "manual testing", "api testing",
             "aws", "cloud", "docker", "kubernetes", "linux", "devops", "sre", "ci/cd", "terraform",
             "technical support", "application support", "production support", "it support", "l2 support", "troubleshooting", "jira", "incident management"
         ]
@@ -290,6 +308,11 @@ class LinkedInPlatform(BaseJobPlatform):
         matched_skills = [k for k in track_keywords if k in full_text]
         if matched_skills:
             score += min(len(matched_skills) * 2, 20)
+
+        # Quality gate: a generic "engineer" title with zero stack overlap
+        # must not pass on geography alone (was 75+10+5=90 before).
+        if not matched_skills and not matched_target_role:
+            return False, "No candidate-stack overlap in title/JD", 0
 
         is_suitable = score >= 60
         match_info = f"Matched '{matched_target_role}'" if matched_target_role else "Skills aligned"
@@ -331,12 +354,33 @@ class LinkedInPlatform(BaseJobPlatform):
             except Exception:
                 pass
 
-        for _ in range(6):
+        # Scroll until the card count stabilises (lazy-load needs more
+        # than a fixed 6 wheels on dense result pages).
+        _card_sel = (
+            ".jobs-search-results-list li, .scaffold-layout__list-container li, li.jobs-search-results__list-item, "
+            "div.job-card-container, div[data-job-id], div.base-card, div.base-search-card, "
+            "ul.jobs-search__results-list li, div[data-entity-urn*='jobPosting']"
+        )
+        _last_count = -1
+        _stable = 0
+        for _ in range(10):
             try:
                 await self.page.mouse.wheel(0, 700)
                 await human_pause(500, 1000)
-            except Exception:
-                pass
+            except Exception as exc:
+                log.debug("linkedin.fetch.scroll_wheel_failed", error=str(exc))
+            try:
+                _n = await self.page.locator(_card_sel).count()
+            except Exception as exc:
+                log.debug("linkedin.fetch.card_count_failed", error=str(exc))
+                break
+            if _n <= _last_count:
+                _stable += 1
+                if _stable >= 3:
+                    break
+            else:
+                _stable = 0
+            _last_count = _n
 
         card_locators = self.page.locator(
             ".jobs-search-results-list li, .scaffold-layout__list-container li, li.jobs-search-results__list-item, "
@@ -399,6 +443,28 @@ class LinkedInPlatform(BaseJobPlatform):
                 seen_ids.add(job_id)
 
                 card_text = (await safe_text(card)).strip()
+                # Easy Apply signal from the card footer: positive "Easy Apply"
+                # evidence only; a bare "Apply" badge means company-site; no
+                # badge at all stays unknown (never penalized).
+                card_low = card_text.lower()
+                if "easy apply" in card_low:
+                    easy_apply: bool | None = True
+                elif re.search(r"\bapply\b", card_low):
+                    easy_apply = False
+                else:
+                    easy_apply = None
+                # Applicant count straight off the card ("57 applicants" -> 57,
+                # "Over 100 applicants" -> 101, "Be an early applicant" -> 5).
+                applicants: int | None = None
+                m_ap = re.search(r"over\s+(\d+)\s+applicants?", card_text, re.IGNORECASE)
+                if m_ap:
+                    applicants = int(m_ap.group(1)) + 1
+                else:
+                    m_ap = re.search(r"(\d+)\s+applicants?\b", card_text, re.IGNORECASE)
+                    if m_ap:
+                        applicants = int(m_ap.group(1))
+                    elif re.search(r"be an early applicant", card_text, re.IGNORECASE):
+                        applicants = 5
                 min_exp, max_exp = None, None
                 exp_imputed = False
                 exp_match = re.search(r"(\d+(?:\.\d+)?)\s*(?:-|to|\+)\s*(\d+(?:\.\d+)?)?\s*(?:yrs|years|yr)", f"{title} {card_text}", re.IGNORECASE)
@@ -425,6 +491,8 @@ class LinkedInPlatform(BaseJobPlatform):
                     min_experience=min_exp,
                     max_experience=max_exp,
                     experience_imputed=exp_imputed,
+                    applicant_count=applicants,
+                    easy_apply=easy_apply,
                     platform="linkedin",
                 )
                 jobs.append(job)
@@ -550,6 +618,15 @@ class LinkedInPlatform(BaseJobPlatform):
                 log.info("linkedin.fetch.no_new_jobs_done", total=len(jobs))
                 break
 
+        # Observability parity with Cutshort/Instahyre: persist the final
+        # search DOM so empty/stale feeds are debuggable without re-running.
+        try:
+            dump_path = self.artifacts.dir / "linkedin-search-results.html"
+            dump_path.write_text(await self.page.content(), encoding="utf-8")
+            log.info("linkedin.search_results_html_saved", path=str(dump_path))
+        except Exception as exc:
+            log.debug("linkedin.search_results_dump_failed", error=str(exc))
+
         log.info("linkedin.fetch.ready", count=len(jobs))
         return jobs
 
@@ -623,7 +700,10 @@ class LinkedInPlatform(BaseJobPlatform):
             timeout_ms=2500,
         )
         job.description = await safe_text(desc_el)
-        extract_description_metadata(job.description)
+        # Persist form links + recruiter emails (return value was discarded).
+        links, emails = extract_description_metadata(job.description)
+        job.form_links = links
+        job.recruiter_emails = emails
 
         if job.min_experience is None and job.description:
             match = re.search(r"(\d+(?:\.\d+)?)\s*(?:-|to|\+)\s*(\d+(?:\.\d+)?)?\s*(?:yrs|years|yr)", job.description, re.IGNORECASE)
@@ -717,6 +797,8 @@ class LinkedInPlatform(BaseJobPlatform):
             timeout_ms=5000,
         )
         if dismiss_btn:
+            # NOTE: never resolve the modal to the bare Dismiss button
+            # itself — filling inputs scoped to a button silently no-ops.
             modal = self.page.locator(
                 "dialog[open]:has(button[aria-label*='Dismiss' i]), "
                 "dialog:has(button[aria-label*='Dismiss' i]), "
@@ -726,7 +808,15 @@ class LinkedInPlatform(BaseJobPlatform):
                 "div[data-test-modal]:visible, "
                 "div[data-view-name*='easy-apply']:visible"
             ).first
+            try:
+                tag = (await modal.evaluate("el => el.tagName || ''")).strip().upper()
+                if tag == "BUTTON":
+                    modal = None  # fall through to container search below
+            except Exception:
+                pass
         else:
+            modal = None
+        if modal is None:
             modal = await first_visible(
                 self.page,
                 [
@@ -1004,6 +1094,37 @@ class LinkedInPlatform(BaseJobPlatform):
                         label = (await sel.evaluate("el => el.closest('div').innerText")).strip()
                     except Exception:
                         pass
+                if _looks_like_option_dump(label):
+                    # The "label" is the option list itself (Month/Year
+                    # dropdowns) — dig for the real question instead.
+                    label = ""
+                    try:
+                        aria = (await sel.get_attribute("aria-label") or "").strip()
+                    except Exception:
+                        aria = ""
+                    if aria and not _looks_like_option_dump(aria):
+                        label = aria
+                    if not label:
+                        try:
+                            named = (await sel.get_attribute("name") or "").strip()
+                        except Exception:
+                            named = ""
+                        if named:
+                            label = re.sub(r"[_-]+", " ", named).strip()
+                    if not label:
+                        try:
+                            labelledby = (await sel.get_attribute("aria-labelledby") or "").strip().split()
+                            for ref_id in labelledby:
+                                ref_el = modal.locator(f"#{ref_id}").first
+                                if await ref_el.count() > 0:
+                                    ref_text = (await safe_text(ref_el)).strip()
+                                    if ref_text and not _looks_like_option_dump(ref_text):
+                                        label = ref_text
+                                        break
+                        except Exception:
+                            pass
+                    if not label:
+                        log.debug("linkedin.apply.select_label_unknown", options=(await sel.locator("option").all_inner_texts())[:4])
                 label_low = label.lower()
 
                 # Guard against footer language selector
@@ -1454,16 +1575,33 @@ class LinkedInPlatform(BaseJobPlatform):
                             else:
                                 ans = "5" if (max_val and max_val <= 5) else "9"
                         elif "ctc" in label_low or "salary" in label_low or "compensation" in label_low:
-                            if min_val and min_val >= 100:
-                                ans = "650000" if min_val > 10000 else "650"
-                            elif "lakh" in label_low or "lpa" in label_low:
-                                ans = "7"
-                            elif "thousand" in label_low:
-                                ans = "650"
-                            elif any(w in label_low for w in ["inr", "annual", "per year", "per annum", "/year"]):
-                                ans = "650000"
+                            # Config first (expected/current CTC from config.yaml —
+                            # same 4/7 for every job), scaled to the field's unit.
+                            # Only 2 unit types exist: LPA (4/7) and full INR
+                            # (400000/700000). The stale 650000/650 literals never
+                            # matched the config and are gone.
+                            _ctc_res = self.answers.resolve(ScreeningQuestion(text=label, kind="text"))
+                            _ctc_lpa: float | None = None
+                            if _ctc_res and _ctc_res.value:
+                                _m = re.search(r"[-+]?\d*\.?\d+", str(_ctc_res.value))
+                                if _m:
+                                    try:
+                                        _ctc_lpa = float(_m.group(0))
+                                    except ValueError:
+                                        _ctc_lpa = None
+                            if any(w in label_low for w in ["inr", "annual", "per year", "per annum", "/year"]) or (min_val and min_val >= 1000):
+                                _unit = "inr"
+                            elif "thousand" in label_low or (min_val and min_val >= 100):
+                                _unit = "thousands"
                             else:
-                                ans = "650000" if (min_val and min_val > 1000) else "7"
+                                _unit = "lpa"  # lakh/lpa label or LinkedIn India default
+                            _base = _ctc_lpa if _ctc_lpa is not None else 7.0  # expected CTC fallback
+                            if _unit == "inr":
+                                ans = str(int(_base * 100000))
+                            elif _unit == "thousands":
+                                ans = str(int(_base * 100))
+                            else:
+                                ans = str(int(_base)) if float(_base) == int(_base) else str(_base)
                         else:
                             # Skill or general years of experience -> whole integer 2 (respecting max if 1)
                             ans = "1" if (max_val and max_val < 2) else "2"
@@ -1553,10 +1691,29 @@ class LinkedInPlatform(BaseJobPlatform):
                     container = err.locator("xpath=ancestor::div[contains(@class, 'fb-dash-form-element') or contains(@class, 'form__input') or contains(@class, 'jobs-easy-apply-form-element') or @data-test-form-builder-radio-button-form-component][1]").first
                     target_scope = container if await container.count() > 0 else modal
 
-                    # 1. Radio group in error container
+                    # 1. Radio group in error container: resolve via
+                    # AnswerEngine first (blind first-option clicks have
+                    # answered e.g. sponsorship with "Yes" before).
                     radios = await target_scope.locator("input[type='radio']").all()
                     if radios:
-                        first_radio = radios[0]
+                        q_text = (await safe_text(target_scope)).strip()[:250]
+                        opt_texts = []
+                        for _r in radios:
+                            _t = (await safe_text(_r)).strip()
+                            if _t:
+                                opt_texts.append(_t)
+                        picked = None
+                        if q_text:
+                            _res = self.answers.resolve(
+                                ScreeningQuestion(text=q_text, kind="radio", options=opt_texts)
+                            )
+                            if _res and _res.value:
+                                for _r in radios:
+                                    _t = (await safe_text(_r)).strip().lower()
+                                    if _res.value.lower() in _t or _t in _res.value.lower():
+                                        picked = _r
+                                        break
+                        first_radio = picked or radios[0]
                         await first_radio.evaluate("""el => {
                             el.checked = true;
                             el.dispatchEvent(new Event('change', {bubbles: true}));

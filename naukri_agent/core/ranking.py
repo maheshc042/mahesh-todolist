@@ -110,6 +110,7 @@ class ScoreBreakdown:
     position_rank: float = 0.0      # Max 4.0
     salary: float = 0.0             # Max 4.0
     company_rating: float = 0.0     # Max 4.0
+    easy_apply_boost: float = 0.0   # 0.0 normally, -4.0 when company-site only
 
     @property
     def total(self) -> float:
@@ -122,7 +123,8 @@ class ScoreBreakdown:
                 + self.tab_priority
                 + self.position_rank
                 + self.salary
-                + self.company_rating,
+                + self.company_rating
+                + self.easy_apply_boost,
             ),
             2,
         )
@@ -136,6 +138,7 @@ class ScoreBreakdown:
             "position_rank": round(self.position_rank, 2),
             "salary": round(self.salary, 2),
             "company_rating": round(self.company_rating, 2),
+            "easy_apply_boost": round(self.easy_apply_boost, 2),
             "total_score": self.total,
         }
 
@@ -439,6 +442,16 @@ class RankingEngine:
         if rating_reason:
             reasons.append(rating_reason)
 
+        # 8. Easy Apply precedence (demotion only, never a reject): a
+        # confirmed company-site posting sinks below Easy Apply peers so
+        # limited slots go to one-click submits first. Unknown stays neutral.
+        easy_boost = 0.0
+        if job.easy_apply is False:
+            easy_boost = -4.0
+            reasons.append("○ Company-site apply (Easy Apply peers first)")
+        elif job.easy_apply is True:
+            reasons.append("✓ Easy Apply")
+
         breakdown = ScoreBreakdown(
             resume_match=resume_result.score,
             experience_match=exp_score,
@@ -447,6 +460,7 @@ class RankingEngine:
             position_rank=pos_score,
             salary=sal_score,
             company_rating=rating_score,
+            easy_apply_boost=easy_boost,
         )
 
         return breakdown, reasons
@@ -487,16 +501,31 @@ class RankingEngine:
         if days is None:
             # Unknown posting date is not "posted today": neutral partial score
             # with an honest reason instead of full marks.
-            return round(w.freshness_max * 0.5, 2), "○ Posting date unknown"
-        if days == 0:
-            return w.freshness_max, "✓ Posted today"
+            score, reason = round(w.freshness_max * 0.5, 2), "○ Posting date unknown"
+        elif days == 0:
+            score, reason = w.freshness_max, "✓ Posted today"
+        else:
+            decay = _exponential_decay(float(days), w.freshness_decay_lambda)
+            score = round(w.freshness_max * decay, 2)
+            reason = "✓ Posted 1 day ago" if days == 1 else f"✓ Posted {days} days ago"
 
-        decay = _exponential_decay(float(days), w.freshness_decay_lambda)
-        score = round(w.freshness_max * decay, 2)
-
-        if days == 1:
-            return score, "✓ Posted 1 day ago"
-        return score, f"✓ Posted {days} days ago"
+        # Applicant crowding (LinkedIn card counts): a fresh post with 100+
+        # applicants is a lottery ticket, not an opportunity. Soft penalty only
+        # — never a reject; unknown counts never penalize.
+        crowd = job.applicant_count
+        if crowd is not None:
+            if crowd > 100:
+                penalty = 6.0
+            elif crowd > 50:
+                penalty = 3.0
+            elif crowd > 25:
+                penalty = 1.0
+            else:
+                penalty = 0.0
+            if penalty:
+                score = max(0.0, round(score - penalty, 2))
+                reason = f"{reason} ○ {crowd}+ applicants (crowded)" if crowd > 100 else f"{reason} ○ {crowd} applicants"
+        return score, reason
 
     def _score_tab(self, job: Job) -> tuple[float, str]:
         w = self.weights

@@ -127,6 +127,14 @@ class Job:
     min_salary_lpa: float | None = None
     max_salary_lpa: float | None = None
     posted_days_ago: int | None = None
+    # LinkedIn applicant count parsed from the card ("57 applicants" -> 57,
+    # "Over 100 applicants" -> 101, "Be an early applicant" -> 5).
+    # None when the card shows no count: unknown never penalizes.
+    applicant_count: int | None = None
+    # Easy Apply signal (LinkedIn card footer). True only on positive "Easy
+    # Apply" evidence; False on a bare "Apply" badge; None when unknown.
+    # Unknown never penalizes — it only deprioritizes confirmed company-site.
+    easy_apply: bool | None = None
 
     @staticmethod
     def stable_id(url: str, title: str, company: str) -> str:

@@ -342,6 +342,10 @@ class RunConfig(_Model):
     screenshot_on_failure: bool = True
     screenshot_on_success: bool = False
     run_timeout_minutes: int = Field(default=90, ge=1, le=1_440)
+    # Max submits to a single company per run. Five applications to one
+    # employer in ten minutes reads as spam to recruiters and burns slots
+    # better spent across companies. Override in config.yaml under `run:`.
+    max_applications_per_company_per_day: int = Field(default=2, ge=1, le=50)
 
     @model_validator(mode="after")
     def _ordered_delays(self) -> RunConfig:
@@ -503,6 +507,18 @@ class FilterRules(_Model):
     min_rating: float | None = Field(default=None, ge=0, le=5)
     require_easy_apply: bool = True
     skip_walkin: bool = True
+    # --- Centralized experience-policy knobs (single source of truth) ---
+    # Previously hardcoded in core/filters.py across three gates; override any
+    # of these per-profile under `filters:` in config.yaml, e.g.
+    # `dedicated_ai_max_years: 3.0`. Unified platform profiles inherit these.
+    # Pure AI/ML & Data roles above this are skipped (recruiter will reject).
+    dedicated_ai_max_years: float = Field(default=2.0, ge=0, le=50)
+    # QA / DevOps / support / data-developer family roles above this are skipped.
+    junior_family_max_years: float = Field(default=2.0, ge=0, le=50)
+    # Upper end of wide startup bands (e.g. "2-10 years") at or below this is
+    # shortlisted; above it the requisition reads senior. Bands starting above
+    # the 3.5y general ceiling keep a fixed 6.0y net in the engine.
+    max_experience_band_ceiling: float = Field(default=10.0, ge=0, le=50)
 
     @field_validator(
         "title_must_include_any",
@@ -1104,7 +1120,7 @@ class AgentConfig(_Model):
             ],
             experience=ExperienceRange(min_years=0, max_years=3.5),
             min_salary_lpa=5.0,
-            max_posted_days=5,
+            max_posted_days=1,
             require_easy_apply=True,
             skip_walkin=True,
         )
@@ -1154,16 +1170,13 @@ class AgentConfig(_Model):
                         seen_inc.add(t)
                         combined_includes.append(t)
 
-        # Remove any QA/Testing keywords from title includes for engineering candidate
-        combined_includes = [
-            t for t in combined_includes
-            if not any(k in t for k in ("qa", "test", "sdet", "quality", "manual testing"))
-        ]
-
+        # User-first policy: title allowlists come from the base profiles
+        # (which explicitly want QA/testing roles). No per-platform QA strip
+        # here — seniority is guarded by the experience gates, not the title
+        # blocklist (same as LinkedIn/Cutshort/Instahyre: "lead" stays allowed).
         forbidden_tech_and_seniority = {
-            "senior", "sr.", "sr ", "lead", "principal", "staff", "architect", "manager", "director", "head of",
-            "qa", "qa engineer", "sdet", "test engineer", "testing", "manual testing", "automation tester",
-            "quality analyst", "quality engineer", "trainer", "sales", "presales", "pre-sales", "bpo",
+            "principal", "staff", "architect", "manager", "director", "head of",
+            "trainer", "sales", "presales", "pre-sales", "bpo",
             "php", "wordpress", ".net", "dotnet", "dot net", "spring boot", "asp.net", "c#", "c++",
             "golang developer", "golang engineer", "go developer", "go engineer", "java",
             "mainframe", "sap", "salesforce", "drupal", "magento", "engineering manager",

@@ -278,7 +278,7 @@ class AnswerEngine:
         if fuzzy is not None:
             return fuzzy
 
-        log.info("answers.unresolved", question=question.text[:160], kind=question.kind, options=len(question.options))
+        log.info("answers.unresolved", question=question.text[:160], kind=question.kind, options=len(question.options), options_preview=str(question.options[:8])[:300])
         return None
 
     def _resolve_language_proficiency(self, text: str, question: ScreeningQuestion) -> ResolvedAnswer | None:
