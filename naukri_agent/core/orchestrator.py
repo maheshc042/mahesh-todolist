@@ -659,9 +659,20 @@ class Orchestrator:
                 self.api_client = None
             if self.stats.failed and status == RunStatus.SUCCESS:
                 status = RunStatus.PARTIAL
+            # Shutdown writes must never crash the run: if the network/DB died
+            # mid-run (run 359: outage hit during finish_run itself), record the
+            # failure loudly but still notify, print the summary, and exit
+            # cleanly. Per-job outcomes were already persisted when recorded.
             if self.repo is not None and self.run_id is not None:
-                await self.repo.finish_run(self.run_id, status, self.stats, fatal_error)
-            await self._notify(status, fatal_error)
+                try:
+                    await self.repo.finish_run(self.run_id, status, self.stats, fatal_error)
+                except Exception as exc:
+                    log.error("run.finish_run_failed", error=str(exc)[:200])
+                    self.stats.errors.append(f"run summary not persisted: {str(exc)[:120]}")
+            try:
+                await self._notify(status, fatal_error)
+            except Exception as exc:
+                log.error("run.notify_failed", error=str(exc)[:200])
 
             # Print & Log structured Runtime Summary report
             summary_report = self.metrics.generate_report()

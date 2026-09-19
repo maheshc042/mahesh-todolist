@@ -68,22 +68,47 @@ jobs:
       - name: Migrate database schema
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          DB_SCHEMA: ${{ secrets.DB_SCHEMA || 'naukri' }}
           DB_SSL_INSECURE: "true"
           BROWSER_SESSION_SECRET: ${{ secrets.BROWSER_SESSION_SECRET }}
         run: python -m naukri_agent migrate
 
       - name: Run Naukri Agent
         env:
+          # --- Core & Database ---
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          DB_SCHEMA: ${{ secrets.DB_SCHEMA || 'naukri' }}
+          DB_POOL_MIN_SIZE: ${{ secrets.DB_POOL_MIN_SIZE || '1' }}
+          BROWSER_SESSION_SECRET: ${{ secrets.BROWSER_SESSION_SECRET }}
+          DB_SSL_INSECURE: "true"
+          HEADLESS: "true"
+          DEFAULT_ACCOUNT: ${{ secrets.DEFAULT_ACCOUNT || 'primary' }}
+
+          # --- Naukri Accounts ---
           NAUKRI_EMAIL: ${{ secrets.NAUKRI_EMAIL }}
           NAUKRI_PASSWORD: ${{ secrets.NAUKRI_PASSWORD }}
           NAUKRI_EMAIL_2: ${{ secrets.NAUKRI_EMAIL_2 }}
           NAUKRI_PASSWORD_2: ${{ secrets.NAUKRI_PASSWORD_2 }}
-          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+
+          # --- AI Personalized Pitches & Cover Letters ---
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+
+          # --- Cold Email Outreach ---
+          GMAIL_USER: ${{ secrets.GMAIL_USER }}
+          GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
+          MATCHED_OUTREACH_ENABLED: ${{ secrets.MATCHED_OUTREACH_ENABLED || 'true' }}
+
+          # --- Multi-Platform Credentials ---
+          INSTAHYRE_EMAIL: ${{ secrets.INSTAHYRE_EMAIL }}
+          INSTAHYRE_PASSWORD: ${{ secrets.INSTAHYRE_PASSWORD }}
+          CUTSHORT_EMAIL: ${{ secrets.CUTSHORT_EMAIL }}
+          CUTSHORT_PASSWORD: ${{ secrets.CUTSHORT_PASSWORD }}
+          LINKEDIN_EMAIL: ${{ secrets.LINKEDIN_EMAIL }}
+          LINKEDIN_PASSWORD: ${{ secrets.LINKEDIN_PASSWORD }}
+
+          # --- Telegram Alerts ---
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-          HEADLESS: "true"
-          DB_SSL_INSECURE: "true"
-          BROWSER_SESSION_SECRET: ${{ secrets.BROWSER_SESSION_SECRET }}
         run: |
           # If triggered manually, use the input provided by the user
           if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
