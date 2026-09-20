@@ -291,6 +291,22 @@ class InstahyrePlatform(BaseJobPlatform):
         except Exception as exc:
             log.debug("instahyre.search_results_dump_failed", error=str(exc))
 
+        # Self-diagnostic: if NO skill tags are active after the filter pass,
+        # the feed is unfiltered and the plan stage will mass-reject on title
+        # (run 360: 117 scraped, 0 eligible). Loud warning, not silent drift.
+        try:
+            active_tags = await self.page.locator("div.selectize-input div.item").all_inner_texts()
+            active_tags = [t.strip() for t in active_tags if t.strip()]
+        except Exception:
+            active_tags = []
+        if not active_tags:
+            log.warning(
+                "instahyre.filters.skills_missing",
+                detail="No skill tags active after UI filter pass — feed is UNFILTERED, expect mass title rejects downstream",
+            )
+        else:
+            log.info("instahyre.filters.skills_active", count=len(active_tags), tags=active_tags[:18])
+
 
     async def _dismiss_modals(self) -> None:
         """Dismiss popup modals (e.g. 'Are you looking for a job actively?')."""

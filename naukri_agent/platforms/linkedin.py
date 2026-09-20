@@ -443,16 +443,21 @@ class LinkedInPlatform(BaseJobPlatform):
                 seen_ids.add(job_id)
 
                 card_text = (await safe_text(card)).strip()
-                # Easy Apply signal from the card footer: positive "Easy Apply"
-                # evidence only; a bare "Apply" badge means company-site; no
-                # badge at all stays unknown (never penalized).
+                # Easy Apply signal from the card footer. This search always
+                # runs with f_AL=true (Easy Apply filter), so a rendered card
+                # WITHOUT the "Easy Apply" footer contradicts LinkedIn's own
+                # filter and is overwhelmingly a company-site posting: mark it
+                # external so gate 0 rejects it in ~0s instead of burning
+                # ~20s per job at apply time (run 360: 22 externals, 0 applies).
+                # Already-applied cards stay unknown so apply-time classifies
+                # them correctly as ALREADY_APPLIED, not EXTERNAL.
                 card_low = card_text.lower()
                 if "easy apply" in card_low:
                     easy_apply: bool | None = True
-                elif re.search(r"\bapply\b", card_low):
-                    easy_apply = False
-                else:
+                elif re.search(r"\bapplied\b", card_low):
                     easy_apply = None
+                else:
+                    easy_apply = False
                 # Applicant count straight off the card ("57 applicants" -> 57,
                 # "Over 100 applicants" -> 101, "Be an early applicant" -> 5).
                 applicants: int | None = None
@@ -493,6 +498,7 @@ class LinkedInPlatform(BaseJobPlatform):
                     experience_imputed=exp_imputed,
                     applicant_count=applicants,
                     easy_apply=easy_apply,
+                    is_external=(easy_apply is False),
                     platform="linkedin",
                 )
                 jobs.append(job)
