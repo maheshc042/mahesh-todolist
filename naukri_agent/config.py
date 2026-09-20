@@ -147,6 +147,82 @@ class Settings(BaseSettings):
     # tracking pass the Naukri production gates.
     matched_outreach_enabled: bool = False
 
+    @field_validator(
+        "matched_outreach_enabled",
+        "db_ssl_insecure",
+        "log_json",
+        "dry_run",
+        "side_effects_enabled",
+        mode="before",
+    )
+    @classmethod
+    def _coerce_booleans(cls, v: Any) -> bool:
+        if v is None:
+            return False
+        if isinstance(v, bool):
+            return v
+        if isinstance(v, (int, float)):
+            return bool(v)
+        if isinstance(v, str):
+            cleaned = v.strip().strip("'\"")
+            if "=" in cleaned:
+                cleaned = cleaned.split("=", 1)[1].strip().strip("'\"")
+            lower = cleaned.lower()
+            if not lower or lower in ("none", "null", "unset", "undefined"):
+                return False
+            if lower in ("true", "1", "yes", "y", "on", "t", "enable", "enabled"):
+                return True
+            if lower in ("false", "0", "no", "n", "off", "f", "disable", "disabled"):
+                return False
+        return bool(v)
+
+    @field_validator("headless", mode="before")
+    @classmethod
+    def _coerce_headless(cls, v: Any) -> bool | None:
+        if v is None:
+            return None
+        if isinstance(v, str):
+            cleaned = v.strip().strip("'\"").lower()
+            if not cleaned or cleaned in ("none", "null", "unset", "undefined"):
+                return None
+        return cls._coerce_booleans(v)
+
+    @field_validator("db_pool_min_size", mode="before")
+    @classmethod
+    def _coerce_db_pool_min(cls, v: Any) -> int:
+        if v is None:
+            return 1
+        if isinstance(v, str):
+            cleaned = v.strip().strip("'\"")
+            if not cleaned or cleaned.lower() in ("none", "null", "unset"):
+                return 1
+            try:
+                return int(cleaned)
+            except ValueError:
+                return 1
+        try:
+            return int(v)
+        except (ValueError, TypeError):
+            return 1
+
+    @field_validator("db_pool_max_size", mode="before")
+    @classmethod
+    def _coerce_db_pool_max(cls, v: Any) -> int:
+        if v is None:
+            return 5
+        if isinstance(v, str):
+            cleaned = v.strip().strip("'\"")
+            if not cleaned or cleaned.lower() in ("none", "null", "unset"):
+                return 5
+            try:
+                return int(cleaned)
+            except ValueError:
+                return 5
+        try:
+            return int(v)
+        except (ValueError, TypeError):
+            return 5
+
     @field_validator("config_path", "artifacts_dir", "log_dir", "resume_dir")
     @classmethod
     def _absolutise(cls, value: Path) -> Path:

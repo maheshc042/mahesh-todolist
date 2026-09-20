@@ -176,7 +176,12 @@ STRICT INSTRUCTIONS FOR THE EMAIL:
 
         payload = {
             "contents": [{"parts": [{"text": prompt.strip()}]}],
-            "generationConfig": {"temperature": 0.5, "maxOutputTokens": 350},
+            # NOTE (Sep 2026): the pinned preview model is a thinking model —
+            # hidden chain-of-thought consumes the SAME token budget as visible
+            # output. 350 tokens starved every reply to ~11 visible tokens
+            # (finishReason MAX_TOKENS, thoughtsTokenCount ~335). 2048 leaves
+            # room for thought AND the full email. Verified live.
+            "generationConfig": {"temperature": 0.5, "maxOutputTokens": 2048},
         }
         data = json.dumps(payload).encode("utf-8")
         # API key travels in a header, never in the URL query, because
