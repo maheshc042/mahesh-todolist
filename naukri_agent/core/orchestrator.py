@@ -1237,7 +1237,10 @@ class Orchestrator:
                     screenshot_path=outcome.screenshot_path,
                 )
         else:
-            self.stats.bump(profile.name, "filtered_out")
+            # Post-fetch skips (stale cards, company cap, repost collapse,
+            # detail-stage filter fails): bucketed by platform so no outcome
+            # is ever invisible in per-platform stats (run 362 gap).
+            self.stats.bump(profile.name, "filtered_out", platform=platform_name)
 
         try:
             await self.repo.record_outcome(

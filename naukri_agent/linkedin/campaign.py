@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+import random
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -211,6 +212,18 @@ async def run_campaign(
                         break
 
                     clean_email = target_email.strip().lower()
+                    # Role inboxes (info@, careers@, noreply@…) are never read
+                    # by a human — skip before dedupe so they don't burn slots.
+                    # NOTE: hr@ is deliberately KEPT: recruiters hire from it.
+                    local_part = clean_email.split("@")[0] if "@" in clean_email else ""
+                    if local_part in (
+                        "info", "support", "sales", "contact", "help", "admin",
+                        "query", "feedback", "careers", "job", "jobs", "apply",
+                        "application", "noreply", "no-reply", "donotreply",
+                        "do-not-reply", "enquiry", "enquiries",
+                    ):
+                        log.info("linkedin.role_inbox_skipped", email=clean_email)
+                        continue
                     if clean_email in attempted_this_run:
                         continue
                     if await repo.has_emailed(clean_email, within_days=60):
@@ -260,7 +273,12 @@ async def run_campaign(
                                 }
                             )
                             log.info("linkedin.email_sent", to=clean_email, role=role, sent_today=emails_sent_today)
-                            await asyncio.sleep(8.0)
+                            # Human sending rhythm: randomized 30-90s between
+                            # sends so Gmail never sees burst automation.
+                            # (15/day cap keeps total volume safe regardless.)
+                            pace = random.uniform(30.0, 90.0)
+                            log.debug("linkedin.send_pacing", seconds=round(pace, 1))
+                            await asyncio.sleep(pace)
 
             log.info("linkedin.pause_between_searches", seconds=10)
             if not dry_run:

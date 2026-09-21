@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import urllib.error
 import urllib.request
 from dataclasses import dataclass
@@ -44,6 +45,8 @@ class ApplicantSnapshot:
     location: str = "India"
     experience_label: str = "2+ years"
     notice_label: str = "immediate"
+    github: str = ""
+    linkedin: str = ""
 
 
 def _settings_model(explicit: str | None) -> str:
@@ -74,6 +77,12 @@ def _settings_api_key(explicit: str | None) -> str:
     except (ValueError, RuntimeError, OSError) as exc:
         log.debug("gemini.settings_key_unavailable", error=str(exc)[:120])
     return os.getenv("GEMINI_API_KEY", "").strip()
+
+
+def is_immediate_joiner(notice_label: str) -> bool:
+    """True when the configured notice means 'can start right away'."""
+    low = (notice_label or "").strip().lower()
+    return low in ("immediate", "immediate joiner", "0 days", "0 day", "0-days") or low.startswith("0 ")
 
 
 def applicant_snapshot() -> ApplicantSnapshot:
@@ -116,6 +125,8 @@ def applicant_snapshot() -> ApplicantSnapshot:
         location=location,
         experience_label=experience_label,
         notice_label=notice_label,
+        github=(config.applicant_github or "").strip(),
+        linkedin=(config.applicant_linkedin or "").strip(),
     )
 
 
@@ -152,26 +163,45 @@ class GeminiWriter:
         company_name = " ".join(str(company_name or "").splitlines()).strip()[:150]
         job_description = " ".join(str(job_description or "").splitlines()).strip()[:2500]
 
+        links = " ".join(p for p in (who.github, who.linkedin) if p)
+        links_line = f"\n{links}" if links else ""
+        salutation = f"Hi {company_name} Team," if company_name else "Hi there,"
+        if is_immediate_joiner(who.notice_label):
+            availability_line = "I am an immediate joiner and can start right away."
+        else:
+            availability_line = f"My notice period is {who.notice_label}."
         prompt = f"""
-You are {who.name}, a Software Engineer with {who.experience_label} of hands-on experience based in {who.location}.
-You are available to join at {who.notice_label} notice period.
+You are {who.name}, a Software Engineer writing a direct job application email for the "{role_name}" role at "{company_name or 'your company'}".
 
-Write a high-converting cold email to a recruiter for the "{role_name}" role at "{company_name or 'the company'}".
+Applicant Background (true facts, use them):
+- Experience: {who.experience_label} building production software systems
+- Location: {who.location}
+- Notice Period: {who.notice_label} (immediate joiner)
+- Links:{links_line if links_line else " none"}
 
-Job Description Context:
-{job_description[:2500] if job_description else "No description provided."}
+Job Requirements to Target:
+{job_description[:2500] if job_description else "Full-stack software engineering."}
 
-STRICT INSTRUCTIONS FOR THE EMAIL:
-1. Ignore all HR boilerplate, benefits, and "Equal Opportunity" text in the description. Focus ONLY on the core technical requirements.
+CONTEXT THAT DECIDES THE TONE: this is the Indian job market (Naukri/Instahyre norms). The reader is almost always an HR recruiter doing 3-second checklist filtering — stack match, years, notice period, resume — not a tech lead to impress with stories. Nobody oversells themselves here; confidence is quiet and factual. Write for the HR scan first, with one solid proof line the hiring manager will also respect.
+
+RULES FOR THE EMAIL:
+1. Length: 80 to 110 words. Must read fully on a phone screen. No "Hope you are doing well" opener.
 2. Structure:
-   - Salutation & Hook: Start directly with "Hi there," and 1 sentence mentioning the role.
-   - Value: 1-2 sentences strictly highlighting hands-on expertise matching their technical stack.
-   - Immediate Joiner: 1 sentence emphasizing {who.notice_label} availability.
-   - Call to Action: 1 short sentence mentioning the attached resume and welcoming a discussion.
-   - Sign off: "Best regards,\\n{who.name}\\n{who.location}"
-3. Keep the total email strictly under 120 words.
-4. Tone: Confident, direct, professional, and human. DO NOT use overly formal words like "delve", "esteemed", "testament", or "utmost".
-5. Output ONLY the raw email body. No markdown formatting (no **bold**, no *italics*), no subject lines, no placeholders like [Recruiter Name] or [Company Name].
+   - Salutation: "{salutation}"
+   - Hook (1 sentence): experienced engineer applying for the {role_name} role, naming 2-3 of THEIR exact stack terms from the description.
+   - Proof (2 sentences): what you built with those exact tools in production — systems shipped, services maintained, uptime owned. Concrete verbs only.
+   - Availability + CTA (1-2 sentences): {availability_line} Resume attached, request a short intro call this week.
+   - Sign off exactly: "Best regards,\\n{who.name}\\n{who.location}{links_line}"
+3. HUMAN PUNCTUATION (anti-bot rules — a recruiter must believe a person typed this on a phone):
+   - NEVER use em dashes (—), en dashes (–), or dash-joined clauses (-). Use commas and periods. Hyphens stay ONLY inside single technical terms (e.g. full-stack).
+   - NEVER use bullet points or numbered lists. Plain sentences only.
+   - NEVER use colon labels ("Tech Stack:", "Notice Period:"). Write everything as normal sentences.
+4. FORBIDDEN:
+   - Buzzwords: passionate, cutting-edge, synergy, leverage, rockstar, ninja, guru, delve, testament, thrilled, robust, game-changer, world-class, esteemed, utmost.
+   - Sob stories and hustle drama: NEVER mention late nights, 2am debugging, sweat, struggle, sacrifice, or nights. Talk reliability and shipping, never hours worked.
+   - Begging or oversell: no "align with your goals", no "hit the ground running", no "thanking for your time and consideration" paragraph — one plain "Thanks," is enough inside the CTA.
+5. NUMBERS DISCIPLINE: never invent metrics, percentages, user counts, company names, or tools. You may echo scale signals ONLY if written in their description. No proof exists without evidence — stay truthful over punchy, always.
+6. Output ONLY the raw email body. No markdown, no subject lines, no placeholders.
 """
 
         payload = {
@@ -198,7 +228,10 @@ STRICT INSTRUCTIONS FOR THE EMAIL:
         )
 
         try:
-            with urllib.request.urlopen(req, timeout=12) as response:
+            # Thinking models reason before writing: 12s starved most calls
+            # into timeouts on busy hours. 30s comfortably covers thought +
+            # output at 2048 tokens.
+            with urllib.request.urlopen(req, timeout=30) as response:
                 if response.status == 200:
                     resp_json: dict[str, Any] = json.loads(response.read().decode("utf-8"))
                     candidates = resp_json.get("candidates", [])
@@ -212,6 +245,16 @@ STRICT INSTRUCTIONS FOR THE EMAIL:
                                     if line.lower().startswith("subject:"):
                                         continue
                                     clean_lines.append(line.replace("**", "").replace("`", ""))
+                                # Markdown fence bleed: a ```text / ```markdown
+                                # wrapper would otherwise leave the bare word
+                                # "text"/"markdown" as line 1 of the email.
+                                while clean_lines and re.match(
+                                    r"^(text|markdown|email|plain)$",
+                                    clean_lines[0].strip().lower(),
+                                ):
+                                    clean_lines.pop(0)
+                                while clean_lines and not clean_lines[-1].strip():
+                                    clean_lines.pop()
                                 cleaned_text = "\n".join(clean_lines).strip()
                                 log.info(
                                     "gemini.email_generated",

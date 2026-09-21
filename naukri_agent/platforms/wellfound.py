@@ -575,6 +575,13 @@ class WellfoundPlatform(BaseJobPlatform):
         except Exception as exc:
             log.warning("wellfound.fetch.link_audit_failed", error=str(exc)[:150])
 
+        # Fetch-stage drop accounting: answers "129 results but 0 collected"
+        # without re-running. Buckets: already-seen (dedupe), stale (>7d),
+        # off-stack titles, unreadable cards.
+        drop_seen = 0
+        drop_stale = 0
+        drop_blocked: dict[str, int] = {}
+        drop_chrome = 0
         for index, link in enumerate(link_elements, start=1):
             try:
                 url = await link.get_attribute("href") or ""
@@ -582,6 +589,7 @@ class WellfoundPlatform(BaseJobPlatform):
                 if not match:
                     # Feed navigation links (/jobs/home, /jobs/applied) carry
                     # no job id — run 308 persisted one as a "Home" job row.
+                    drop_chrome += 1
                     continue
                 if url.startswith("/"):
                     url = f"https://wellfound.com{url}"
@@ -591,24 +599,30 @@ class WellfoundPlatform(BaseJobPlatform):
                 # already-applied rows in run 308 (33 of them) each cost a
                 # company-xpath lookup, lines scan and regex pass first.
                 if job_id in exclude_job_ids or job_id in seen_job_ids:
+                    drop_seen += 1
                     continue
                 seen_job_ids.add(job_id)
 
                 raw_text = await safe_text(link)
                 lines = [line.strip() for line in raw_text.split("\n") if line.strip()]
                 if not lines:
+                    drop_chrome += 1
                     continue
                 title = _clean_wellfound_title(lines[0])
                 if not title or title.lower() in _CHROME_TITLES:
+                    drop_chrome += 1
                     continue
 
-                # Immediate title pre-filter against blocked keywords (senior, lead, qa, sdet, etc.)
+                # Immediate title pre-filter against off-stack families only
+                # (user-first policy: QA/senior/lead/fresher pass here and are
+                # judged by the allowlist + experience gates instead).
                 block_hit = None
                 for lbl, rgx in _BLOCKED_TITLE_RES:
                     if rgx.search(title):
                         block_hit = lbl
                         break
                 if block_hit:
+                    drop_blocked[block_hit] = drop_blocked.get(block_hit, 0) + 1
                     log.debug("wellfound.fetch.prefilter_blocked", title=title, blocked=block_hit)
                     continue
 
@@ -637,6 +651,7 @@ class WellfoundPlatform(BaseJobPlatform):
 
                 posted_days = _parse_posted_days(raw_text)
                 if posted_days is not None and posted_days > MAX_POSTED_DAYS:
+                    drop_stale += 1
                     continue
 
                 min_exp, max_exp = _parse_card_experience(f"{title} {raw_text}")
@@ -665,7 +680,14 @@ class WellfoundPlatform(BaseJobPlatform):
                 log.debug("wellfound.fetch.parse_error", error=str(exc))
                 continue
 
-        log.info("wellfound.fetch.done", count=len(jobs))
+        log.info(
+            "wellfound.fetch.done",
+            count=len(jobs),
+            drop_seen=drop_seen,
+            drop_stale=drop_stale,
+            drop_chrome=drop_chrome,
+            drop_blocked=drop_blocked,
+        )
         return jobs
 
     async def apply_to_job(

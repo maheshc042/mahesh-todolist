@@ -19,7 +19,7 @@ from pathlib import Path
 
 from ..config import AgentConfig
 from ..logging_setup import get_logger
-from .gemini_writer import GeminiWriter, applicant_snapshot
+from .gemini_writer import GeminiWriter, applicant_snapshot, is_immediate_joiner
 
 log = get_logger(__name__)
 
@@ -75,29 +75,33 @@ class ColdEmailer:
 
         role_low = role_name.lower()
         if "ai" in role_low or "python" in role_low or "ml" in role_low or "llm" in role_low:
-            tech_stack = "Python, FastAPI, GenAI, LLMs, and RAG pipelines"
-            highlights = "building autonomous AI agents, scalable Python backends, and low-latency LLM workflows"
+            stack = "Python, FastAPI, LLMs and RAG pipelines"
+            proof = "I build and maintain production LLM features, chatbot backends, retrieval pipelines and GenAI services."
         else:
-            tech_stack = "React, Node.js, TypeScript, and modern web architectures"
-            highlights = "architecting high-performance full-stack web applications and robust REST/GraphQL APIs"
+            stack = "React, Node.js and TypeScript"
+            proof = "I build and maintain production web apps end to end, React frontends on Node.js APIs."
 
-        config = AgentConfig.load()
         who = applicant_snapshot()
-        name = who.name if who.name != "a Software Engineer" else (config.applicant_name or "").strip()
+        if who.name != "a Software Engineer":
+            name = who.name
+        else:
+            # Config disk read only on the fallback-of-fallback path.
+            name = (AgentConfig.load().applicant_name or "").strip()
+        links = " ".join(p for p in (who.github, who.linkedin) if p)
+        salutation = f"Hi {company_name} Team," if (company_name or "").strip() else "Hi there,"
+        if is_immediate_joiner(who.notice_label):
+            availability = "I am an immediate joiner and can start right away."
+        else:
+            availability = f"My notice period is {who.notice_label}."
 
-        return f"""Hi there,
+        return f"""{salutation}
 
-I came across your recent hiring post for the {role_name} role and would love to be considered.
+I am applying for the {role_name} role. My stack is {stack}, with {who.experience_label} building production systems around them. {proof}
 
-I have {who.experience_label} of hands-on experience specializing in {tech_stack}. In my recent work, I have focused on {highlights}, consistently delivering robust and scalable solutions.
-
-As an immediate joiner ({who.notice_label} notice period), I can hit the ground running with minimal ramp-up time. I have attached my resume for your review and would welcome the opportunity to discuss how my technical expertise aligns with your team's goals.
-
-Thank you for your time and consideration!
-
-Best regards,
+I am based in {who.location}. {availability} Resume attached, please consider a short intro call this week. Thanks,
 {name}
 {who.location}
+{links}
 """
 
     def send_application(
@@ -138,8 +142,22 @@ Best regards,
                 log.warning("mailer.invalid_recipient", to=clean_target[:60])
                 return False
 
+            # Human-style subject: no pipes, no tags, no YOE counters, no
+            # dashes — and the name is ALWAYS present so recruiters can find
+            # the thread later by searching it.
+            try:
+                immediate = is_immediate_joiner(applicant_snapshot().notice_label)
+            except Exception:
+                immediate = False
+            clean_name = " ".join(str(name or "").splitlines()).strip()
+            if immediate and clean_name:
+                subject = f"{clean_role} application, {clean_name} (immediate joiner)"
+            elif clean_name:
+                subject = f"Applying for {clean_role}, {clean_name}"
+            else:
+                subject = f"{clean_role} application"
             msg = EmailMessage()
-            msg["Subject"] = f"Application: {clean_role} - {name}"
+            msg["Subject"] = subject
             msg["From"] = self.sender_email
             msg["To"] = clean_target
 
