@@ -66,6 +66,26 @@ CUTSHORT_UNIFIED_SKILLS: list[str | tuple[str, str]] = list(
 )
 
 
+async def _safe_click(loc) -> bool:
+    """Click-or-JS-click without raising: questionnaire controls are best
+    effort; callers decide what a missed click means."""
+    try:
+        await loc.scroll_into_view_if_needed()
+    except Exception:
+        pass
+    try:
+        await loc.click(force=True, timeout=1000)
+        return True
+    except Exception:
+        pass
+    try:
+        await loc.evaluate("el => el.click()")
+        return True
+    except Exception as exc:
+        log.debug("cutshort.click_failed", error=str(exc)[:80])
+        return False
+
+
 class CutshortChatbot:
     """Handles recruiter screening questions and quick-reply options in Cutshort messages."""
 
@@ -275,6 +295,93 @@ class CutshortChatbot:
                     if not options:
                         options = await fs.locator("div[role='radio'], label, button").all()
                     opt_texts = [(await safe_text(opt)).strip() for opt in options if (await safe_text(opt)).strip()]
+
+                    # Display rows masquerading as questions (run 375: "Resume /
+                    # Work experience / Current company / Current location" with
+                    # a single echo option). Not choices — skip without failing,
+                    # UNLESS an unchecked declaration checkbox needs ticking.
+                    distinct_opts = {o.lower() for o in opt_texts}
+                    if len(distinct_opts) <= 1:
+                        boxes = await fs.locator("input[type='checkbox']").all()
+                        ticked = False
+                        for cb in boxes:
+                            try:
+                                if not await cb.is_visible() or await cb.is_checked():
+                                    continue
+                                cb_low = q_text.lower()
+                                if any(k in cb_low for k in ("declar", "agree", "accept", "confirm", "certify", "consent", "acknowledge", "terms", "policy", "true and correct")):
+                                    try:
+                                        await cb.check(force=True)
+                                    except Exception:
+                                        await _safe_click(cb)
+                                    await human_pause(200, 400)
+                                    log.info("cutshort.chatbot.checked_declaration", question=q_text[:70])
+                                    answered += 1
+                                    ticked = True
+                            except Exception:
+                                continue
+                        if not ticked:
+                            log.debug("cutshort.chatbot.display_row_skipped", question=q_text[:70])
+                        continue
+
+                    # Specialization choice (run 375: Software development vs
+                    # fullstack). Candidate is full-stack first: prefer the
+                    # fullstack option explicitly instead of leaving it to the
+                    # generic resolver, which has no specialization mapping.
+                    if "specializ" in q_text.lower():
+                        _pref = ["fullstack", "full stack", "software development", "backend", "frontend", "ai", "python"]
+                        picked_spec = None
+                        for want in _pref:
+                            for opt in options:
+                                if want in (await safe_text(opt)).strip().lower():
+                                    picked_spec = opt
+                                    break
+                            if picked_spec is not None:
+                                break
+                        if picked_spec is not None:
+                            await _safe_click(picked_spec)
+                            log.info("cutshort.chatbot.answered_specialization", selected=(await safe_text(picked_spec)).strip()[:50])
+                            await human_pause(200, 400)
+                            answered += 1
+                            continue
+
+                    # Salary inputs disguised as degenerate radios (run 375:
+                    # options ['INR','INR'] with current/expected text boxes).
+                    # Fill from configured CTC answers — never fabricated.
+                    if any(k in q_text.lower() for k in ["salary", "ctc", "lacs", "compensation", "drawn salary", "expected salary"]) and (
+                        len(distinct_opts) <= 1 or all(o.lower() in ("inr", "rs", "₹", "lacs", "lpa") for o in opt_texts)
+                    ):
+                        sal_inputs = await fs.locator("input[type='text'], input[type='number'], input:not([type='radio']):not([type='checkbox']):not([type='hidden']):not([type='file']):not([type='submit'])").all()
+                        sal_inputs = [i for i in sal_inputs if await i.is_visible()]
+                        cur_res = self.answers.resolve(ScreeningQuestion(text="current ctc", kind="text", options=[]))
+                        exp_res = self.answers.resolve(ScreeningQuestion(text="expected ctc", kind="text", options=[]))
+                        cur_val = (cur_res.value if cur_res and cur_res.value else "").strip()
+                        exp_val = (exp_res.value if exp_res and exp_res.value else "").strip()
+                        filled = 0
+                        for idx, inp in enumerate(sal_inputs[:2]):
+                            want_val = cur_val if idx == 0 else exp_val
+                            if not want_val:
+                                continue
+                            try:
+                                cur = (await inp.input_value()).strip()
+                                if cur:
+                                    filled += 1
+                                    continue
+                                await inp.scroll_into_view_if_needed()
+                                await inp.fill(want_val)
+                                await human_pause(200, 400)
+                                try:
+                                    await inp.dispatch_event("input")
+                                    await inp.dispatch_event("change")
+                                except Exception:
+                                    pass
+                                log.info("cutshort.chatbot.answered_salary", question=q_text[:60], value=want_val)
+                                filled += 1
+                            except Exception as exc:
+                                log.debug("cutshort.chatbot.salary_fill_failed", error=str(exc))
+                        if filled:
+                            answered += filled
+                            continue
 
                     resolved = self.answers.resolve(ScreeningQuestion(text=q_text, kind="radio", options=opt_texts))
                     target_val = resolved.value if resolved else ""
@@ -909,12 +1016,9 @@ class CutshortPlatform(BaseJobPlatform):
         log.info("cutshort.filters.applied_ui_successfully")
         await human_pause(2000, 3000)
 
-    async def fetch_jobs(self, profile: JobProfile, exclude_job_ids: set[str]) -> list[Job]:
-        log.info("cutshort.fetch.start", profile=profile.name)
-        await self.page.goto("https://cutshort.io/profile/all-jobs", wait_until="domcontentloaded")
-        await human_pause(2000, 3000)
-
-        # Ensure recommendation switch is OFF so all filtered jobs are loaded
+    async def _set_recommendation_switch(self, want_on: bool) -> None:
+        """Set the All-jobs recommendation switch ON (curated feed) or OFF
+        (full inventory). Best-effort: a missing switch leaves the view as-is."""
         switch_el = await first_visible(
             self.page,
             [
@@ -924,38 +1028,40 @@ class CutshortPlatform(BaseJobPlatform):
             ],
             timeout_ms=3000,
         )
-        if switch_el:
+        if not switch_el:
+            return
+        try:
+            is_checked = await switch_el.is_checked()
+        except Exception:
+            is_checked = True
+        if is_checked == want_on:
+            return
+        try:
+            await switch_el.scroll_into_view_if_needed()
+            await human_pause(300, 600)
             try:
-                is_checked = await switch_el.is_checked()
+                await switch_el.click(force=True)
             except Exception:
-                is_checked = True
-            if is_checked:
-                await switch_el.scroll_into_view_if_needed()
-                await human_pause(300, 600)
-                try:
-                    await switch_el.click(force=True)
-                except Exception:
-                    await switch_el.evaluate("el => el.click()")
-                await human_pause(2000, 3000)
+                await switch_el.evaluate("el => el.click()")
+            await human_pause(2000, 3000)
+        except Exception as exc:
+            log.debug("cutshort.switch_toggle_failed", want_on=want_on, error=str(exc))
 
-        await self._apply_ui_filters(profile)
-
-        job_link_sel = "a[href*='/job/']"
-
-        # Infinite scroll to fetch available jobs in the feed
+    async def _scroll_feed(self, job_link_sel: str, target_pool: int, tab_name: str):
+        """Infinite-scroll the current feed view until the pool target or a
+        stagnant end-of-feed. Returns the collected link anchors."""
         last_link_count = 0
         stagnant_scrolls = 0
-        target_pool = max(100, min(profile.platform_limits.get(self.platform_name, 40) * 3, 150))
         while True:
             anchors = await self.page.locator(job_link_sel).all()
             link_count = len(anchors)
             if link_count >= target_pool:
-                log.info("cutshort.fetch.target_pool_reached", count=link_count, target=target_pool)
+                log.info("cutshort.fetch.target_pool_reached", tab=tab_name, count=link_count, target=target_pool)
                 break
             if link_count == last_link_count:
                 stagnant_scrolls += 1
                 if stagnant_scrolls >= 5:
-                    log.info("cutshort.fetch.stagnant_end_of_feed", count=link_count)
+                    log.info("cutshort.fetch.stagnant_end_of_feed", tab=tab_name, count=link_count)
                     break
                 # Scroll up slightly and then back down to kick intersection observer
                 try:
@@ -982,20 +1088,21 @@ class CutshortPlatform(BaseJobPlatform):
             await scroll_page(self.page, steps=4, delay_s=0.5)
             await human_pause(1500, 2500)
 
-        # Dump AFTER scrolling so the artifact reflects what was actually parsed
-        try:
-            dump_path = self.artifacts.dir / "cutshort-dashboard.html"
-            dump_path.write_text(await self.page.content(), encoding="utf-8")
-            log.info("cutshort.dashboard_html_saved", path=str(dump_path))
-        except Exception as exc:
-            log.debug("cutshort.dashboard_dump_failed", error=str(exc))
-
         anchors = await self.page.locator(job_link_sel).all()
-        jobs: list[Job] = []
-        seen_urls: set[str] = set()
+        log.info("cutshort.fetch.cards_found", tab=tab_name, count=len(anchors))
+        return anchors
 
-        log.info("cutshort.fetch.cards_found", count=len(anchors))
-
+    async def _parse_feed_anchors(
+        self,
+        anchors,
+        tab_name: str,
+        exclude_job_ids: set[str],
+        seen_urls: set[str],
+        jobs: list[Job],
+    ) -> None:
+        """Parse job cards from scrolled anchors into Job objects (shared by
+        the recommended pass and the all-jobs pass). Appends in place so the
+        recommended pass keeps global positions 1..N."""
         for anchor in anchors:
             try:
                 url = (await anchor.get_attribute("href")) or ""
@@ -1063,7 +1170,7 @@ class CutshortPlatform(BaseJobPlatform):
                         min_experience=min_exp,
                         max_experience=max_exp,
                         posted_days_ago=posted_days,
-                        recommendation_tab="default" if profile.use_recommended else "all_jobs",
+                        recommendation_tab=tab_name,
                         recommendation_position=len(jobs) + 1,
                         platform="cutshort",
                     )
@@ -1071,6 +1178,38 @@ class CutshortPlatform(BaseJobPlatform):
             except Exception as exc:
                 log.debug("cutshort.fetch.parse_error", error=str(exc))
                 continue
+
+    async def fetch_jobs(self, profile: JobProfile, exclude_job_ids: set[str]) -> list[Job]:
+        log.info("cutshort.fetch.start", profile=profile.name)
+        await self.page.goto("https://cutshort.io/profile/all-jobs", wait_until="domcontentloaded")
+        await human_pause(2000, 3000)
+
+        job_link_sel = "a[href*='/job/']"
+        jobs: list[Job] = []
+        seen_urls: set[str] = set()
+
+        # PASS 1 — recommended feed first (switch ON): Cutshort's own
+        # "recently active" curation outranks the raw grid. Bounded small.
+        await self._set_recommendation_switch(True)
+        await human_pause(1000, 2000)
+        reco_anchors = await self._scroll_feed(job_link_sel, 50, "recommended")
+        await self._parse_feed_anchors(reco_anchors, "recommended", exclude_job_ids, seen_urls, jobs)
+        log.info("cutshort.fetch.recommended_done", count=len(jobs))
+
+        # PASS 2 — full inventory overflow (switch OFF) + native UI filters.
+        await self._set_recommendation_switch(False)
+        await self._apply_ui_filters(profile)
+        target_pool = max(100, min(profile.platform_limits.get(self.platform_name, 40) * 3, 150))
+        all_anchors = await self._scroll_feed(job_link_sel, target_pool, "all_jobs")
+        await self._parse_feed_anchors(all_anchors, "all_jobs", exclude_job_ids, seen_urls, jobs)
+
+        # Dump AFTER scrolling so the artifact reflects what was actually parsed
+        try:
+            dump_path = self.artifacts.dir / "cutshort-dashboard.html"
+            dump_path.write_text(await self.page.content(), encoding="utf-8")
+            log.info("cutshort.dashboard_html_saved", path=str(dump_path))
+        except Exception as exc:
+            log.debug("cutshort.dashboard_dump_failed", error=str(exc))
 
         log.info("cutshort.fetch.done", count=len(jobs))
         return jobs

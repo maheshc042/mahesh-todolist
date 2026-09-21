@@ -80,6 +80,10 @@ DISJOINT_SPECIALIZATIONS = (
     # does not make it a software role (e.g. "Embedded Software Engineer").
     "embedded", "embedded systems", "firmware", "vlsi", "hardware",
     "mechanical", "electrical", "civil",
+    # Non-software QA professions: lab/food testing shares only the "QA"
+    # letters (run 368 applied to a "QA Executive - Microbiologist" food-lab
+    # role). Surgical tokens — healthcare-IT (HL7, informatics) stays eligible.
+    "microbiologist", "microbiology",
 )
 
 # Hybrid AI titles: full-stack/software markers that promote an AI-titled

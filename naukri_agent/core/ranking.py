@@ -533,6 +533,7 @@ class RankingEngine:
         tab_multipliers = {
             RecommendationTab.PROFILE: 1.0,
             RecommendationTab.TOP_CANDIDATE: 0.85,
+            RecommendationTab.RECOMMENDED: 0.85,
             RecommendationTab.APPLIES: 0.70,
             RecommendationTab.PREFERENCES: 0.55,
             RecommendationTab.YOU_MIGHT_LIKE: 0.40,
@@ -546,6 +547,8 @@ class RankingEngine:
             return score, "✓ High-priority profile recommendation"
         if tab_enum == RecommendationTab.TOP_CANDIDATE:
             return score, "✓ Top candidate feed match"
+        if tab_enum == RecommendationTab.RECOMMENDED:
+            return score, "✓ Curated recommendation — platform-flagged fit"
         return score, "✓ Recommended feed match"
 
     def _score_position(self, job: Job) -> tuple[float, str]:

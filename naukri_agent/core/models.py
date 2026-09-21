@@ -33,6 +33,7 @@ class RecommendationTab(str, Enum):
     APPLIES = "applies"
     PREFERENCES = "preferences"
     YOU_MIGHT_LIKE = "you_might_like"
+    RECOMMENDED = "recommended"
     OTHER = "other"
 
     @classmethod
@@ -48,6 +49,8 @@ class RecommendationTab(str, Enum):
             return cls.PREFERENCES
         if "might like" in low or "you might" in low:
             return cls.YOU_MIGHT_LIKE
+        if "recommend" in low:
+            return cls.RECOMMENDED
         if "default" in low or not low:
             return cls.DEFAULT
         return cls.OTHER

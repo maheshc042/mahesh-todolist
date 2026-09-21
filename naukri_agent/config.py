@@ -969,7 +969,7 @@ class AgentConfig(_Model):
         forbidden_tech_and_seniority = {
             "principal", "staff", "architect", "manager", "trainer", "sales", "presales", "pre-sales", "bpo",
             "php", "wordpress", ".net", "dotnet", "dot net", "spring boot", "asp.net", "c#", "c++",
-            "golang developer", "golang engineer", "go developer", "go engineer", "java",
+            "golang", "golang developer", "golang engineer", "go developer", "go engineer", "java",
             "mainframe", "sap", "salesforce", "drupal", "magento", "engineering manager",
             "project manager", "product manager", "general manager", "solution architect",
             "enterprise architect", "tech architect", "technical architect", "sr. manager",
@@ -1067,7 +1067,7 @@ class AgentConfig(_Model):
         forbidden_tech_and_seniority = {
             "principal", "staff", "architect", "manager", "trainer", "sales", "presales", "pre-sales", "bpo",
             "php", "wordpress", ".net", "dotnet", "dot net", "spring boot", "asp.net", "c#", "c++",
-            "golang developer", "golang engineer", "go developer", "go engineer", "java",
+            "golang", "golang developer", "golang engineer", "go developer", "go engineer", "java",
             "mainframe", "sap", "salesforce", "drupal", "magento", "engineering manager",
             "project manager", "product manager", "general manager", "solution architect",
             "enterprise architect", "tech architect", "technical architect", "sr. manager",
@@ -1162,7 +1162,7 @@ class AgentConfig(_Model):
         forbidden_tech_and_seniority = {
             "principal", "staff", "architect", "manager", "trainer", "sales", "presales", "pre-sales", "bpo",
             "php", "wordpress", ".net", "dotnet", "dot net", "spring boot", "asp.net", "c#", "c++",
-            "golang developer", "golang engineer", "go developer", "go engineer", "java",
+            "golang", "golang developer", "golang engineer", "go developer", "go engineer", "java",
             "mainframe", "sap", "salesforce", "drupal", "magento", "engineering manager",
             "project manager", "product manager", "general manager", "solution architect",
             "enterprise architect", "tech architect", "technical architect", "sr. manager",
@@ -1257,7 +1257,7 @@ class AgentConfig(_Model):
             "principal", "staff", "architect", "manager", "director", "head of",
             "trainer", "sales", "presales", "pre-sales", "bpo",
             "php", "wordpress", ".net", "dotnet", "dot net", "spring boot", "asp.net", "c#", "c++",
-            "golang developer", "golang engineer", "go developer", "go engineer", "java",
+            "golang", "golang developer", "golang engineer", "go developer", "go engineer", "java",
             "mainframe", "sap", "salesforce", "drupal", "magento", "engineering manager",
             "project manager", "product manager", "general manager", "solution architect",
             "enterprise architect", "tech architect", "technical architect", "sr. manager",

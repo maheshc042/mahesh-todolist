@@ -470,6 +470,38 @@ class LinkedInPlatform(BaseJobPlatform):
                         applicants = int(m_ap.group(1))
                     elif re.search(r"be an early applicant", card_text, re.IGNORECASE):
                         applicants = 5
+                # Posted age straight off the card ("3 days ago" -> 3). Without
+                # this the 24h plan gate can never fire (unknown never rejects)
+                # and stale jobs sail to apply time — the exact leak behind the
+                # 3-day-old 100+ applicant jobs. None when unstated: unknown
+                # still never rejects.
+                posted_days: int | None = None
+                card_age = f"{title} {card_text}".lower()
+                if re.search(r"\bjust now\b|few minutes|seconds? ago|today\b", card_age):
+                    posted_days = 0
+                elif "yesterday" in card_age:
+                    posted_days = 1
+                else:
+                    # "ago" anchor is mandatory: without it an experience range
+                    # ("3-5 years") misreads as a posted age. LinkedIn always
+                    # renders card dates as relative ("3 days ago").
+                    m_age = re.search(
+                        r"(\d+)\s*(hours?|hrs?|h|days?|d|weeks?|w|months?|mos?|years?|y)\s+ago\b",
+                        card_age,
+                    )
+                    if m_age:
+                        n = int(m_age.group(1))
+                        unit = m_age.group(2).lower()
+                        if unit.startswith("h"):
+                            posted_days = 0
+                        elif unit.startswith("w"):
+                            posted_days = n * 7
+                        elif unit.startswith("mo"):
+                            posted_days = n * 30
+                        elif unit.startswith("y"):
+                            posted_days = n * 365
+                        else:
+                            posted_days = n
                 min_exp, max_exp = None, None
                 exp_imputed = False
                 exp_match = re.search(r"(\d+(?:\.\d+)?)\s*(?:-|to|\+)\s*(\d+(?:\.\d+)?)?\s*(?:yrs|years|yr)", f"{title} {card_text}", re.IGNORECASE)
@@ -498,7 +530,7 @@ class LinkedInPlatform(BaseJobPlatform):
                     experience_imputed=exp_imputed,
                     applicant_count=applicants,
                     easy_apply=easy_apply,
-                    is_external=(easy_apply is False),
+                    posted_days_ago=posted_days,
                     platform="linkedin",
                 )
                 jobs.append(job)
