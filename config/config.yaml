@@ -38,7 +38,17 @@ linkedin:
   days: 1
 
 instahyre:
+  # Feed pages to scrape: skill-filtered search is relevance-ordered (decay,
+  # not cliff). Eligible jobs were observed on page 3 itself, so 5 keeps a
+  # 2-page margin past the last proven zone at ~25s/page. Ranked-plan CSVs
+  # carry per-job page tabs — tighten further only if they prove pages 4-5
+  # barren over several runs.
+  max_pages: 5
+  # Instahyre enforces MAX 15 skill tags: anything past #15 is silently
+  # ignored (run 366: 15 active, 16th missing with zero warning). Keep this
+  # list at exactly 15, most important first. Code truncates + warns on more.
   skills:
+    - "SDET"
     - "Python"
     - "Node.js"
     - "React.js"
@@ -46,14 +56,13 @@ instahyre:
     - "FastAPI"
     - "Next.js"
     - "Generative AI"
-    - "LLMs"
     - "JavaScript"
     - "LangChain"
     - "LangGraph"
     - "MLOps"
-    - "MCP"
     - "AWS Bedrock"
-    - "Hugging Face"
+    - "API Testing"
+    - "Quality Assurance"
   experience_years: 2
 
 browser:

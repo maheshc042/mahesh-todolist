@@ -816,6 +816,7 @@ class LinkedInConfig(_Model):
 class InstahyreConfig(_Model):
     skills: list[str] = Field(
         default_factory=lambda: [
+            "SDET",
             "Python",
             "Node.js",
             "React.js",
@@ -823,17 +824,19 @@ class InstahyreConfig(_Model):
             "FastAPI",
             "Next.js",
             "Generative AI",
-            "LLMs",
             "JavaScript",
             "LangChain",
             "LangGraph",
             "MLOps",
-            "MCP",
             "AWS Bedrock",
-            "Hugging Face",
+            "API Testing",
+            "Quality Assurance",
         ]
     )
     experience_years: int = Field(default=2, ge=0, le=30)
+    # Skill-filtered search is relevance-ordered (decay, not cliff). 5 keeps
+    # a 2-page margin past page 3, the last page with observed eligible jobs.
+    max_pages: int = Field(default=5, ge=1, le=20)
 
 
 
