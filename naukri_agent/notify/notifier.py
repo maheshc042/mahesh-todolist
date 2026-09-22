@@ -145,6 +145,7 @@ def format_run_summary(
         f"  • Total Scraped     : {stats.scraped}",
         f"  • Jobs Considered   : {stats.considered}",
         f"  • Filtered Out      : {stats.filtered_out}",
+        f"  • 🧹 Plan Rejected (pre-apply): {stats.plan_rejected}",
         f"  • ✅ APPLIED        : {stats.applied}",
         f"  • 🔄 Already Applied: {stats.already_applied}",
         f"  • 🔗 External Links : {stats.external}",

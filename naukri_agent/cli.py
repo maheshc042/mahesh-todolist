@@ -196,6 +196,7 @@ def _print_stats(account: str, stats) -> None:
         "scraped",
         "considered",
         "filtered_out",
+        "plan_rejected",
         "applied",
         "already_applied",
         "external",

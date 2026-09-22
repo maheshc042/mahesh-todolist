@@ -309,9 +309,12 @@ class LinkedInPlatform(BaseJobPlatform):
         if matched_skills:
             score += min(len(matched_skills) * 2, 20)
 
-        # Quality gate: a generic "engineer" title with zero stack overlap
-        # must not pass on geography alone (was 75+10+5=90 before).
-        if not matched_skills and not matched_target_role:
+        # Quality gate: a title with zero candidate-stack overlap must not
+        # pass on role-name + geography alone (was 75+10+5=90 before for a
+        # bare "Software Engineer"). Mirrors Naukri's broad-title gate in
+        # core/filters.py — run 377 applied five stacking-empty generic SWEs
+        # plus an automotive High-Integrity role on title alone.
+        if not matched_skills:
             return False, "No candidate-stack overlap in title/JD", 0
 
         is_suitable = score >= 60

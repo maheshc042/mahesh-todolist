@@ -213,6 +213,10 @@ class RunStats:
     scraped: int = 0
     considered: int = 0
     filtered_out: int = 0
+    # Plan-level hard rejects (title/experience/score gates inside
+    # ApplicationPlanner). These jobs never reach _process_job, so without
+    # this counter Telegram under-reports filtering ~5x. Informational only.
+    plan_rejected: int = 0
     applied: int = 0
     failed: int = 0
     external: int = 0
@@ -244,6 +248,7 @@ class RunStats:
             "scraped": self.scraped,
             "considered": self.considered,
             "filtered_out": self.filtered_out,
+            "plan_rejected": self.plan_rejected,
             "applied": self.applied,
             "failed": self.failed,
             "external": self.external,

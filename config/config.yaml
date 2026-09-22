@@ -397,11 +397,15 @@ experience:
     .net: 0
     dotnet: 0
     dot net: 0
-    java: 1
-    spring: 1
-    spring boot: 1
-    spring framework: 1
-    hibernate: 1
+    # Java ecosystem stays 0: the resume claims no Java/Spring, and the
+    # explicit answers above already say 0. A nonzero map here would let
+    # unlisted-variant questions ("years in Hibernate?") answer 1 against
+    # the resume — never inflate tenure recruiters cross-check.
+    java: 0
+    spring: 0
+    spring boot: 0
+    spring framework: 0
+    hibernate: 0
     # AI / Python track: 2 years hands-on. Recruiters cross-check these
     # against the resume, so anything outside this list falls back to
     # default_years (1) — honest for new tools, never inflated.

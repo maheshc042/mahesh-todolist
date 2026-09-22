@@ -34,6 +34,11 @@ def _normalise_str(text: str) -> str:
     """Normalize string and unify tech synonyms like Dot Net / .NET / dot.net -> dotnet, reactjs -> react, nodejs -> node."""
     low = (text or "").lower()
     low = re.sub(r"\bdot[\s.-]?net\b|(?<!\w)\.net\b", "dotnet", low)
+    # Dotnet-family frameworks share one hiring pool: a Blazor / Razor /
+    # ASP.NET requisition rejects a 0-dotnet resume as fast as ".NET" itself
+    # (run 377 applied to a Blazor senior role). One family rule here beats a
+    # 1M-term title blocklist — both haystack and needles flow through this.
+    low = re.sub(r"\bblazor\b|\brazor\b|\basp[\s.-]?net\b|\bmaui\b|\bxamarin\b", "dotnet", low)
     low = re.sub(r"\breact[\s.-]?js\b", "react", low)
     low = re.sub(r"\bnode[\s.-]?js\b", "node", low)
     low = re.sub(r"\bnext[\s.-]?js\b", "next", low)

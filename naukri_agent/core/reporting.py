@@ -29,9 +29,15 @@ class ReportExporter:
         self.output_dir.mkdir(parents=True, exist_ok=True)
 
     def _names(self, base: str, platform: str = "") -> Path:
-        """Per-platform filenames so phases stop overwriting each other."""
+        """Per-platform filenames so phases stop overwriting each other.
+
+        Prefixed with the run id so consecutive runs stop clobbering each
+        other's forensics (run 377's plan CSVs were lost to run 359's files).
+        """
         slug = "".join(ch if ch.isalnum() else "_" for ch in (platform or "").lower()).strip("_")
-        return self.output_dir / (f"{slug}_{base}" if slug else base)
+        run_prefix = f"run{self.run_id}_" if self.run_id not in (None, "") else ""
+        stem = f"{slug}_{base}" if slug else base
+        return self.output_dir / f"{run_prefix}{stem}"
 
     def export_plan_reports(self, plan: ApplicationPlan, collected_jobs: list[Job], profile_name: str = "", platform: str = "") -> None:
         try:

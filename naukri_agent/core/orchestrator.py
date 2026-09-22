@@ -903,6 +903,10 @@ class Orchestrator:
 
         # Step 4: Print Concise Summary & Full Application Plan Report
         s = plan.stats
+        # Product observability: plan-level rejects never reach _process_job,
+        # so without this counter the run summary under-reports filtering ~5x
+        # (run 377 showed 7 vs ~357 actual). Informational only; no gating.
+        self.stats.bump(profile.name, "plan_rejected", s.rejected_count, platform=platform.platform_name)
         report_text = plan.generate_report()
         log.info(
             "plan.summary",

@@ -76,6 +76,26 @@ class TestFilterEngine(unittest.TestCase):
             decision = engine.evaluate_card(job)
             self.assertFalse(decision.passed, f"{blocked_title} should have been blocked!")
 
+    def test_dotnet_family_blocks(self):
+        """Dotnet-family frameworks (Blazor/Razor/ASP.NET) must hit the same
+        block as '.NET' — run 377 applied to a Blazor senior role."""
+        engine = FilterEngine(self.fs_profile.filters_for("recommended"))
+        for blocked_title in [
+            "Senior Software Engineer - Blazor",
+            "Backend Developer (ASP.NET Core)",
+            "Software Engineer - Razor Components",
+        ]:
+            job = Job(
+                job_id=f"test-dotnet-{blocked_title}",
+                title=blocked_title,
+                company="Block Corp",
+                location="Bengaluru",
+                url="http://test.com",
+                platform="naukri",
+            )
+            decision = engine.evaluate_card(job)
+            self.assertFalse(decision.passed, f"{blocked_title} should have been blocked!")
+
 
 class TestLinkedInPlatform(unittest.TestCase):
     def setUp(self):
@@ -85,21 +105,51 @@ class TestLinkedInPlatform(unittest.TestCase):
         )
 
     def test_default_and_config_days(self):
-        """LinkedIn platform should default to 3 days from config or init."""
-        self.assertEqual(self.platform.days, 3)
+        """LinkedIn platform should default to 1 day (24h freshness) from config."""
+        self.assertEqual(self.platform.days, 1)
 
     def test_search_url_freshness_parameter(self):
-        """Verify search URLs contain f_TPR=r259200 (3 days) and f_TPR=r604800 (7 days)."""
+        """Verify search URLs contain f_TPR=r86400 (1 day default) and f_TPR=r604800 (7 days)."""
         ai_prof = next(p for p in self.cfg.profiles if "AI" in p.name)
         fs_prof = next(p for p in self.cfg.profiles if "Full Stack" in p.name)
 
-        url_3d = self.platform._get_search_url(ai_prof)
-        self.assertIn("f_TPR=r259200", url_3d)
-        self.assertIn("f_AL=true", url_3d)
-        self.assertIn("f_E=2%2C3", url_3d)
+        url_1d = self.platform._get_search_url(ai_prof)
+        self.assertIn("f_TPR=r86400", url_1d)
+        self.assertIn("f_AL=true", url_1d)
+        self.assertIn("f_E=2%2C3", url_1d)
 
         url_7d = self.platform._get_search_url(fs_prof, days=7)
         self.assertIn("f_TPR=r604800", url_7d)
+
+    def test_suitability_requires_stack_overlap(self):
+        """A bare 'Software Engineer' title with zero candidate-stack overlap
+        must be rejected even though the role name matches (run 377 filler)."""
+        from naukri_agent.core.models import Job
+
+        bare = Job(
+            job_id="test-bare-swe",
+            title="Software Engineer",
+            company="Generic Corp",
+            url="https://www.linkedin.com/jobs/view/1/",
+            location="India (Remote)",
+            description="We are looking for a great engineer to join our team.",
+            platform="linkedin",
+        )
+        suitable, _, _ = self.platform.evaluate_job_suitability(bare)
+        self.assertFalse(suitable, "stack-empty generic title should be rejected")
+
+        stacked = Job(
+            job_id="test-stacked-swe",
+            title="Software Engineer",
+            company="Stack Corp",
+            url="https://www.linkedin.com/jobs/view/2/",
+            location="India (Remote)",
+            description="Build backend services with Python, FastAPI and PostgreSQL. REST APIs on AWS.",
+            platform="linkedin",
+        )
+        suitable, _, score = self.platform.evaluate_job_suitability(stacked)
+        self.assertTrue(suitable, "stack-matching title should pass")
+        self.assertGreaterEqual(score, 60)
 
 
 class TestNaukriChatbotFuzzyMatching(unittest.TestCase):
@@ -125,10 +175,10 @@ class TestInstahyreUnifiedConfiguration(unittest.TestCase):
     def test_instahyre_search_skills_and_exp(self):
         """Instahyre configuration must contain the exact 15 skills and 2 years experience."""
         expected_skills = [
-            "Python", "Node.js", "React.js", "TypeScript", "FastAPI",
-            "Next.js", "Generative AI", "LLMs", "JavaScript",
-            "LangChain", "LangGraph", "MLOps", "MCP", "AWS Bedrock",
-            "Hugging Face",
+            "SDET", "Python", "Node.js", "React.js", "TypeScript",
+            "FastAPI", "Next.js", "Generative AI", "JavaScript",
+            "LangChain", "LangGraph", "MLOps", "AWS Bedrock",
+            "API Testing", "Quality Assurance",
         ]
         self.assertEqual(self.cfg.instahyre.skills, expected_skills)
         self.assertEqual(self.cfg.instahyre.experience_years, 2)
