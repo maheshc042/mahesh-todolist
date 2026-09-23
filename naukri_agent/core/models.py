@@ -285,7 +285,7 @@ def extract_description_metadata(description_or_job: str | Any) -> tuple[list[st
     clean_links = list(dict.fromkeys(form_links))
 
     raw_emails = re.findall(r"([a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+)", description)
-    ignored_prefixes = ("info@", "support@", "sales@", "contact@", "help@", "admin@", "query@", "feedback@")
+    ignored_prefixes = ("info@", "support@", "sales@", "contact@", "help@", "admin@", "query@", "feedback@", "hrintern@", "careers@", "jobs@")
     valid_emails = [
         e.lower().strip(".")
         for e in raw_emails

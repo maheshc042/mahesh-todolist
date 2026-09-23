@@ -122,6 +122,43 @@ class TestFilterEngine(unittest.TestCase):
             )
 
 
+    def test_creative_roles_blocked(self):
+        """Graphics/game/creator roles hire portfolios, not engineering tenure
+        (run 391 applied to a 2d/3d senior role and an AI Artist posting)."""
+        for prof in (self.fs_profile, self.ai_profile):
+            engine = FilterEngine(prof.filters_for("recommended"))
+            for blocked_title in [
+                "Software Developer 2d/3d - Senior",
+                "AI Artist",
+                "Unity Developer",
+            ]:
+                job = Job(
+                    job_id=f"test-creative-{blocked_title}",
+                    title=blocked_title,
+                    company="Block Corp",
+                    location="Bengaluru",
+                    url="http://test.com",
+                    platform="naukri",
+                )
+                decision = engine.evaluate_card(job)
+                self.assertFalse(
+                    decision.passed,
+                    f"{prof.name}: {blocked_title} should have been blocked!",
+                )
+
+
+class TestDescriptionMetadata(unittest.TestCase):
+    def test_generic_intake_inboxes_ignored(self):
+        """hrintern/careers/jobs inboxes never convert; named recruiters pass."""
+        from naukri_agent.core.models import extract_description_metadata
+
+        links, emails = extract_description_metadata(
+            "Apply now. Contact hrintern@corp.com or careers@corp.com or "
+            "jobs@corp.com. Recruiter: pooja.roy@esolglobal.com"
+        )
+        self.assertEqual(emails, ["pooja.roy@esolglobal.com"])
+
+
 class TestRunSummary(unittest.TestCase):
     def test_platform_only_breakdown_with_forensics(self):
         """Summary shows per-platform (never per-profile) lines carrying

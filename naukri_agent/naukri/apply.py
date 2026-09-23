@@ -117,7 +117,7 @@ class ApplyEngine:
             # Extract Recruiter Emails
             raw_emails = re.findall(r"([a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+)", description)
             if raw_emails:
-                ignored_prefixes = ("info@", "support@", "sales@", "contact@", "help@", "admin@", "query@", "feedback@")
+                ignored_prefixes = ("info@", "support@", "sales@", "contact@", "help@", "admin@", "query@", "feedback@", "hrintern@", "careers@", "jobs@")
                 valid_emails = [
                     e.lower().strip(".")
                     for e in raw_emails

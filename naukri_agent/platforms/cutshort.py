@@ -10,6 +10,7 @@ from playwright.async_api import Page
 
 from ..browser.artifacts import ArtifactStore
 from ..browser.resilience import (
+    dismiss_overlays,
     first_visible,
     human_pause,
     human_type,
@@ -1668,12 +1669,17 @@ class CutshortPlatform(BaseJobPlatform):
                 await textarea.click()
             except Exception:
                 pass
+            # Dismiss cookie/overlay layers first: run 391 failed every pitch
+            # fill with 10s actionability timeouts on a resolved textarea —
+            # classic overlay-intercept signature, not a missing element.
+            await dismiss_overlays(self.page)
             try:
-                await textarea.fill(pitch)
+                await textarea.fill(pitch, timeout=5000)
             except Exception:
                 # React re-render can detach the resolved handle between
                 # resolve and fill (run 388: 10s timeout on the dialog chain).
-                # One re-resolve, then give up — never submit an empty pitch.
+                # One re-resolve, then keyboard typing (which only needs focus
+                # and bypasses stability checks) — never submit an empty pitch.
                 # (Early return skips the feed nav-back below; the next job's
                 # clean slate + URL fallback covers it.)
                 try:
@@ -1685,7 +1691,12 @@ class CutshortPlatform(BaseJobPlatform):
                     if fresh is None:
                         raise RuntimeError("pitch textarea gone")
                     textarea = fresh
-                    await textarea.fill(pitch)
+                    await dismiss_overlays(self.page)
+                    try:
+                        await textarea.fill(pitch, timeout=5000)
+                    except Exception:
+                        await textarea.evaluate("el => el.focus()")
+                        await self.page.keyboard.type(pitch[:1500], delay=1)
                 except Exception as exc2:
                     try:
                         await self.page.keyboard.press("Escape")

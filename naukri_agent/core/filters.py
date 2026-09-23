@@ -89,6 +89,13 @@ DISJOINT_SPECIALIZATIONS = (
     # letters (run 368 applied to a "QA Executive - Microbiologist" food-lab
     # role). Surgical tokens — healthcare-IT (HL7, informatics) stays eligible.
     "microbiologist", "microbiology",
+    # Creative/content professions: graphics, game and creator roles hire
+    # portfolios, not engineering tenure (run 391 applied to a "Software
+    # Developer 2d/3d - Senior" graphics role and an "AI Artist" creator
+    # posting). Surgical tokens — "game" never matches "gaming", "unity"
+    # never matches "community" (word boundaries).
+    "2d", "3d", "unreal", "unity", "graphics", "game developer",
+    "artist", "animator", "video editor",
 )
 
 # Hybrid AI titles: full-stack/software markers that promote an AI-titled

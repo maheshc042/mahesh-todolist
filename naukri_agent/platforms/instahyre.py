@@ -3,6 +3,7 @@ Instahyre Platform Implementation (Pagination & Modal-Swiper Engine).
 """
 from __future__ import annotations
 
+import asyncio
 import re
 import time as _time
 from collections.abc import Callable
@@ -142,6 +143,54 @@ class InstahyrePlatform(BaseJobPlatform):
         log.error("instahyre.auth.login_failed")
         return False
 
+    async def _select_skill(self, skills_input, _tags_text, skill: str) -> None:
+        """Select one skill tag: exact-match dropdown option, else Enter.
+
+        Closes any stale dropdown first (an open flyout covers the input and
+        turns every subsequent fill into a 10s actionability timeout) and
+        verifies the whole skill landed as one tag (run 366 fracture).
+        Raises on persistent failure; the caller time-boxes and logs.
+        """
+        try:
+            await self.page.keyboard.press("Escape")
+            await human_pause(100, 200)
+        except Exception:
+            pass
+        await skills_input.click()
+        await human_pause(150, 300)
+        await skills_input.fill("")
+        await human_type(skills_input, skill)
+        await human_pause(300, 500)
+
+        picked = False
+        try:
+            options = self.page.locator(".selectize-dropdown .option")
+            count = await options.count()
+            for idx in range(min(count, 8)):
+                try:
+                    text = ((await options.nth(idx).inner_text()) or "").strip().lower()
+                except Exception:
+                    continue
+                if text == skill.lower():
+                    await options.nth(idx).click()
+                    picked = True
+                    break
+        except Exception:
+            pass
+        if not picked:
+            await skills_input.press("Enter")
+        await human_pause(250, 450)
+
+        if skill.lower() not in await _tags_text():
+            try:
+                await skills_input.click()
+                await human_pause(150, 300)
+                await skills_input.press("Enter")
+                await human_pause(250, 450)
+            except Exception as exc:
+                log.debug("instahyre.filters.skill_retry_failed", skill=skill, error=str(exc))
+            if skill.lower() not in await _tags_text():
+                log.warning("instahyre.filters.skill_missing", skill=skill)
 
     async def _apply_ui_filters(self, profile: JobProfile) -> None:
         """Interactively opens and sets the filter UI on Instahyre opportunities page."""
@@ -230,35 +279,17 @@ class InstahyrePlatform(BaseJobPlatform):
                     return ""
 
             for skill in target_skills:
+                # Hard time-box per skill: on the new UI the selectize input
+                # intermittently stops accepting fills (run 396: 14 skills ×
+                # ~20s of hung fills = 5 silent minutes, 1/15 tags landed).
+                # One stuck skill must never eat the run budget.
                 try:
-                    await skills_input.click()
-                    await human_pause(150, 300)
-                    await skills_input.fill("")
-                    await human_type(skills_input, skill)
-                    await human_pause(300, 500)
-
-                    # Click matching selectize dropdown option if visible, else press Enter
-                    opt_loc = self.page.locator(".selectize-dropdown .option.active, .selectize-dropdown .option").first
-                    if await opt_loc.count() > 0 and await opt_loc.is_visible():
-                        await opt_loc.click()
-                    else:
-                        await skills_input.press("Enter")
-                    await human_pause(250, 450)
-
-                    # Verify the whole skill landed as one tag (run 366:
-                    # "Generative AI" fractured into "Gener" + "ative AI").
-                    # One retry via Enter; persistent failure is logged, and
-                    # the end-of-pass fracture check names it.
-                    if skill.lower() not in await _tags_text():
-                        try:
-                            await skills_input.click()
-                            await human_pause(150, 300)
-                            await skills_input.press("Enter")
-                            await human_pause(250, 450)
-                        except Exception as exc:
-                            log.debug("instahyre.filters.skill_retry_failed", skill=skill, error=str(exc))
-                        if skill.lower() not in await _tags_text():
-                            log.warning("instahyre.filters.skill_missing", skill=skill)
+                    await asyncio.wait_for(
+                        self._select_skill(skills_input, _tags_text, skill),
+                        timeout=12,
+                    )
+                except asyncio.TimeoutError:
+                    log.warning("instahyre.filters.skill_timeboxed", skill=skill)
                 except Exception as exc:
                     log.debug("instahyre.filters.skill_select_failed", skill=skill, error=str(exc))
 
@@ -630,7 +661,13 @@ class InstahyrePlatform(BaseJobPlatform):
                 target_limit=max_scrape,
                 profile=profile.name,
             )
-            await self._apply_ui_filters(profile)
+            # Whole filter pass is time-boxed: a degraded filter UI must yield
+            # a partial filter set, never a silent multi-minute stall that
+            # eats the run budget (runs 395/396).
+            try:
+                await asyncio.wait_for(self._apply_ui_filters(profile), timeout=180)
+            except asyncio.TimeoutError:
+                log.warning("instahyre.filters.pass_timeboxed")
             self._current_view = "search"
 
             # Paginate through filtered search results directly

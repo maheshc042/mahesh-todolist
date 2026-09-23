@@ -374,6 +374,13 @@ class Orchestrator:
 
                     self.platform_started_at = time.monotonic()
                     self.platform_consecutive_failures = 0
+                    # The global streak is an anti-ban tripwire for one contiguous
+                    # burst (markup change, IP block). It must not leak across
+                    # platforms: run 391's Cutshort fill-wall drove it to 5+ and
+                    # the very first Wellfound job check aborted a platform that
+                    # never ran a single job. Per-platform trips still use the
+                    # counter above.
+                    self.consecutive_failures = 0
                     self.current_platform_name = p_name
 
                     log.info(
