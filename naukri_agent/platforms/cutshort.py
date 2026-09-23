@@ -1214,6 +1214,41 @@ class CutshortPlatform(BaseJobPlatform):
         log.info("cutshort.fetch.done", count=len(jobs))
         return jobs
 
+    async def _cloudflare_wall(self, *, blocked: bool = False) -> bool:
+        """True when a Cloudflare Turnstile challenge is intercepting the page.
+
+        Provenance: runs 375/376 failure dumps show an empty modal-root plus
+        a cf-challenge widget and zero textareas — in that state no pitch
+        modal can ever appear, so every queued job would burn ~30s into a
+        wall. `blocked=True` (nothing actionable was found) also counts when
+        challenge markers are present, covering embedded/invisible challenges.
+        """
+        try:
+            html = (await self.page.content()).lower()
+        except Exception:
+            return False
+        if not any(
+            marker in html
+            for marker in (
+                "cf-turnstile",
+                "cf-chl",
+                "challenges.cloudflare.com",
+                "verifying you are human",
+            )
+        ):
+            return False
+        if not blocked:
+            widget = await first_visible(
+                self.page,
+                [
+                    "iframe[src*='challenges.cloudflare.com']",
+                    "input[name='cf-turnstile-response']",
+                ],
+                timeout_ms=800,
+            )
+            return widget is not None
+        return True
+
     async def apply_to_job(
         self,
         job: Job,
@@ -1233,6 +1268,17 @@ class CutshortPlatform(BaseJobPlatform):
                 await human_pause(300, 600)
         except Exception:
             pass
+
+        # 1b. Cloudflare wall pre-flight: when the challenge widget is up, no
+        # pitch modal can ever appear. Fail fast with a distinct reason so the
+        # run pauses the platform instead of burning every queued job.
+        if await self._cloudflare_wall():
+            log.warning("cutshort.apply.cloudflare_wall", job_id=job.job_id)
+            return ApplyOutcome(
+                status=ApplicationStatus.FAILED,
+                reason=SkipReason.CLOUDFLARE_CHALLENGE,
+                detail="Cloudflare Turnstile challenge is intercepting Cutshort; pitch modal cannot appear",
+            )
 
         modal = None
 
@@ -1622,7 +1668,34 @@ class CutshortPlatform(BaseJobPlatform):
                 await textarea.click()
             except Exception:
                 pass
-            await textarea.fill(pitch)
+            try:
+                await textarea.fill(pitch)
+            except Exception:
+                # React re-render can detach the resolved handle between
+                # resolve and fill (run 388: 10s timeout on the dialog chain).
+                # One re-resolve, then give up — never submit an empty pitch.
+                # (Early return skips the feed nav-back below; the next job's
+                # clean slate + URL fallback covers it.)
+                try:
+                    fresh = await first_visible(
+                        modal_scope,
+                        ["textarea[name='message']", "textarea[placeholder*='message' i]", "textarea"],
+                        timeout_ms=2000,
+                    )
+                    if fresh is None:
+                        raise RuntimeError("pitch textarea gone")
+                    textarea = fresh
+                    await textarea.fill(pitch)
+                except Exception as exc2:
+                    try:
+                        await self.page.keyboard.press("Escape")
+                        await human_pause(300, 500)
+                    except Exception:
+                        pass
+                    return ApplyOutcome(
+                        ApplicationStatus.FAILED,
+                        detail=f"cutshort pitch fill failed for {job.title} at {job.company}: {str(exc2)[:120]}",
+                    )
             # Crucial: dispatch synthetic events so React updates controlled component state
             await textarea.dispatch_event("input")
             await textarea.dispatch_event("change")
@@ -1763,10 +1836,18 @@ class CutshortPlatform(BaseJobPlatform):
                 log.info("cutshort.apply_failed_dump", path=str(dump_path))
             except Exception:
                 pass
-            outcome = ApplyOutcome(
-                ApplicationStatus.FAILED,
-                detail=f"Pitch modal/send button never appeared for {job.title} at {job.company}",
-            )
+            if await self._cloudflare_wall(blocked=True):
+                outcome = ApplyOutcome(
+                    ApplicationStatus.FAILED,
+                    reason=SkipReason.CLOUDFLARE_CHALLENGE,
+                    detail=f"Cloudflare challenge wall (no actionable modal) for {job.title} at {job.company}",
+                )
+            else:
+                stage = "send" if send_btn else ("textarea" if textarea else ("modal" if modal else "cta"))
+                outcome = ApplyOutcome(
+                    ApplicationStatus.FAILED,
+                    detail=f"cutshort apply stalled at stage={stage} (modal={bool(modal)}, textarea={bool(textarea)}, send={bool(send_btn)}) for {job.title} at {job.company}",
+                )
 
         # Always ensure browser returns cleanly to /profile/all-jobs feed for subsequent jobs
         if "/profile/all-jobs" not in self.page.url:

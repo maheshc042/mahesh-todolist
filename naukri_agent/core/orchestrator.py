@@ -520,7 +520,7 @@ class Orchestrator:
                                 log.warning("platform.stopped_early", platform=platform.platform_name, profile=profile.name, reason=str(stop))
                                 self.stats.errors.append(f"{platform.platform_name} ({profile.name}): {stop}")
                                 stop_msg = str(stop).lower()
-                                if "timeout" in stop_msg or "budget" in stop_msg or "consecutive" in stop_msg:
+                                if "timeout" in stop_msg or "budget" in stop_msg or "consecutive" in stop_msg or "cloudflare" in stop_msg:
                                     break
                                 continue
                             except FatalAgentError:
@@ -837,6 +837,30 @@ class Orchestrator:
             log.info("search.jobs_empty_after_dedupe", profile=profile.name, platform=platform.platform_name)
             return
 
+        # =========================================================
+        # STEP 1.2: 3-strike backoff for unrenderable pages.
+        # Failed outcomes never enter the 90-day dedupe, so a permanently
+        # unresolvable card (e.g. walk-in pages failing classification every
+        # run) would burn an apply slot daily. Skip jobs already failing
+        # classification 3+ times — visible via filtered_out, no row spam.
+        # =========================================================
+        strike_ids = await self.repo.classification_strike_jobs(
+            platform.platform_name, self.account_key
+        )
+        if strike_ids:
+            kept_jobs: list[Job] = []
+            for _job in collected_jobs:
+                if _job.job_id in strike_ids:
+                    self.stats.bump(profile.name, "filtered_out", platform=platform.platform_name)
+                    log.info("search.strike_backoff", job_id=_job.job_id, title=_job.title[:60])
+                else:
+                    kept_jobs.append(_job)
+            collected_jobs = kept_jobs
+
+        if not collected_jobs:
+            log.info("search.jobs_empty_after_strikes", profile=profile.name, platform=platform.platform_name)
+            return
+
 
         # =========================================================
         # STEP 1.5: Inject API Match Scores (Fast Pre-filter)
@@ -996,6 +1020,26 @@ class Orchestrator:
                         status=ApplicationStatus.FAILED,
                         detail=f"Unhandled job error: {exc}",
                     )
+
+                # Cloudflare wall: the page cannot produce a modal, so every
+                # remaining job would fail identically. Pause the platform and
+                # stop it fast instead of burning the queue into the wall.
+                if outcome.reason == SkipReason.CLOUDFLARE_CHALLENGE:
+                    assert self.repo is not None
+                    await self.repo.pause_platform(
+                        self.account_key,
+                        platform.platform_name,
+                        (outcome.detail or "Cloudflare challenge wall")[:500],
+                    )
+                    log.warning(
+                        "platform.cloudflare_paused",
+                        platform=platform.platform_name,
+                        job_id=job.job_id,
+                    )
+                    self.stats.errors.append(
+                        f"{platform.platform_name} paused: Cloudflare challenge wall"
+                    )
+                    raise StopRun(f"cloudflare wall on {platform.platform_name} — platform paused")
 
                 if outcome.status == ApplicationStatus.APPLIED:
                     applied_this_profile += 1

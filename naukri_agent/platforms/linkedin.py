@@ -31,6 +31,7 @@ from ..browser.resilience import (
 )
 from ..config import AgentConfig, JobProfile, NaukriAccount
 from ..core.answers import AnswerEngine
+from ..core.filters import FilterEngine
 from ..core.models import (
     ApplicationStatus,
     ApplyOutcome,
@@ -756,6 +757,41 @@ class LinkedInPlatform(BaseJobPlatform):
                     job.max_experience = float(match.group(2))
                 elif "+" in match.group(0):
                     job.max_experience = job.min_experience + 5.0
+
+        # Universal family gates on JD-enriched data. The orchestrator ran
+        # these on card data (Phase 1), but the description + JD experience
+        # parsed above can flip unknown -> known. Re-gating with the same
+        # profile rules keeps QA/DevOps/support <=2y, dedicated-AI <=2y and
+        # the 3.5y ceiling in force on every platform (run 388 applied a
+        # Manual QA role whose card carried no experience signal).
+        try:
+            _prof = next(
+                (p for p in (getattr(self.config, "profiles", []) or [])
+                 if (getattr(p, "name", "") or "") == (profile_name or "")),
+                None,
+            )
+            _rules = (
+                _prof.filters_for("recommended")
+                if _prof is not None
+                else self.config.get_unified_linkedin_profile().filters
+            )
+            _regated = FilterEngine(_rules).evaluate_card(job)
+        except Exception as exc:
+            log.debug("linkedin.apply.regate_failed_open", error=str(exc)[:120])
+            _regated = None
+        if _regated is not None and not _regated.passed:
+            log.info(
+                "linkedin.apply.regated",
+                job_id=job.job_id,
+                reason=_regated.reason.value if _regated.reason else "?",
+                detail=_regated.detail,
+            )
+            _record_timing()
+            return ApplyOutcome(
+                status=ApplicationStatus.SKIPPED,
+                reason=_regated.reason or SkipReason.FILTER_REJECTED,
+                detail=_regated.detail,
+            )
 
         # Suitability & Spam Check
         suitable, reason, score = self.evaluate_job_suitability(job)

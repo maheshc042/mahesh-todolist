@@ -96,6 +96,49 @@ class TestFilterEngine(unittest.TestCase):
             decision = engine.evaluate_card(job)
             self.assertFalse(decision.passed, f"{blocked_title} should have been blocked!")
 
+    def test_universal_junior_family_cap(self):
+        """QA/DevOps/support roles above 2y must fail on EVERY profile's rules.
+
+        All platforms share FilterEngine, so the junior-family cap holds
+        everywhere by construction (run 388: Manual QA applied only because
+        its card carried no experience signal, never a rule gap).
+        """
+        for prof in (self.fs_profile, self.ai_profile):
+            engine = FilterEngine(prof.filters_for("recommended"))
+            job = Job(
+                job_id="test-junior-cap",
+                title="Manual QA Engineer",
+                company="Test Corp",
+                location="Bengaluru",
+                url="http://test.com",
+                platform="linkedin",
+                min_experience=3.0,
+                max_experience=5.0,
+            )
+            decision = engine.evaluate_card(job)
+            self.assertFalse(
+                decision.passed,
+                f"{prof.name}: Manual QA at 3-5y must be rejected, got {decision.reason}",
+            )
+
+
+class TestRunSummary(unittest.TestCase):
+    def test_platform_only_breakdown_with_forensics(self):
+        """Summary shows per-platform (never per-profile) lines carrying
+        scraped + plan-rejected counts, so a 0/0/0 platform is self-explanatory."""
+        from naukri_agent.core.models import RunStats
+        from naukri_agent.notify.notifier import format_run_summary
+
+        stats = RunStats()
+        stats.bump("AI / Python Engineer", "scraped", 10, platform="naukri")
+        stats.bump("AI / Python Engineer", "plan_rejected", 6, platform="naukri")
+        stats.bump("AI / Python Engineer", "applied", 3, platform="naukri")
+        body = format_run_summary(stats, duration_s=60, run_id=1)
+        self.assertNotIn("PER-PROFILE", body)
+        self.assertIn("PER-PLATFORM", body)
+        self.assertIn("10 scraped", body)
+        self.assertIn("6 plan-rejected", body)
+
 
 class TestLinkedInPlatform(unittest.TestCase):
     def setUp(self):

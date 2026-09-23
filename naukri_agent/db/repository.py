@@ -293,6 +293,40 @@ class Repository:
 
         return [j for j in jobs if not is_duplicate(j)]
 
+    async def classification_strike_jobs(
+        self,
+        platform: str,
+        account: str = "primary",
+        min_prior: int = 3,
+    ) -> set[str]:
+        """Jobs that failed page classification `min_prior`+ times.
+
+        Failed outcomes upsert onto one row per (job, profile, platform,
+        account) with an accumulating `attempts` counter — so the signal is
+        `attempts`, not row counts. Skipped here pre-plan (visible via
+        filtered_out). Self-healing: a job that ever renders flips status
+        away from failed and leaves the set automatically.
+        """
+        try:
+            rows = await self._fetch_with_retry(
+                """
+                SELECT job_id
+                  FROM applications
+                 WHERE platform = $1
+                   AND account = $2
+                   AND status = 'failed'
+                   AND detail LIKE 'Page classification failed%'
+                   AND attempts >= $3
+                """,
+                platform,
+                account,
+                min_prior,
+            )
+            return {row["job_id"] for row in rows}
+        except Exception as exc:
+            log.warning("db.classification_strike_jobs_failed", error=str(exc))
+            return set()
+
     async def applied_today(self, account: str = "primary", tz: str = "Asia/Kolkata") -> int:
         """
         Applications submitted TODAY by THIS account, in the given IANA timezone day.

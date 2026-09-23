@@ -187,12 +187,10 @@ async def run_campaign(
             try:
                 posts = await hunter.hunt_for_jobs(url)
             except CookieExpiredError as exc:
+                # Log-only by operator policy: the campaign runs every run, so
+                # a Telegram ping here spams once per run while the cookie is
+                # dead. Refresh LINKEDIN_LI_AT or run login-linkedin headed.
                 log.error("linkedin.cookie_expired", error=str(exc))
-                await notifier.send(
-                    "🚨 LinkedIn Cookie Expired!",
-                    "Please update your LINKEDIN_LI_AT cookie or run login-linkedin in headed mode.",
-                    is_error=True,
-                )
                 return emails_sent_today
 
             for post_data in posts:

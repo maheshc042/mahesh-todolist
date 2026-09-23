@@ -155,15 +155,6 @@ def format_run_summary(
     if dry_run:
         lines.insert(1, "  ℹ️ SIMULATION ONLY — No live applications submitted.")
 
-    if stats.per_profile:
-        lines.append("")
-        lines.append("👤 PER-PROFILE BREAKDOWN:")
-        for profile, counters in stats.per_profile.items():
-            applied = counters.get("applied", 0)
-            failed = counters.get("failed", 0)
-            review = counters.get("needs_review", 0)
-            lines.append(f"  • {profile}: {applied} applied | {failed} failed | {review} review")
-
     if stats.per_platform:
         lines.append("")
         lines.append("🌐 PER-PLATFORM BREAKDOWN:")
@@ -171,7 +162,12 @@ def format_run_summary(
             applied = counters.get("applied", 0)
             failed = counters.get("failed", 0)
             external = counters.get("external", 0)
-            lines.append(f"  • {platform.capitalize():<10}: {applied} applied | {failed} failed | {external} external")
+            scraped = counters.get("scraped", 0)
+            rejected = counters.get("plan_rejected", 0)
+            lines.append(
+                f"  • {platform.capitalize():<10}: {applied} applied | {failed} failed | "
+                f"{external} external | {scraped} scraped | {rejected} plan-rejected"
+            )
 
     if include_job_list and stats.applied_jobs:
         lines.append("")
