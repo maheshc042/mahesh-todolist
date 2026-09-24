@@ -12,6 +12,7 @@ Design Decisions:
 from __future__ import annotations
 
 import asyncio
+import re
 import smtplib
 import ssl
 from email.message import EmailMessage
@@ -74,12 +75,20 @@ class ColdEmailer:
             return gemini_body
 
         role_low = role_name.lower()
-        if "ai" in role_low or "python" in role_low or "ml" in role_low or "llm" in role_low:
+        # Word boundaries: bare `"ai" in role` misfires on Retail/Training.
+        ai_track = re.search(
+            r"\b(ai|artificial intelligence|machine learning|\bml\b|llm|genai|"
+            r"generative ai|nlp|python|rag|agent|chatbot|fastapi|mlops)\b",
+            role_low,
+        )
+        if ai_track:
             stack = "Python, FastAPI, LLMs and RAG pipelines"
             proof = "I build and maintain production LLM features, chatbot backends, retrieval pipelines and GenAI services."
+            skills = "Python, FastAPI, LLMs, LangChain, RAG, PostgreSQL, Docker"
         else:
             stack = "React, Node.js and TypeScript"
             proof = "I build and maintain production web apps end to end, React frontends on Node.js APIs."
+            skills = "React, Node.js, TypeScript, JavaScript, PostgreSQL, REST APIs"
 
         who = applicant_snapshot()
         if who.name != "a Software Engineer":
@@ -89,18 +98,27 @@ class ColdEmailer:
             name = (AgentConfig.load().applicant_name or "").strip()
         links = " ".join(p for p in (who.github, who.linkedin) if p)
         salutation = f"Hi {company_name} Team," if (company_name or "").strip() else "Hi there,"
-        if is_immediate_joiner(who.notice_label):
-            availability = "I am an immediate joiner and can start right away."
-        else:
-            availability = f"My notice period is {who.notice_label}."
+        contact_line = f"{who.mobile} | {who.location}" if who.mobile else who.location
 
         return f"""{salutation}
 
 I am applying for the {role_name} role. My stack is {stack}, with {who.experience_label} building production systems around them. {proof}
 
-I am based in {who.location}. {availability} Resume attached, please consider a short intro call this week. Thanks,
+Candidate Overview:
+• Name: {name}
+• Total Experience: {who.experience_label} ({role_name})
+• Current CTC: {who.current_ctc}
+• Expected CTC: {who.expected_ctc}
+• Notice Period: {who.notice_label}
+• Current Location: {who.location}
+• Mobile: {who.mobile}
+• Key Technical Skills: {skills}
+
+My resume is attached for your review. I would welcome a short intro call this week to discuss how I can contribute.
+
+Best regards,
 {name}
-{who.location}
+{contact_line}
 {links}
 """
 

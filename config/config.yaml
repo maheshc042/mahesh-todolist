@@ -166,9 +166,9 @@ answers:
   portfolio url: "https://github.com/maheshchichkoti"
 
   # Salary & CTC
-  current ctc: "4"
-  expected ctc: "7"
-  fixed ctc: "3.8"
+  current ctc: "3.9"
+  expected ctc: "7.5"
+  fixed ctc: "3.9"
   variable ctc: "0"
 
   # Experience — 3 years total career experience (full stack + cloud)

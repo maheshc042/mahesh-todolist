@@ -42,10 +42,13 @@ PINNED_DEFAULT_MODEL = "gemini-3.6-flash"
 class ApplicantSnapshot:
     """Identity facts for email copy, resolved from AgentConfig."""
 
-    name: str = "a Software Engineer"
-    location: str = "India"
-    experience_label: str = "2+ years"
-    notice_label: str = "immediate"
+    name: str = "Mahesh Chitakoti"
+    location: str = "Bengaluru, India"
+    experience_label: str = "2.5+ years"
+    notice_label: str = "Immediate (0 days)"
+    current_ctc: str = "₹3.9 LPA"
+    expected_ctc: str = "₹7 - 8 LPA (Negotiable)"
+    mobile: str = "+91 9481777227"
     github: str = ""
     linkedin: str = ""
 
@@ -96,36 +99,55 @@ def applicant_snapshot() -> ApplicantSnapshot:
         log.debug("gemini.config_unavailable", error=str(exc)[:120])
         return ApplicantSnapshot()
 
-    name = (config.applicant_name or "").strip() or "a Software Engineer"
-    location = (config.applicant_location or "").strip() or "India"
+    name = (config.applicant_name or "").strip() or "Mahesh Chitakoti"
+    location = (config.applicant_location or "").strip() or "Bengaluru, India"
 
+    # User profile specifies 2.5 years of experience
+    experience_label = "2.5 years"
     years: float | None = None
     try:
         years = config.experience.total_years
     except (AttributeError, ValueError):
         years = None
-    if not years or years <= 0:
-        for profile in config.active_profiles():
-            if profile.experience_years and profile.experience_years > 0:
-                years = profile.experience_years
-                break
-    experience_label = f"{years:g} years" if years and years > 0 else "2+ years"
+    if years and years > 0 and years != 3:
+        experience_label = f"{years:g} years"
 
-    notice_label = "immediate"
+    notice_label = "Immediate (0 days)"
+    current_ctc = "₹3.9 LPA"
+    expected_ctc = "₹7 - 8 LPA (Negotiable)"
     try:
         answers = config.answers or {}
         lowered = {str(k).strip().lower(): str(v).strip() for k, v in answers.items()}
         notice_raw = lowered.get("notice period", "")
         if notice_raw:
-            notice_label = notice_raw if "day" in notice_raw.lower() else f"{notice_raw} notice"
+            if "0" in notice_raw or "immediate" in notice_raw.lower():
+                notice_label = "Immediate (0 days)"
+            else:
+                notice_label = notice_raw if "day" in notice_raw.lower() else f"{notice_raw} notice"
+
+        c_raw = lowered.get("current ctc", "")
+        if c_raw:
+            current_ctc = f"₹{c_raw} LPA" if "lpa" not in c_raw.lower() else c_raw
+        e_raw = lowered.get("expected ctc", "")
+        if e_raw:
+            expected_ctc = f"₹{e_raw} LPA (Negotiable)" if "lpa" not in e_raw.lower() else f"{e_raw} (Negotiable)"
     except (AttributeError, ValueError) as exc:
-        log.debug("gemini.notice_unavailable", error=str(exc)[:120])
+        log.debug("gemini.answers_unavailable", error=str(exc)[:120])
+
+    phone = (config.applicant_phone or "").strip()
+    if phone:
+        mobile = f"+91 {phone}" if not phone.startswith("+") and len(phone) == 10 else phone
+    else:
+        mobile = "+91 9481777227"
 
     return ApplicantSnapshot(
         name=name,
         location=location,
         experience_label=experience_label,
         notice_label=notice_label,
+        current_ctc=current_ctc,
+        expected_ctc=expected_ctc,
+        mobile=mobile,
         github=(config.applicant_github or "").strip(),
         linkedin=(config.applicant_linkedin or "").strip(),
     )
@@ -171,42 +193,49 @@ class GeminiWriter:
         links = " ".join(p for p in (who.github, who.linkedin) if p)
         links_line = f"\n{links}" if links else ""
         salutation = f"Hi {company_name} Team," if company_name else "Hi there,"
-        if is_immediate_joiner(who.notice_label):
-            availability_line = "I am an immediate joiner and can start right away."
-        else:
-            availability_line = f"My notice period is {who.notice_label}."
+        contact_line = f"\n{who.mobile} | {who.location}" if who.mobile else f"\n{who.location}"
         prompt = f"""
-You are {who.name}, a Software Engineer writing a direct job application email for the "{role_name}" role at "{company_name or 'your company'}".
+You are {who.name}, writing a direct job application email to an HR recruiter for the "{role_name}" role at "{company_name or 'your company'}".
 
-Applicant Background (true facts, use them):
-- Experience: {who.experience_label} building production software systems
-- Location: {who.location}
-- Notice Period: {who.notice_label} (immediate joiner)
-- Links:{links_line if links_line else " none"}
+Applicant Background (exact facts, use them):
+- Name: {who.name}
+- Total Experience: {who.experience_label} building production software systems (Full Stack & AI)
+- Current CTC: {who.current_ctc}
+- Expected CTC: {who.expected_ctc}
+- Notice Period: {who.notice_label}
+- Current Location: {who.location}
+- Mobile / WhatsApp: {who.mobile}
+- Links:{links_line if links_line else ' none'}
 
 Job Requirements to Target:
-{job_description[:2500] if job_description else "Full-stack software engineering."}
+{job_description[:2500] if job_description else 'Full-stack and AI software engineering.'}
 
-CONTEXT THAT DECIDES THE TONE: this is the Indian job market (Naukri/Instahyre norms). The reader is almost always an HR recruiter doing 3-second checklist filtering — stack match, years, notice period, resume — not a tech lead to impress with stories. Nobody oversells themselves here; confidence is quiet and factual. Write for the HR scan first, with one solid proof line the hiring manager will also respect.
+CONTEXT:
+This is for the Indian tech job market. HR recruiters scan cold emails in 5 seconds to verify core hiring criteria: stack match, years, current CTC, expected CTC, notice period, location, and mobile number. A clean, structured quick candidate snapshot is essential for HR screening.
 
 RULES FOR THE EMAIL:
-1. Length: 80 to 110 words. Must read fully on a phone screen. No "Hope you are doing well" opener.
-2. Structure:
-   - Salutation: "{salutation}"
-   - Hook (1 sentence): experienced engineer applying for the {role_name} role, naming 2-3 of THEIR exact stack terms from the description.
-   - Proof (2 sentences): what you built with those exact tools in production — systems shipped, services maintained, uptime owned. Concrete verbs only.
-   - Availability + CTA (1-2 sentences): {availability_line} Resume attached, request a short intro call this week.
-   - Sign off exactly: "Best regards,\\n{who.name}\\n{who.location}{links_line}"
-3. HUMAN PUNCTUATION (anti-bot rules — a recruiter must believe a person typed this on a phone):
-   - NEVER use em dashes (—), en dashes (–), or dash-joined clauses (-). Use commas and periods. Hyphens stay ONLY inside single technical terms (e.g. full-stack).
-   - NEVER use bullet points or numbered lists. Plain sentences only.
-   - NEVER use colon labels ("Tech Stack:", "Notice Period:"). Write everything as normal sentences.
-4. FORBIDDEN:
+1. Salutation: "{salutation}"
+2. Intro (2 sentences): Apply for the {role_name} role, stating you have {who.experience_label} of experience building production systems, naming 2-3 of THEIR exact stack terms from the job requirements, and summarizing the services you developed.
+3. Quick Candidate Snapshot (clean bullet points for rapid HR scan):
+   • Name: {who.name}
+   • Total Experience: {who.experience_label} ({role_name})
+   • Current CTC: {who.current_ctc}
+   • Expected CTC: {who.expected_ctc}
+   • Notice Period: {who.notice_label}
+   • Current Location: {who.location}
+   • Mobile: {who.mobile}
+   • Key Technical Skills: (name 4-6 matching tools from their description, dynamically customized to their requirements)
+4. CTA (1 sentence): Mention resume is attached and request a short introductory call this week.
+5. Sign off:
+   Best regards,
+   {who.name}
+   {contact_line}{links_line}
+
+6. FORBIDDEN:
    - Buzzwords: passionate, cutting-edge, synergy, leverage, rockstar, ninja, guru, delve, testament, thrilled, robust, game-changer, world-class, esteemed, utmost.
-   - Sob stories and hustle drama: NEVER mention late nights, 2am debugging, sweat, struggle, sacrifice, or nights. Talk reliability and shipping, never hours worked.
-   - Begging or oversell: no "align with your goals", no "hit the ground running", no "thanking for your time and consideration" paragraph — one plain "Thanks," is enough inside the CTA.
-5. NUMBERS DISCIPLINE: never invent metrics, percentages, user counts, company names, or tools. You may echo scale signals ONLY if written in their description. No proof exists without evidence — stay truthful over punchy, always.
-6. Output ONLY the raw email body. No markdown, no subject lines, no placeholders.
+   - Sob stories, hustle drama, or begging paragraphs.
+   - Never invent metrics, percentages, user counts, or company names.
+7. Output ONLY the raw email body. No markdown fences, no subject lines, no placeholders.
 """
 
         payload = {

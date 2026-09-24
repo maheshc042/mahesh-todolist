@@ -562,6 +562,27 @@ class TestGeminiBreaker(unittest.TestCase):
         self.assertEqual(writer._server_errors, 0)
 
 
+class TestMailerTrackRouting(unittest.TestCase):
+    def test_ai_track_word_boundaries(self):
+        """AI-track routing must use word boundaries: Retail/Training are
+        full-stack roles, not AI roles. Gemini forced off so the template
+        routing itself is pinned."""
+        from unittest.mock import patch
+
+        from naukri_agent.core.mailer import ColdEmailer
+
+        mailer = ColdEmailer(sender_email="a@b.com", app_password="x")
+        with patch(
+            "naukri_agent.core.gemini_writer.GeminiWriter.generate_email_body",
+            return_value=None,
+        ):
+            self.assertIn("Python, FastAPI", mailer._generate_body("AI Engineer", "", "Co"))
+            self.assertIn("Python, FastAPI", mailer._generate_body("ML Engineer", "", "Co"))
+            self.assertIn("React, Node.js", mailer._generate_body("Retail Associate", "", "Co"))
+            self.assertIn("React, Node.js", mailer._generate_body("Training Manager", "", "Co"))
+            self.assertIn("React, Node.js", mailer._generate_body("Full Stack Developer", "", "Co"))
+
+
 if __name__ == "__main__":
     unittest.main()
 

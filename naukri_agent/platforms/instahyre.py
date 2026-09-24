@@ -143,59 +143,34 @@ class InstahyrePlatform(BaseJobPlatform):
         log.error("instahyre.auth.login_failed")
         return False
 
-    async def _set_skills_via_api(self, skills: list[str]) -> list[str]:
-        """Set skill tags through selectize's own JS API, bypassing the
-        autocomplete UI entirely.
+    async def _clear_skill_tags(self) -> int:
+        """Remove every active skill tag; return how many remain.
 
-        The suggestion dropdown stopped returning options (runs 396+: typed
-        text lands in the input, zero options render, Enter commits nothing),
-        while the widget instance itself is healthy. Driving addOption +
-        addItem directly restores deterministic filtering with zero typing.
-        Returns the widget's resulting item list.
+        Loops until clean (or 3 passes): single-pass clearing leaves fossils
+        like the ever-present SDET tag, which then skew every filtered search.
         """
-        js = """(wanted) => {
-          const out = {via: null, items: []};
-          try {
-            const host = document.getElementById('skills-drop-select-job-search');
-            const inst = host && host.selectize;
-            if (inst) {
-              for (const sk of wanted) {
-                try {
-                  if (!inst.options[sk]) inst.addOption({value: sk, text: sk});
-                  inst.addItem(sk);
-                } catch (e) {}
-              }
-              out.via = 'selectize';
-              out.items = (inst.items || []).slice();
-              if (out.items.length) return out;
-            } else { out.noInstance = true; }
-          } catch (e) { out.instErr = String(e).slice(0, 100); }
-          try {
-            const ng = window.angular;
-            if (!ng) { out.noAngular = true; return out; }
-            const root = document.querySelector('.facets-main') || document.body;
-            let s = ng.element(root).scope();
-            let d = 0;
-            while (s && d < 8 && !(s.search && s.search.searchObj)) { s = s.$parent; d++; }
-            if (s && s.search && s.search.searchObj) {
-              s.search.searchObj.skills = wanted.slice();
-              try { s.$apply(); } catch (e) {}
-              out.via = 'scope';
-              out.scopeFound = true;
-            } else { out.scopeFound = false; }
-          } catch (e) { out.scopeErr = String(e).slice(0, 100); }
-          return out;
-        }"""
-        try:
-            result = await self.page.evaluate(js, skills)
-        except Exception as exc:
-            log.debug("instahyre.filters.api_failed", error=str(exc)[:120])
-            return []
-        if not isinstance(result, dict):
-            return []
-        log.info("instahyre.filters.api_result", result=str(result)[:300])
-        items = result.get("items") or []
-        return [str(x) for x in items]
+        remaining = 0
+        for _ in range(3):
+            try:
+                remove_buttons = await self.page.locator(
+                    "div.selectize-input div.item a.remove, div.selectize-input a.remove"
+                ).all()
+                for rem in remove_buttons:
+                    try:
+                        await rem.click()
+                        await human_pause(100, 250)
+                    except Exception:
+                        pass
+            except Exception:
+                pass
+            try:
+                tags = await self.page.locator("div.selectize-input div.item").all_inner_texts()
+                remaining = len([t for t in tags if t.strip()])
+            except Exception:
+                remaining = 0
+            if remaining == 0:
+                break
+        return remaining
 
     async def _select_skill(self, _tags_text, skill: str) -> None:
         """Select one skill tag: exact-match dropdown option, else Enter.
@@ -397,17 +372,11 @@ class InstahyrePlatform(BaseJobPlatform):
         )
 
         if skills_input:
-            # Clear any pre-existing stale skill tags
-            try:
-                remove_buttons = await self.page.locator("div.selectize-input div.item a.remove, div.selectize-input a.remove").all()
-                for rem in remove_buttons:
-                    try:
-                        await rem.click()
-                        await human_pause(100, 250)
-                    except Exception:
-                        pass
-            except Exception:
-                pass
+            # Clear any pre-existing stale skill tags (verified loop — a
+            # single pass leaves fossils like the ever-present SDET tag).
+            cleared_left = await self._clear_skill_tags()
+            if cleared_left:
+                log.warning("instahyre.filters.clear_incomplete", remaining=cleared_left)
 
             # Instahyre enforces MAX 15 skill tags: anything past #15 is
             # silently ignored (run 366). Truncate loudly, never silently.
@@ -426,22 +395,12 @@ class InstahyrePlatform(BaseJobPlatform):
                 except Exception:
                     return ""
 
-            # Primary path: widget API (deterministic, seconds). The per-skill
-            # UI loop below is the fallback for when the API lands nothing.
-            api_landed = 0
-            try:
-                await self._set_skills_via_api(target_skills)
-                await human_pause(500, 1000)
-                landed_text = await _tags_text()
-                api_landed = sum(1 for s in target_skills if s.lower() in landed_text)
-                log.info("instahyre.filters.skills_via_api", landed=api_landed, total=len(target_skills))
-            except Exception as exc:
-                log.debug("instahyre.filters.api_path_failed", error=str(exc)[:120])
-
-            ui_needed = api_landed < max(1, len(target_skills) // 2)
+            # Skill loop: real UI interaction only. (A scope-injection path
+            # was tried in runs 412-417: tags displayed but the backend
+            # resolved nothing — display tags without matching option
+            # identities filter zero jobs. Removed; only UI-created tags
+            # count as coverage.)
             for skill in target_skills:
-                if not ui_needed:
-                    break
                 if skill.lower() in await _tags_text():
                     continue
                 # Hard time-box per skill: on the new UI the selectize input
@@ -457,6 +416,26 @@ class InstahyrePlatform(BaseJobPlatform):
                     log.warning("instahyre.filters.skill_timeboxed", skill=skill)
                 except Exception as exc:
                     log.debug("instahyre.filters.skill_select_failed", skill=skill, error=str(exc))
+
+            # Last resort: unfiltered feed. When the skill widget is dead
+            # (runs 396+: 0 options render, nothing lands), a skill-filtered
+            # search returns near-zero jobs while an unfiltered one returns
+            # the full feed — and the planner/ranker already enforce precision
+            # downstream (run 368: 111 scraped -> 17 applied with no skill UI
+            # dependence). Never trade a dead filter for zero coverage.
+            try:
+                landed_text = await _tags_text()
+                landed_n = sum(1 for s in target_skills if s.lower() in landed_text)
+            except Exception:
+                landed_n = 0
+            if landed_n < max(1, len(target_skills) // 2):
+                left = await self._clear_skill_tags()
+                log.warning(
+                    "instahyre.filters.unfiltered_fallback",
+                    landed=landed_n,
+                    total=len(target_skills),
+                    tags_cleared=left == 0,
+                )
 
         # 3. Fill Experience Input (#years)
         exp_input = await first_visible(
@@ -487,10 +466,16 @@ class InstahyrePlatform(BaseJobPlatform):
             except Exception as exc:
                 log.debug("instahyre.filters.exp_select_failed", error=str(exc))
 
-        # 4. Click "Show results" Button (#show-results)
+        # 4. Click the search submit button. NOTE Sep 2026: Instahyre
+        # renamed it from button#show-results ("Show results") to
+        # button.skills-search-btn ("Search") — the old selectors silently
+        # match nothing and the search never fires (runs 396+: 0 jobs with
+        # zero errors). New markup first, legacy as fallback.
         submit_filter = await first_visible(
             self.page,
             [
+                "button.skills-search-btn",
+                "#job-search-section button:has-text('Search')",
                 "button#show-results",
                 "button.show-results",
                 "button:has-text('Show results')",
@@ -635,10 +620,20 @@ class InstahyrePlatform(BaseJobPlatform):
             "div.employer-row, div.opportunity-box, div.opportunity-card, "
             "div.job-card, div[class*='employer-row']"
         )
-        try:
-            await self.page.wait_for_selector(card_selector, timeout=8000)
-        except Exception:
-            pass
+        # Page 1 gets a long settle budget: a 16-skill backend search can
+        # take 20s+ (run 412 saw 0 cards at 8s while FETCHING was still in
+        # flight, then declared last page). Later pages keep the short budget.
+        budget_s = 30 if page_num == 1 else 8
+        deadline = _time.monotonic() + budget_s
+        while True:
+            try:
+                await self.page.wait_for_selector(card_selector, timeout=3000)
+                break
+            except Exception:
+                pass
+            if _time.monotonic() >= deadline:
+                break
+            await human_pause(1500, 2500)
 
         cards = await self.page.locator(card_selector).all()
         if not cards:

@@ -1790,7 +1790,13 @@ class LinkedInPlatform(BaseJobPlatform):
                                     if _res.value.lower() in _t or _t in _res.value.lower():
                                         picked = _r
                                         break
-                        first_radio = picked or radios[0]
+                        first_radio = picked
+                        if first_radio is None:
+                            # Strict: never click a blind default. A wrong
+                            # radio (e.g. sponsorship "Yes") is a
+                            # misrepresentation; leave it for NEEDS_REVIEW.
+                            log.info("linkedin.apply.error_recovery_radio_unresolved")
+                            continue
                         await first_radio.evaluate("""el => {
                             el.checked = true;
                             el.dispatchEvent(new Event('change', {bubbles: true}));
@@ -1803,28 +1809,30 @@ class LinkedInPlatform(BaseJobPlatform):
                     # 2. Text/Number input in error container
                     inputs = await target_scope.locator("input:not([type='radio']):not([type='checkbox']):not([type='hidden']):not([type='file']), textarea").all()
                     for inp in inputs:
-                        val = (await inp.input_value()).strip()
                         err_text_low = (await safe_text(err)).lower()
-                        if not val or err:
+                        # Strict: only identity facts (email/phone/date) and
+                        # mathematically-forced values. A bare "2" for an
+                        # unrecognized field fabricates tenure — leave it for
+                        # NEEDS_REVIEW instead.
+                        new_val = ""
+                        if "larger than" in err_text_low or "greater than" in err_text_low:
+                            num_match = re.search(r"(?:larger|greater)\s+than\s+(\d+)", err_text_low)
+                            if num_match:
+                                min_val = int(num_match.group(1))
+                                new_val = str(min_val + 10) if min_val < 1000 else str(min_val + 50000)
+                            else:
+                                new_val = "500000"
+                        elif "between 0 and 99" in err_text_low or "between 0 and" in err_text_low:
                             new_val = "2"
-                            if "larger than" in err_text_low or "greater than" in err_text_low:
-                                num_match = re.search(r"(?:larger|greater)\s+than\s+(\d+)", err_text_low)
-                                if num_match:
-                                    min_val = int(num_match.group(1))
-                                    new_val = str(min_val + 10) if min_val < 1000 else str(min_val + 50000)
-                                else:
-                                    new_val = "500000"
-                            elif "between 0 and 99" in err_text_low or "between 0 and" in err_text_low:
-                                new_val = "2"
-                            elif "decimal" in err_text_low:
-                                new_val = "2.5"
-                            elif "email" in err_text_low:
-                                new_val = (self.config.applicant_email or "").strip()
-                            elif "phone" in err_text_low or "mobile" in err_text_low:
-                                new_val = (self.config.applicant_phone or "").strip()
-                            elif "date" in err_text_low or (await inp.get_attribute("type") == "date"):
-                                import datetime
-                                new_val = datetime.date.today().strftime("%Y-%m-%d")
+                        elif "decimal" in err_text_low:
+                            new_val = "2.5"
+                        elif "email" in err_text_low:
+                            new_val = (self.config.applicant_email or "").strip()
+                        elif "phone" in err_text_low or "mobile" in err_text_low:
+                            new_val = (self.config.applicant_phone or "").strip()
+                        elif "date" in err_text_low or (await inp.get_attribute("type") == "date"):
+                            import datetime
+                            new_val = datetime.date.today().strftime("%Y-%m-%d")
 
                             if not new_val:
                                 # Config holds no identity value for this field:
