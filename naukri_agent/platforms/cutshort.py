@@ -10,7 +10,6 @@ from playwright.async_api import Page
 
 from ..browser.artifacts import ArtifactStore
 from ..browser.resilience import (
-    dismiss_overlays,
     first_visible,
     human_pause,
     human_type,
@@ -1669,35 +1668,55 @@ class CutshortPlatform(BaseJobPlatform):
                 await textarea.click()
             except Exception:
                 pass
-            # Dismiss cookie/overlay layers first: run 391 failed every pitch
-            # fill with 10s actionability timeouts on a resolved textarea —
-            # classic overlay-intercept signature, not a missing element.
-            await dismiss_overlays(self.page)
+            # NOTE: do NOT call dismiss_overlays() inside this modal flow — it
+            # ends with an unconditional Escape that closes the pitch modal
+            # itself (run 397 headed: 5/5 "pitch textarea gone" came from
+            # exactly that call placed here). Overlays were cleared at flow
+            # entry; the modal is the foreground by construction.
             try:
                 await textarea.fill(pitch, timeout=5000)
             except Exception:
-                # React re-render can detach the resolved handle between
-                # resolve and fill (run 388: 10s timeout on the dialog chain).
-                # One re-resolve, then keyboard typing (which only needs focus
-                # and bypasses stability checks) — never submit an empty pitch.
+                # The resolved handle can detach on React re-render (runs
+                # 388/391: 10s timeouts on the dialog chain). Re-resolve from
+                # the PAGE — the old modal handle may itself be detached —
+                # then give up. Never submit an empty pitch.
                 # (Early return skips the feed nav-back below; the next job's
                 # clean slate + URL fallback covers it.)
                 try:
+                    fresh_modal = await first_visible(
+                        self.page,
+                        [
+                            "#modal__content",
+                            "div.modal__wrapper",
+                            "div[role='dialog']",
+                            "div#modal-root > div",
+                            "div#modal-root div[class*='Modal']",
+                            "div#modal-root div[class*='modal']",
+                            "div.modal-content",
+                            "div[class*='modal']",
+                            "form:has(textarea)",
+                            "div:has(> textarea[name='message'])",
+                        ],
+                        timeout_ms=2000,
+                    )
+                    fresh_scope = fresh_modal or self.page
                     fresh = await first_visible(
-                        modal_scope,
+                        fresh_scope,
                         ["textarea[name='message']", "textarea[placeholder*='message' i]", "textarea"],
                         timeout_ms=2000,
                     )
                     if fresh is None:
                         raise RuntimeError("pitch textarea gone")
                     textarea = fresh
-                    await dismiss_overlays(self.page)
-                    try:
-                        await textarea.fill(pitch, timeout=5000)
-                    except Exception:
-                        await textarea.evaluate("el => el.focus()")
-                        await self.page.keyboard.type(pitch[:1500], delay=1)
+                    modal = fresh_modal or modal
+                    await textarea.fill(pitch, timeout=5000)
                 except Exception as exc2:
+                    try:
+                        dump_path = self.artifacts.dir / f"cutshort-pitch-failed-{raw_id}.html"
+                        dump_path.write_text(await self.page.content(), encoding="utf-8")
+                        log.info("cutshort.pitch_failed_dump", path=str(dump_path))
+                    except Exception:
+                        pass
                     try:
                         await self.page.keyboard.press("Escape")
                         await human_pause(300, 500)

@@ -966,7 +966,15 @@ class WellfoundPlatform(BaseJobPlatform):
                     f"Best regards,\n{who.name}"
                 )
 
-            await human_type(textarea, pitch)
+            # Instant fill, not keystroke simulation: human_type costs ~35s on
+            # a 500-char pitch (run 398 averaged 96s/job, mostly typing +
+            # Gemini waits). Dispatch input/change so React picks up the value.
+            try:
+                await textarea.fill(pitch)
+                await textarea.dispatch_event("input")
+                await textarea.dispatch_event("change")
+            except Exception:
+                await human_type(textarea, pitch)
             await human_pause(500, 1000)
             try:
                 delivered = await textarea.input_value()

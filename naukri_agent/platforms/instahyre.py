@@ -143,29 +143,139 @@ class InstahyrePlatform(BaseJobPlatform):
         log.error("instahyre.auth.login_failed")
         return False
 
-    async def _select_skill(self, skills_input, _tags_text, skill: str) -> None:
+    async def _set_skills_via_api(self, skills: list[str]) -> list[str]:
+        """Set skill tags through selectize's own JS API, bypassing the
+        autocomplete UI entirely.
+
+        The suggestion dropdown stopped returning options (runs 396+: typed
+        text lands in the input, zero options render, Enter commits nothing),
+        while the widget instance itself is healthy. Driving addOption +
+        addItem directly restores deterministic filtering with zero typing.
+        Returns the widget's resulting item list.
+        """
+        js = """(wanted) => {
+          const out = {via: null, items: []};
+          try {
+            const host = document.getElementById('skills-drop-select-job-search');
+            const inst = host && host.selectize;
+            if (inst) {
+              for (const sk of wanted) {
+                try {
+                  if (!inst.options[sk]) inst.addOption({value: sk, text: sk});
+                  inst.addItem(sk);
+                } catch (e) {}
+              }
+              out.via = 'selectize';
+              out.items = (inst.items || []).slice();
+              if (out.items.length) return out;
+            } else { out.noInstance = true; }
+          } catch (e) { out.instErr = String(e).slice(0, 100); }
+          try {
+            const ng = window.angular;
+            if (!ng) { out.noAngular = true; return out; }
+            const root = document.querySelector('.facets-main') || document.body;
+            let s = ng.element(root).scope();
+            let d = 0;
+            while (s && d < 8 && !(s.search && s.search.searchObj)) { s = s.$parent; d++; }
+            if (s && s.search && s.search.searchObj) {
+              s.search.searchObj.skills = wanted.slice();
+              try { s.$apply(); } catch (e) {}
+              out.via = 'scope';
+              out.scopeFound = true;
+            } else { out.scopeFound = false; }
+          } catch (e) { out.scopeErr = String(e).slice(0, 100); }
+          return out;
+        }"""
+        try:
+            result = await self.page.evaluate(js, skills)
+        except Exception as exc:
+            log.debug("instahyre.filters.api_failed", error=str(exc)[:120])
+            return []
+        if not isinstance(result, dict):
+            return []
+        log.info("instahyre.filters.api_result", result=str(result)[:300])
+        items = result.get("items") or []
+        return [str(x) for x in items]
+
+    async def _select_skill(self, _tags_text, skill: str) -> None:
         """Select one skill tag: exact-match dropdown option, else Enter.
 
-        Closes any stale dropdown first (an open flyout covers the input and
-        turns every subsequent fill into a 10s actionability timeout) and
-        verifies the whole skill landed as one tag (run 366 fracture).
-        Raises on persistent failure; the caller time-boxes and logs.
+        Resolves the input fresh on EVERY call: selectize swaps the input
+        node after each tag lands, so a reused handle goes permanently
+        non-actionable (runs 396/400/402: SDET lands, then fourteen straight
+        10s click timeouts on the dead node). Raises on persistent failure;
+        the caller time-boxes and logs.
         """
         try:
             await self.page.keyboard.press("Escape")
             await human_pause(100, 200)
         except Exception:
             pass
-        await skills_input.click()
+        skills_input = await first_visible(
+            self.page,
+            [
+                "#skills-selectized",
+                "input[placeholder*='skills' i]",
+                "div.selectize-input input",
+            ],
+            timeout_ms=2500,
+        )
+        if skills_input is None:
+            raise RuntimeError("skill input gone")
+        # The input collapses to a few px once tags exist and is routinely
+        # covered by the tag/flyout layer (runs 396-403: every click() dies
+        # in actionability). focus() skips coverage checks — type after it.
+        try:
+            await skills_input.click(timeout=2000)
+        except Exception:
+            await skills_input.focus()
         await human_pause(150, 300)
         await skills_input.fill("")
-        await human_type(skills_input, skill)
+        try:
+            await human_type(skills_input, skill)
+        except Exception:
+            # human_type starts with an unbounded click; on a covered input
+            # that is another 10s burn. Focus + raw typing needs no coverage.
+            await skills_input.focus()
+            await self.page.keyboard.type(skill, delay=20)
         await human_pause(300, 500)
 
         picked = False
         try:
-            options = self.page.locator(".selectize-dropdown .option")
+            # The dropdown populates on a debounce — wait for options instead
+            # of snapshotting an empty list (runs 396-404: Enter commits
+            # nothing when no option is highlighted and creation is off).
+            # NOTE Sep 2026: Instahyre renamed option nodes from
+            # `.option` to `.selectize-option` (old dumps: 0 selectize-option
+            # nodes; new dumps: 15). Match both so either markup works.
+            _opt_sel = ".selectize-dropdown .selectize-option, .selectize-dropdown .option"
+            try:
+                await self.page.locator(_opt_sel).first.wait_for(state="attached", timeout=2000)
+            except Exception:
+                pass
+            options = self.page.locator(_opt_sel)
             count = await options.count()
+            try:
+                _typed = await skills_input.input_value()
+                _dd_visible = await self.page.locator(".selectize-dropdown").first.is_visible()
+                _samples = []
+                for _si in range(min(count, 3)):
+                    try:
+                        _samples.append(
+                            ((await options.nth(_si).inner_text()) or "").strip()[:30]
+                        )
+                    except Exception:
+                        pass
+            except Exception:
+                _typed, _dd_visible, _samples = "?", False, []
+            log.debug(
+                "instahyre.filters.dropdown_options",
+                skill=skill,
+                count=count,
+                typed=_typed,
+                dropdown_visible=_dd_visible,
+                samples=_samples,
+            )
             for idx in range(min(count, 8)):
                 try:
                     text = ((await options.nth(idx).inner_text()) or "").strip().lower()
@@ -178,18 +288,56 @@ class InstahyrePlatform(BaseJobPlatform):
         except Exception:
             pass
         if not picked:
+            # No exact option: keyboard-navigate (ArrowDown highlights the
+            # top suggestion) before Enter — bare Enter on an unhighlighted
+            # list commits nothing when creation is disabled.
+            try:
+                await skills_input.press("ArrowDown")
+                await human_pause(200, 400)
+            except Exception:
+                pass
             await skills_input.press("Enter")
         await human_pause(250, 450)
 
         if skill.lower() not in await _tags_text():
+            # Retry against a freshly resolved input (same swap hazard).
             try:
-                await skills_input.click()
-                await human_pause(150, 300)
-                await skills_input.press("Enter")
-                await human_pause(250, 450)
+                retry_input = await first_visible(
+                    self.page,
+                    ["#skills-selectized", "input[placeholder*='skills' i]"],
+                    timeout_ms=2000,
+                )
+                if retry_input is not None:
+                    await retry_input.click(timeout=2000)
+                    await human_pause(150, 300)
+                    await retry_input.press("Enter")
+                    await human_pause(250, 450)
             except Exception as exc:
                 log.debug("instahyre.filters.skill_retry_failed", skill=skill, error=str(exc))
             if skill.lower() not in await _tags_text():
+                # Forensics for the next round: box size, enabled state and
+                # whatever element sits on top of the input at its center.
+                try:
+                    probe = await first_visible(
+                        self.page, ["div.selectize-input input"], timeout_ms=1500
+                    )
+                    if probe is not None:
+                        box = await probe.bounding_box()
+                        enabled = await probe.is_enabled()
+                        coverer = await probe.evaluate(
+                            "el => { const r = el.getBoundingClientRect();"
+                            " const t = document.elementFromPoint(r.x + r.width/2, r.y + r.height/2);"
+                            " return t ? (t.tagName + '.' + (t.className.baseVal ?? t.className)) : 'none'; }"
+                        )
+                        log.warning(
+                            "instahyre.filters.input_forensics",
+                            skill=skill,
+                            box=box,
+                            enabled=enabled,
+                            coverer=str(coverer)[:120],
+                        )
+                except Exception as exc:
+                    log.debug("instahyre.filters.forensics_failed", error=str(exc)[:100])
                 log.warning("instahyre.filters.skill_missing", skill=skill)
 
     async def _apply_ui_filters(self, profile: JobProfile) -> None:
@@ -278,15 +426,32 @@ class InstahyrePlatform(BaseJobPlatform):
                 except Exception:
                     return ""
 
+            # Primary path: widget API (deterministic, seconds). The per-skill
+            # UI loop below is the fallback for when the API lands nothing.
+            api_landed = 0
+            try:
+                await self._set_skills_via_api(target_skills)
+                await human_pause(500, 1000)
+                landed_text = await _tags_text()
+                api_landed = sum(1 for s in target_skills if s.lower() in landed_text)
+                log.info("instahyre.filters.skills_via_api", landed=api_landed, total=len(target_skills))
+            except Exception as exc:
+                log.debug("instahyre.filters.api_path_failed", error=str(exc)[:120])
+
+            ui_needed = api_landed < max(1, len(target_skills) // 2)
             for skill in target_skills:
+                if not ui_needed:
+                    break
+                if skill.lower() in await _tags_text():
+                    continue
                 # Hard time-box per skill: on the new UI the selectize input
                 # intermittently stops accepting fills (run 396: 14 skills ×
                 # ~20s of hung fills = 5 silent minutes, 1/15 tags landed).
                 # One stuck skill must never eat the run budget.
                 try:
                     await asyncio.wait_for(
-                        self._select_skill(skills_input, _tags_text, skill),
-                        timeout=12,
+                        self._select_skill(_tags_text, skill),
+                        timeout=15,
                     )
                 except asyncio.TimeoutError:
                     log.warning("instahyre.filters.skill_timeboxed", skill=skill)

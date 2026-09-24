@@ -21,6 +21,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import time
 import urllib.error
 import urllib.request
 from dataclasses import dataclass
@@ -34,7 +35,7 @@ GEMINI_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/models"
 
 # Last-resort default when Settings cannot load. Must equal
 # `Settings.gemini_model`'s default; GEMINI_MODEL env overrides both.
-PINNED_DEFAULT_MODEL = "gemini-3-flash-preview"
+PINNED_DEFAULT_MODEL = "gemini-3.6-flash"
 
 
 @dataclass(slots=True)
@@ -137,6 +138,10 @@ class GeminiWriter:
         # Set on 401/403/404: every further call this process would fail the
         # same way (run 291 burned 12 identical 404s). Fail-soft to template.
         self._model_broken = False
+        # Preview models flap with 503s under load (run 398: six straight
+        # 503s, ~20s burned per job). Three consecutive 5xx trips the same
+        # breaker; a later success resets the count.
+        self._server_errors = 0
 
     def generate_email_body(
         self,
@@ -211,7 +216,11 @@ RULES FOR THE EMAIL:
             # output. 350 tokens starved every reply to ~11 visible tokens
             # (finishReason MAX_TOKENS, thoughtsTokenCount ~335). 2048 leaves
             # room for thought AND the full email. Verified live.
-            "generationConfig": {"temperature": 0.5, "maxOutputTokens": 2048},
+            "generationConfig": {
+                "temperature": 0.5,
+                "maxOutputTokens": 1024,
+                "thinkingConfig": {"thinkingBudget": 0},
+            },
         }
         data = json.dumps(payload).encode("utf-8")
         # API key travels in a header, never in the URL query, because
@@ -228,10 +237,8 @@ RULES FOR THE EMAIL:
         )
 
         try:
-            # Thinking models reason before writing: 12s starved most calls
-            # into timeouts on busy hours. 30s comfortably covers thought +
-            # output at 2048 tokens.
-            with urllib.request.urlopen(req, timeout=30) as response:
+            # With thinkingBudget=0, responses return cleanly in 2-4s without timeout.
+            with urllib.request.urlopen(req, timeout=15) as response:
                 if response.status == 200:
                     resp_json: dict[str, Any] = json.loads(response.read().decode("utf-8"))
                     candidates = resp_json.get("candidates", [])
@@ -245,9 +252,6 @@ RULES FOR THE EMAIL:
                                     if line.lower().startswith("subject:"):
                                         continue
                                     clean_lines.append(line.replace("**", "").replace("`", ""))
-                                # Markdown fence bleed: a ```text / ```markdown
-                                # wrapper would otherwise leave the bare word
-                                # "text"/"markdown" as line 1 of the email.
                                 while clean_lines and re.match(
                                     r"^(text|markdown|email|plain)$",
                                     clean_lines[0].strip().lower(),
@@ -256,6 +260,7 @@ RULES FOR THE EMAIL:
                                 while clean_lines and not clean_lines[-1].strip():
                                     clean_lines.pop()
                                 cleaned_text = "\n".join(clean_lines).strip()
+                                self._server_errors = 0
                                 log.info(
                                     "gemini.email_generated",
                                     role=role_name,
@@ -274,6 +279,16 @@ RULES FOR THE EMAIL:
                     status=exc.code,
                     detail="Check GEMINI_MODEL in .env — template fallback for the rest of this run.",
                 )
+            elif 500 <= exc.code < 600:
+                self._server_errors += 1
+                if self._server_errors >= 3:
+                    self._model_broken = True
+                    log.error(
+                        "gemini.model_overloaded",
+                        model=self.model,
+                        consecutive_5xx=self._server_errors,
+                        detail="Model flapping — template fallback for the rest of this run.",
+                    )
         except (urllib.error.URLError, OSError, ValueError, TimeoutError) as exc:
             log.warning("gemini.api_error", model=self.model, error=str(exc)[:150])
 

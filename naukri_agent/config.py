@@ -124,7 +124,7 @@ class Settings(BaseSettings):
     gemini_api_key: str = ""
     # Single pinned Gemini model for all AI copy. Overridable via GEMINI_MODEL
     # env var; there is exactly one serving model per run so logs stay truthful.
-    gemini_model: str = "gemini-3-flash-preview"
+    gemini_model: str = "gemini-3.6-flash"
     browser_session_secret: str = ""
 
 

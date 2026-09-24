@@ -510,6 +510,58 @@ class TestCutshortUnifiedConfiguration(unittest.TestCase):
         self.assertGreater(_parse_posted_days("Posted 2 weeks ago"), MAX_POSTED_DAYS)
 
 
+class TestGeminiBreaker(unittest.TestCase):
+    def _http_503(self, *args, **kwargs):
+        import urllib.error
+
+        raise urllib.error.HTTPError(
+            "https://generativelanguage.googleapis.com/", 503,
+            "Service Unavailable", {}, None,
+        )
+
+    def test_three_503_trips_breaker(self):
+        """Three straight 503s must trip the breaker: the 4th call returns
+        None without touching the network (run 398 burned ~20s per job)."""
+        from unittest.mock import patch
+
+        from naukri_agent.core.gemini_writer import GeminiWriter
+
+        writer = GeminiWriter(api_key="test-key", model="test-model")
+        with patch("urllib.request.urlopen", side_effect=self._http_503) as mock_open:
+            for _ in range(3):
+                self.assertIsNone(writer.generate_email_body("Dev", "desc", "Co"))
+            self.assertTrue(writer._model_broken)
+            self.assertIsNone(writer.generate_email_body("Dev", "desc", "Co"))
+            self.assertEqual(mock_open.call_count, 3)
+
+    def test_success_resets_503_count(self):
+        """A success between failures must reset the consecutive count."""
+        import io
+        import json
+        from unittest.mock import patch
+
+        from naukri_agent.core.gemini_writer import GeminiWriter
+
+        body = json.dumps(
+            {"candidates": [{"content": {"parts": [{"text": "Hello world pitch text here"}]}}]}
+        ).encode()
+        writer = GeminiWriter(api_key="test-key", model="test-model")
+        with patch("urllib.request.urlopen", side_effect=self._http_503):
+            writer.generate_email_body("Dev", "desc", "Co")
+            writer.generate_email_body("Dev", "desc", "Co")
+        self.assertEqual(writer._server_errors, 2)
+        self.assertFalse(writer._model_broken)
+
+        resp = MagicMock()
+        resp.status = 200
+        resp.read.return_value = body
+        resp.__enter__.return_value = resp
+        with patch("urllib.request.urlopen", return_value=resp):
+            out = writer.generate_email_body("Dev", "desc", "Co")
+        self.assertTrue(out)
+        self.assertEqual(writer._server_errors, 0)
+
+
 if __name__ == "__main__":
     unittest.main()
 
