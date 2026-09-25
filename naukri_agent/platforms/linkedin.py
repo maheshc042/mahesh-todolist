@@ -765,17 +765,25 @@ class LinkedInPlatform(BaseJobPlatform):
         # the 3.5y ceiling in force on every platform (run 388 applied a
         # Manual QA role whose card carried no experience signal).
         try:
+            from ..core.ranking import CandidateProfile
+
             _prof = next(
                 (p for p in (getattr(self.config, "profiles", []) or [])
                  if (getattr(p, "name", "") or "") == (profile_name or "")),
                 None,
             )
-            _rules = (
-                _prof.filters_for("recommended")
-                if _prof is not None
-                else self.config.get_unified_linkedin_profile().filters
+            if _prof is None:
+                _prof = self.config.get_unified_linkedin_profile()
+            _cand = CandidateProfile(
+                title_keywords=list(getattr(_prof, "title_keywords", []) or []),
+                core_skills=list(getattr(_prof, "core_skills", []) or []),
+                secondary_skills=list(getattr(_prof, "secondary_skills", []) or []),
+                bonus_skills=list(getattr(_prof, "bonus_skills", []) or []),
+                target_experience_years=float(getattr(_prof, "experience_years", 0) or 2.5),
             )
-            _regated = FilterEngine(_rules).evaluate_card(job)
+            _regated = FilterEngine(
+                _prof.filters_for("recommended"), candidate=_cand
+            ).evaluate_card(job)
         except Exception as exc:
             log.debug("linkedin.apply.regate_failed_open", error=str(exc)[:120])
             _regated = None
@@ -1024,7 +1032,7 @@ class LinkedInPlatform(BaseJobPlatform):
                     log.warning("linkedin.apply.step_stuck", step=step, error=err_txt)
                     await self._dismiss_modal()
                     _record_timing()
-                    return ApplyOutcome(status=ApplicationStatus.FAILED, detail=f"Step {step} blocked: {err_txt}")
+                    return ApplyOutcome(status=ApplicationStatus.FAILED, detail=f"Step {step} blocked: {err_txt} | step={step_sig}")
             else:
                 stuck_count = 0
             prev_step_signature = step_sig

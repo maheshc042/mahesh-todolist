@@ -34,6 +34,15 @@ def _normalise_str(text: str) -> str:
     """Normalize string and unify tech synonyms like Dot Net / .NET / dot.net -> dotnet, reactjs -> react, nodejs -> node."""
     low = (text or "").lower()
     low = re.sub(r"\bdot[\s.-]?net\b|(?<!\w)\.net\b", "dotnet", low)
+    # Bare "NET" means .NET only when tech-adjacent ("TypeScript NET",
+    # run 391). A bare \bnet\b rule would nuke real companies like
+    # "Net Solutions" via the blocked-company gate, so require a tech
+    # token in front. Leading-lone "Net Developer" stays uncovered.
+    low = re.sub(
+        r"(\b(?:typescript|javascript|react|angular|node|vue|asp|mvc|core|web|backend|software|stack|fullstack)\s+)net\b",
+        lambda m: m.group(1) + "dotnet",
+        low,
+    )
     # Dotnet-family frameworks share one hiring pool: a Blazor / Razor /
     # ASP.NET requisition rejects a 0-dotnet resume as fast as ".NET" itself
     # (run 377 applied to a Blazor senior role). One family rule here beats a
@@ -123,10 +132,44 @@ JUNIOR_FAMILY_KEYWORDS = (
 # trustworthy; one triggered by stray card text is not.
 _IMPUTED_SENIORITY_MARKERS = ("senior", "sr.", "sr ", "lead", "principal", "staff")
 
+_ROMAN_LEVELS = {"i": 1, "ii": 2, "iii": 3, "iv": 4, "v": 5, "vi": 6}
+
 
 def _title_suggests_senior(title: str) -> bool:
     low = f" {(title or '').lower()} "
-    return any(marker in low for marker in _IMPUTED_SENIORITY_MARKERS)
+    if any(marker in low for marker in _IMPUTED_SENIORITY_MARKERS):
+        return True
+    # Leveled bands read senior at 3+: SDE 4 / SDE-III imply a senior
+    # requisition while SDE 1/2 stay junior (run 424 applied SDE-4 sight
+    # unseen). Bare III/IV tokens behave the same ("Engineer III").
+    level_match = re.search(r"\bsde[\s.\-]*([ivxl]+|\d+)\b", low)
+    if level_match:
+        token = level_match.group(1)
+        level = _ROMAN_LEVELS.get(token, int(token) if token.isdigit() else 0)
+        return level >= 3
+    return bool(re.search(r"\b(iii|iv|v|vi)\b", low))
+
+
+def impute_seniority(job: Job) -> bool:
+    """Fill missing experience from title seniority markers, all platforms.
+
+    LinkedIn's card scraper does this inline; every other platform leaves exp
+    empty and senior titles sail through on 'unknown never rejects' (run 424:
+    SDE-4, Sr Lead AI, Eng Lead applied with no stated range). Only fills when
+    BOTH bounds are missing, and flags experience_imputed so the gates treat
+    the numbers as title-corroborated. Returns True when it filled.
+    """
+    if job.min_experience is not None or job.max_experience is not None:
+        return False
+    low = f" {(job.title or '').lower()} "
+    if any(k in low for k in ("intern", "trainee", "fresher")):
+        job.min_experience, job.max_experience = 0.0, 0.0
+    elif _title_suggests_senior(job.title):
+        job.min_experience, job.max_experience = 5.0, 10.0
+    else:
+        return False
+    job.experience_imputed = True
+    return True
 
 
 TECH_ALIASES = (
@@ -398,6 +441,19 @@ class FilterEngine:
                         False,
                         SkipReason.FILTER_EXPERIENCE,
                         f"caps at {job.max_experience}y < min {exp.min_years}y",
+                    )
+                # Fresher-only requisitions cap below any experienced hire: a
+                # 0-0 band is a guaranteed recruiter reject at 2y+ tenure
+                # (run 424 applied to a 0-0 "Fresher" posting). Bands reaching
+                # 1.0y+ stay eligible — overqualified decay handles them.
+                candidate_years = float(
+                    getattr(self.candidate, "target_experience_years", 0) or 0
+                )
+                if job.max_experience < 1.0 and candidate_years >= 2.0:
+                    return FilterDecision(
+                        False,
+                        SkipReason.FILTER_EXPERIENCE,
+                        f"fresher-only band caps at {job.max_experience}y",
                     )
                 # Allow wide startup requisition bands up to the configured
                 # ceiling if min_experience <= 3.5y; bands starting above the

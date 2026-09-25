@@ -357,7 +357,7 @@ class ApplyEngine:
 
             if result.unanswered:
                 shot = await self.artifacts.screenshot(self.page, "unanswered", profile, job.job_id)
-                return ApplyOutcome(status=ApplicationStatus.NEEDS_REVIEW, reason=SkipReason.UNANSWERED_QUESTION, detail="Unanswered screening question", screenshot_path=shot, questions_answered=result.answered, attempts=attempts)
+                return ApplyOutcome(status=ApplicationStatus.NEEDS_REVIEW, reason=SkipReason.UNANSWERED_QUESTION, detail="Unanswered screening question", screenshot_path=shot, questions_answered=result.answered, unanswered_questions=list(result.unanswered), attempts=attempts)
 
             is_page_confirmed = (
                 await self._fast_check(S.APPLY_SUCCESS)

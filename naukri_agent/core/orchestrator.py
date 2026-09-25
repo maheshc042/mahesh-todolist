@@ -42,7 +42,7 @@ from ..browser.resilience import FatalAgentError, first_visible
 from ..config import PROJECT_ROOT, AgentConfig, ConfigError, JobProfile, NaukriAccount, Settings
 from ..core.answers import AnswerEngine
 from ..core.application_planner import ApplicationPlanner
-from ..core.filters import FilterEngine
+from ..core.filters import FilterEngine, impute_seniority
 from ..core.mailer import ColdEmailer
 from ..core.models import (
     ApplicationStatus,
@@ -868,6 +868,17 @@ class Orchestrator:
             log.info("search.jobs_empty_after_strikes", profile=profile.name, platform=platform.platform_name)
             return
 
+        # Universal seniority imputation: only LinkedIn imputes at scrape, so
+        # senior titles elsewhere arrive with empty exp and sail through on
+        # 'unknown never rejects'. Imputed numbers are title-corroborated, so
+        # the experience gates can judge them (run 424: SDE-4, Sr Lead AI).
+        for _j in collected_jobs:
+            try:
+                if impute_seniority(_j):
+                    log.debug("search.seniority_imputed", job_id=_j.job_id, title=_j.title[:60])
+            except Exception:
+                pass
+
 
         # =========================================================
         # STEP 1.5: Inject API Match Scores (Fast Pre-filter)
@@ -1273,6 +1284,16 @@ class Orchestrator:
             self.stats.bump(profile.name, "needs_review", platform=platform_name)
             self.consecutive_failures = 0
             self.platform_consecutive_failures = 0
+            if not outcome.unanswered_questions:
+                # A review with no captured questions teaches the KB nothing
+                # (run 424: Guenstiger.de left zero question rows). Loud so the
+                # producing platform gets its unanswered list fixed.
+                log.warning(
+                    "answer_learn.empty_review",
+                    job_id=job.job_id,
+                    title=job.title[:70],
+                    detail=(outcome.detail or "")[:150],
+                )
             for question in outcome.unanswered_questions:
                 if isinstance(question, dict):
                     q_text = question.get("text", "")

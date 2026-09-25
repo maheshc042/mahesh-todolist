@@ -583,6 +583,85 @@ class TestMailerTrackRouting(unittest.TestCase):
             self.assertIn("React, Node.js", mailer._generate_body("Full Stack Developer", "", "Co"))
 
 
+class TestExperienceGates(unittest.TestCase):
+    def _engine(self, profile_name="AI / Python Engineer", years=2.5):
+        from naukri_agent.core.ranking import CandidateProfile
+
+        cfg = AgentConfig.load()
+        prof = next(p for p in cfg.profiles if profile_name in p.name)
+        cand = CandidateProfile(
+            title_keywords=[], core_skills=[], secondary_skills=[],
+            target_experience_years=years,
+        )
+        return FilterEngine(prof.filters_for("recommended"), candidate=cand)
+
+    def _job(self, title, company="C", min_exp=None, max_exp=None):
+        return Job(
+            job_id="t-%s" % title[:10], title=title, company=company,
+            location="Bengaluru", url="http://t", platform="naukri",
+            min_experience=min_exp, max_experience=max_exp,
+        )
+
+    def test_fresher_only_band_rejected(self):
+        """0-0 fresher requisitions reject at 2y+ tenure (run 424)."""
+        engine = self._engine()
+        d = engine.evaluate_card(self._job("AI Engineer", min_exp=0.0, max_exp=0.0))
+        self.assertFalse(d.passed)
+        self.assertEqual(d.reason.value, "filter_experience")
+
+    def test_narrow_bands_stay_eligible(self):
+        """0-1/0-2 bands stay eligible — only pure 0-0 is cut."""
+        engine = self._engine()
+        self.assertTrue(engine.evaluate_card(self._job("AI Engineer", min_exp=0.0, max_exp=1.0)).passed)
+        self.assertTrue(engine.evaluate_card(self._job("AI Engineer", min_exp=0.0, max_exp=2.0)).passed)
+
+    def test_bare_net_blocked_tech_adjacent(self):
+        """'TypeScript NET' is .NET (run 391 Neu Edge miss)."""
+        engine = self._engine("Full Stack / Web Developer", years=3.0)
+        d = engine.evaluate_card(self._job("Full Stack Engineer React Angular TypeScript NET"))
+        self.assertFalse(d.passed)
+
+    def test_net_company_not_blocked(self):
+        """A company literally named 'Net Solutions' must not trip the
+        dotnet company gate — the NET rule is tech-adjacent only."""
+        engine = self._engine("Full Stack / Web Developer", years=3.0)
+        d = engine.evaluate_card(self._job("Software Engineer", company="Net Solutions"))
+        self.assertTrue(d.passed, f"wrongly blocked: {d.detail}")
+
+    def test_impute_seniority(self):
+        """Missing exp fills from title markers for every platform (run 424:
+        SDE-4/Sr Lead applied with no stated range)."""
+        from naukri_agent.core.filters import impute_seniority
+
+        j = self._job("SDE 4 - Backend")
+        self.assertTrue(impute_seniority(j))
+        self.assertEqual((j.min_experience, j.max_experience), (5.0, 10.0))
+        self.assertTrue(j.experience_imputed)
+
+        stated = self._job("SDE 4 - Backend", min_exp=2.0, max_exp=7.0)
+        self.assertFalse(impute_seniority(stated))
+
+        junior_band = self._job("SDE 2 - Backend")
+        self.assertFalse(impute_seniority(junior_band))
+
+        roman = self._job("SDE - III @ Arintra")
+        self.assertTrue(impute_seniority(roman))
+
+        plain = self._job("Software Engineer")
+        self.assertFalse(impute_seniority(plain))
+        self.assertIsNone(plain.min_experience)
+
+    def test_imputed_senior_rejected_by_ceiling(self):
+        """Imputed 5-10y seniority must then fail the 3.5y ceiling gate."""
+        from naukri_agent.core.filters import impute_seniority
+
+        engine = self._engine()
+        j = self._job("Sr. Lead AI Engineer")
+        self.assertTrue(impute_seniority(j))
+        d = engine.evaluate_card(j)
+        self.assertFalse(d.passed)
+
+
 if __name__ == "__main__":
     unittest.main()
 
