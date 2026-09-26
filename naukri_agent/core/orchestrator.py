@@ -991,6 +991,10 @@ class Orchestrator:
                 self._check_platform_limits(platform.platform_name)
                 if remaining() <= 0:
                     log.info("profile.cap_reached", profile=profile.name, cap=platform_limit)
+                    self.stats.errors.append(
+                        f"{platform.platform_name} ({profile.name}): application cap reached "
+                        f"({applied_this_profile}/{platform_limit} profile, {self.applied_today}/{self.config.run.daily_application_cap} daily) — remaining queue skipped"
+                    )
                     break
 
                 job = rjob.job

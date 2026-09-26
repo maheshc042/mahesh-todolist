@@ -277,6 +277,13 @@ answers:
   why leaving: "Looking for better technical growth, challenging engineering problems, and career advancement."
   why are you looking for a change: "Looking for better technical growth, challenging engineering problems, and career advancement."
 
+  # Self fit-rating questions (1-10 / 0-10 scales with real options):
+  # default 8 — strong but credible. Never 10 (not believable), never
+  # below 7. Requires the word "fit" so skill ratings ("Rate yourself in
+  # Java") never catch an inflated number. (Skip-only variants are
+  # answered Skip per-question.)
+  "re:rate.{0,25}fit|\\bfit\\b.{0,25}(?:1|one).{0,8}10|(?:1|one).{0,8}10.{0,25}\\bfit\\b": "8"
+
   # General HR
   do you have a valid passport: "Yes"
   highest qualification: "B.Tech"

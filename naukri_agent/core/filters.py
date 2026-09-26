@@ -105,6 +105,10 @@ DISJOINT_SPECIALIZATIONS = (
     # never matches "community" (word boundaries).
     "2d", "3d", "unreal", "unity", "graphics", "game developer",
     "artist", "animator", "video editor",
+    # Strategy/advisory titles are not engineering roles even when they wear
+    # an AI prefix (run 430 applied to an "AI Activation Strategist" individual
+    # contributor posting). Surgical token — no engineering title uses it.
+    "strategist",
 )
 
 # Hybrid AI titles: full-stack/software markers that promote an AI-titled

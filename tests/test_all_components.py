@@ -121,6 +121,25 @@ class TestFilterEngine(unittest.TestCase):
                 f"{prof.name}: Manual QA at 3-5y must be rejected, got {decision.reason}",
             )
 
+    def test_strategist_titles_blocked(self):
+        """Strategy/advisory titles are not engineering even with an AI
+        prefix (run 430 applied to an AI Activation Strategist)."""
+        for prof in (self.fs_profile, self.ai_profile):
+            engine = FilterEngine(prof.filters_for("recommended"))
+            job = Job(
+                job_id="test-strategist",
+                title="AI Activation Strategist",
+                company="Test Corp",
+                location="Bengaluru",
+                url="http://test.com",
+                platform="naukri",
+            )
+            decision = engine.evaluate_card(job)
+            self.assertFalse(
+                decision.passed,
+                f"{prof.name}: Strategist title must be rejected, got {decision.reason}",
+            )
+
 
     def test_creative_roles_blocked(self):
         """Graphics/game/creator roles hire portfolios, not engineering tenure
