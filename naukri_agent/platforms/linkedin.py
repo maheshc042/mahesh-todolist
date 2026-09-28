@@ -1494,6 +1494,23 @@ class LinkedInPlatform(BaseJobPlatform):
                         label = (await inp.evaluate("el => el.closest('div').innerText")).strip()
                     except Exception:
                         pass
+                if not label:
+                    # LinkedIn's newer "Additional Questions" form-builder
+                    # renders question text in detached heading nodes that no
+                    # structural query catches (runs 424/433: every stuck job
+                    # died with an empty label). Nearest preceding visible
+                    # text, bounded — still resolved strictly downstream, so a
+                    # miss here only preserves the honest fail, never invents.
+                    try:
+                        label = (await inp.evaluate(
+                            "el => { let node = el; for (let hop = 0; hop < 6 && node; hop++) {"
+                            " let sib = node.previousElementSibling;"
+                            " while (sib) { const t = (sib.innerText || '').trim().replace(/\\s+/g, ' ');"
+                            " if (t.length > 5) return t.slice(0, 200); sib = sib.previousElementSibling; }"
+                            " node = node.parentElement; } return ''; }"
+                        ) or "").strip()
+                    except Exception:
+                        pass
                 
                 label_low = label.lower()
 

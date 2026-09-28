@@ -302,6 +302,19 @@ answers:
   employment type: "FTE"
   type of employment: "FTE"
   job type: "FTE"
+
+  # Person-level identity facts: identical for every account/profile, so they
+  # live globally — never profile-scoped (run 437 queued ex-Infosys on the
+  # Full Stack account although the AI account already knew it).
+  are you an ex-infosys employee: "NA"
+  ex-infosys employee id: "NA"
+  ex-employee of infosys: "NA"
+  date of birth: "1997-11-19"
+  dob: "1997-11-19"
+  birth date: "1997-11-19"
+  which product did you work on: "WorkBridge - AI-Powered Collaboration Platform (full-stack + AI: React, Node.js, Python, FastAPI, PostgreSQL, live project)"
+  product worked on: "WorkBridge - AI-Powered Collaboration Platform (full-stack + AI: React, Node.js, Python, FastAPI, PostgreSQL, live project)"
+  name the product: "WorkBridge - AI-Powered Collaboration Platform (full-stack + AI: React, Node.js, Python, FastAPI, PostgreSQL, live project)"
   brief description of the projects: "Built full-stack & AI applications using Python, FastAPI, Node.js, React & AWS. Implemented REST APIs."
   description of the projects: "Built full-stack & AI applications using Python, FastAPI, Node.js, React & AWS. Implemented REST APIs."
   key contributions and technical skills: "Built full-stack & AI applications using Python, FastAPI, Node.js, React & AWS. Implemented REST APIs."
