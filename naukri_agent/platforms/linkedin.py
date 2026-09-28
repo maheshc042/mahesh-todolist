@@ -123,6 +123,42 @@ def _looks_like_option_dump(text: str) -> bool:
     return months >= 2 or years >= 3
 
 
+def _parse_lpa_range(text: str) -> tuple[float, float] | None:
+    """Parse an (lo, hi) pay band in LPA from an option like '4-6 LPA',
+    '3 to 5', 'Rs 4,00,000 - 7,00,000' or '50k-80k monthly'. None when the
+    option is not a numeric band."""
+    t = (text or "").lower().replace(",", "")
+    m = re.search(r"(\d+(?:\.\d+)?)\s*(?:-|–|—|to)\s*(\d+(?:\.\d+)?)", t)
+    if not m:
+        return None
+    lo, hi = float(m.group(1)), float(m.group(2))
+    if "month" in t or "/mo" in t:
+        mult = 12.0 / 100000.0
+    elif "thousand" in t or re.search(r"\bk\b", t):
+        mult = 1000.0 / 100000.0
+    elif lo >= 1000:
+        mult = 1.0 / 100000.0
+    else:
+        mult = 1.0
+    return (round(lo * mult, 2), round(hi * mult, 2))
+
+
+def _pick_ctc_option(opt_texts: list[str], expected_lpa: float | None) -> str | None:
+    """Return the first pay band containing OUR number, else None.
+
+    Containment only — nearest-above would overstate pay, nearest-below
+    would anchor offers down. No band fits means an honest fail, never a
+    blind first-option click (run 441: Current CTC ranges).
+    """
+    if expected_lpa is None:
+        return None
+    for opt in opt_texts:
+        band = _parse_lpa_range(opt)
+        if band is not None and band[0] <= expected_lpa <= band[1]:
+            return opt.strip()
+    return None
+
+
 class LinkedInPlatform(BaseJobPlatform):
     def __init__(
         self,
@@ -1115,6 +1151,19 @@ class LinkedInPlatform(BaseJobPlatform):
             return self._resume_ref(fallback)
         return "", ""
 
+    def _ctc_want_lpa(self, label_low: str) -> float | None:
+        """Our CTC number for a pay question: current vs expected by label."""
+        which = "current ctc" if ("current" in label_low and "expected" not in label_low) else "expected ctc"
+        res = self.answers.resolve(ScreeningQuestion(text=which, kind="text"))
+        if res and res.value:
+            m = re.search(r"[-+]?\d*\.?\d+", str(res.value))
+            if m:
+                try:
+                    return float(m.group(0))
+                except ValueError:
+                    return None
+        return None
+
     async def _fill_step_inputs(self, modal: Locator, job: Job | None = None, profile_name: str = "") -> None:
         """Fills radio fieldsets, text inputs, dropdowns, comboboxes strictly within the modal."""
         # 1. State-aware resume selection (never deselects already selected resume)
@@ -1306,8 +1355,19 @@ class LinkedInPlatform(BaseJobPlatform):
                             if any(w in o.lower() for w in ["not", "no", "decline", "prefer not"]):
                                 target_val = o.strip()
                                 break
+                    elif any(k in label_low for k in ["ctc", "salary", "compensation"]):
+                        # Same containment rule as radios: our band or honest fail.
+                        want = self._ctc_want_lpa(label_low)
+                        pick = _pick_ctc_option(options, want)
+                        if pick:
+                            target_val = pick.strip()
 
-                if not target_val and len(options) > 1:
+                ctc_no_blind = (
+                    any(k in label_low for k in ["ctc", "salary", "compensation"])
+                    and any(_parse_lpa_range(o) is not None for o in options)
+                    and not target_val
+                )
+                if not target_val and len(options) > 1 and not ctc_no_blind:
                     target_val = options[1].strip() if "select" not in options[1].lower() else (options[2].strip() if len(options) > 2 else "")
 
                 if target_val:
@@ -1365,6 +1425,19 @@ class LinkedInPlatform(BaseJobPlatform):
                 resolved = self.answers.resolve(ScreeningQuestion(text=q_text, kind="radio", options=opt_texts)) if q_text else None
                 target_val = resolved.value if resolved else ""
 
+                # CTC range containment (run 441: Current CTC range options
+                # never chip-match a bare "3.9"). Pick the band containing
+                # OUR number; never nearest-above/below (misstates pay).
+                ctc_skip_fallback = False
+                low_q = (q_text or "").lower()
+                if any(k in low_q for k in ["ctc", "salary", "compensation", "pay scale", "pay band"]):
+                    want = self._ctc_want_lpa(low_q)
+                    pick = _pick_ctc_option(opt_texts, want)
+                    if pick:
+                        target_val = pick
+                    elif any(_parse_lpa_range(o) is not None for o in opt_texts):
+                        ctc_skip_fallback = True
+
                 if not target_val:
                     low_q = q_text.lower()
                     if any(k in low_q for k in ["sponsorship", "visa sponsorship", "require sponsorship"]) or any(k in low_q for k in ["disability", "handicap", "impairment"]) or any(k in low_q for k in ["veteran", "military"]):
@@ -1402,7 +1475,7 @@ class LinkedInPlatform(BaseJobPlatform):
                         matched_radio = True
                         break
 
-                if not matched_radio and options:
+                if not matched_radio and options and not ctc_skip_fallback:
                     # Robust fallback: click first option or option containing decline / prefer not
                     chosen_opt = None
                     for opt in options:

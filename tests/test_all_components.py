@@ -681,6 +681,29 @@ class TestExperienceGates(unittest.TestCase):
         self.assertFalse(d.passed)
 
 
+class TestCtcRangePick(unittest.TestCase):
+    def test_parse_bands(self):
+        from naukri_agent.platforms.linkedin import _parse_lpa_range
+
+        self.assertEqual(_parse_lpa_range("4-6 LPA"), (4.0, 6.0))
+        self.assertEqual(_parse_lpa_range("3 to 5"), (3.0, 5.0))
+        self.assertEqual(_parse_lpa_range("Rs 4,00,000 - 7,00,000"), (4.0, 7.0))
+        self.assertEqual(_parse_lpa_range("Yes"), None)
+        self.assertEqual(_parse_lpa_range("Competitive"), None)
+
+    def test_containment_only(self):
+        """Only the band containing OUR number is picked (run 441: Current
+        CTC ranges). Nearest-above/below would misstate pay."""
+        from naukri_agent.platforms.linkedin import _pick_ctc_option
+
+        opts = ["0-3 LPA", "3-6 LPA", "6-10 LPA"]
+        self.assertEqual(_pick_ctc_option(opts, 3.9), "3-6 LPA")
+        self.assertEqual(_pick_ctc_option(opts, 7.5), "6-10 LPA")
+        self.assertIsNone(_pick_ctc_option(opts, 25.0))
+        self.assertIsNone(_pick_ctc_option(["Yes", "No"], 4.0))
+        self.assertIsNone(_pick_ctc_option(opts, None))
+
+
 if __name__ == "__main__":
     unittest.main()
 
