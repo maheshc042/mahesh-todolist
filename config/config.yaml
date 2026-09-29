@@ -32,6 +32,31 @@ platforms:
   linkedin: true
   naukri: true
   wellfound: true
+  # HiringCafe SHELVED live (2026-09-29, runs 470-471): the SSR rewrite is
+  # correct (search URLs render 2,226 jobs when fetched as a normal client)
+  # but Cloudflare challenges EVERY parameterized navigation inside the
+  # automated browser — 3x90s manual-solve waits burned with zero cards, and
+  # a run needs dozens of solves. Unworkable attended, impossible headless.
+  # Revisit only if Cloudflare posture changes. Code kept; flip to re-try.
+  hiringcafe: false
+
+# HiringCafe feed (read-only source for the Sidekick handoff).
+# Server-side filters mirror the proven query: fresh, junior, eng/IT/data.
+# NOTE: HiringCafe is EXTERNAL-only (never APPLIED), so it takes no
+# platform_limits entry — volume is governed by target_jobs_per_run below.
+hiringcafe:
+  max_days: 3
+  max_experience: 3
+  target_jobs_per_run: 25
+  max_pages: 2
+
+# Sidekick handoff (contract v1, see career-apply-agent/CONTRACT.md).
+# External outcomes from ANY platform are enqueued in Postgres and POSTed
+# to Sidekick /apply with retry. Dry-run never POSTs.
+sidekick_integration:
+  enabled: true
+  api_url: "http://127.0.0.1:8000"
+  request_timeout_s: 15
 
 
 linkedin:
@@ -167,7 +192,7 @@ answers:
 
   # Salary & CTC
   current ctc: "3.9"
-  expected ctc: "7.5"
+  expected ctc: "7"
   fixed ctc: "3.9"
   variable ctc: "0"
 
@@ -306,6 +331,10 @@ answers:
   # Person-level identity facts: identical for every account/profile, so they
   # live globally — never profile-scoped (run 437 queued ex-Infosys on the
   # Full Stack account although the AI account already knew it).
+  # Substring keys: Stage-1 matches `pattern in question`, so the short
+  # "currently located in bangalore" covers every phrasing ("Are you
+  # currently located in Bangalore?", "currently located in...") at 0.9.
+  currently located in bangalore: "Yes"
   are you an ex-infosys employee: "NA"
   ex-infosys employee id: "NA"
   ex-employee of infosys: "NA"

@@ -421,6 +421,36 @@ MIGRATIONS: list[tuple[str, str]] = [
             UNIQUE NULLS NOT DISTINCT (profile, pattern);
         """,
     ),
+    (
+        "0017_sidekick_dispatch_queue",
+        """
+        -- Transactional outbox for the Sidekick handoff (contract v1).
+        -- Producers: any platform outcome recorded as EXTERNAL.
+        -- Consumer: ExternalJobDispatcher POSTs rows to Sidekick /apply.
+        CREATE TABLE IF NOT EXISTS external_dispatch_queue (
+            id              BIGSERIAL PRIMARY KEY,
+            job_id          TEXT NOT NULL UNIQUE,
+            url             TEXT NOT NULL,
+            company         TEXT NOT NULL DEFAULT '',
+            title           TEXT NOT NULL DEFAULT '',
+            platform        TEXT NOT NULL DEFAULT '',
+            profile         TEXT NOT NULL DEFAULT '',
+            account         TEXT NOT NULL DEFAULT '',
+            source_metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
+            status          TEXT NOT NULL DEFAULT 'pending',
+            attempts        INTEGER NOT NULL DEFAULT 0,
+            last_error      TEXT,
+            next_retry_at   TIMESTAMPTZ,
+            created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+            dispatched_at   TIMESTAMPTZ
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_dispatch_status
+            ON external_dispatch_queue(status, created_at);
+        CREATE INDEX IF NOT EXISTS idx_dispatch_job
+            ON external_dispatch_queue(job_id);
+        """,
+    ),
 ]
 
 

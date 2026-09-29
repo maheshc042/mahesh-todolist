@@ -63,8 +63,9 @@ from ..naukri.apply import ApplyEngine
 from ..naukri.naukri_api import NaukriApiClient, extract_naukri_token
 from ..naukri.profile import ProfileRefresher
 from ..notify.notifier import build_notifier, format_run_summary
-from ..platforms.base import BaseJobPlatform
+from ..platforms.base import BaseJobPlatform, PlatformWalledError
 from ..platforms.cutshort import CutshortPlatform
+from ..platforms.hiringcafe import HiringCafePlatform
 from ..platforms.instahyre import InstahyrePlatform
 from ..platforms.linkedin import LinkedInPlatform
 from ..platforms.naukri_platform import NaukriPlatform
@@ -352,6 +353,14 @@ class Orchestrator:
                             platform_specs.append("wellfound")
                         if self.config.platforms.instahyre:
                             platform_specs.append("instahyre")
+                        # HiringCafe is login-free and account-agnostic, and its
+                        # search terms already cover both personas via the
+                        # unified profile — one primary pass feeds both funnels.
+                        # A second pass on other accounts would only re-scrape
+                        # the same feed (outbox enqueue is idempotent, but the
+                        # Cloudflare exposure and minutes are not free).
+                        if self.config.platforms.hiringcafe:
+                            platform_specs.append("hiringcafe")
 
                 answers: AnswerEngine | None = None
                 total_timeout_s = self.config.run.run_timeout_minutes * 60
@@ -440,6 +449,10 @@ class Orchestrator:
                             platform = LinkedInPlatform(
                                 page, self.account, artifacts, answers, self.policy, config=self.config, metrics=self.metrics
                             )
+                        elif p_name == "hiringcafe":
+                            platform = HiringCafePlatform(
+                                page, self.account, artifacts, self.policy, config=self.config, metrics=self.metrics
+                            )
                         else:
                             continue
 
@@ -450,11 +463,12 @@ class Orchestrator:
                         authenticated = await platform.ensure_logged_in()
                         self.metrics.login_s += time.perf_counter() - t_login_0
                         if not authenticated:
-                            await self.repo.pause_platform(
-                                self.account_key,
-                                platform.platform_name,
-                                f"{platform.platform_name} authentication was not confirmed",
-                            )
+                            if getattr(platform, "pause_on_login_failure", True):
+                                await self.repo.pause_platform(
+                                    self.account_key,
+                                    platform.platform_name,
+                                    f"{platform.platform_name} authentication was not confirmed",
+                                )
                             if platform.platform_name == "naukri":
                                 raise FatalAgentError(
                                     f"{platform.platform_name} authentication was not confirmed"
@@ -515,6 +529,13 @@ class Orchestrator:
                                 platform_profiles = [self.config.get_unified_wellfound_profile()]
                             else:
                                 platform_profiles = self.config.active_profiles(self.only_profiles, account=None)[:1]
+                        elif platform.platform_name == "hiringcafe":
+                            # Single unified pass (see get_unified_hiringcafe_profile):
+                            # per-profile passes would re-scrape the same feed.
+                            if not self.only_profiles:
+                                platform_profiles = [self.config.get_unified_hiringcafe_profile()]
+                            else:
+                                platform_profiles = self.config.active_profiles(self.only_profiles, account=None)[:1]
                         elif platform.platform_name != "naukri":
                             platform_profiles = self.config.active_profiles(self.only_profiles, account=None)
 
@@ -528,10 +549,22 @@ class Orchestrator:
                                 self.stats.errors.append(f"{platform.platform_name} ({profile.name}): {stop}")
                                 stop_msg = str(stop).lower()
                                 if "timeout" in stop_msg or "budget" in stop_msg or "consecutive" in stop_msg or "cloudflare" in stop_msg:
+                                    if "cloudflare" in stop_msg:
+                                        await self.repo.pause_platform(
+                                            self.account_key, platform.platform_name, str(stop)[:500]
+                                        )
+                                        log.warning("platform.walled_paused", platform=platform.platform_name)
                                     break
                                 continue
                             except FatalAgentError:
                                 raise
+                            except PlatformWalledError as wall:
+                                await self.repo.pause_platform(
+                                    self.account_key, platform.platform_name, str(wall)[:500]
+                                )
+                                log.warning("platform.walled_paused", platform=platform.platform_name)
+                                self.stats.errors.append(f"{platform.platform_name} paused: {wall}")
+                                break
                             except Exception as exc:
                                 log.exception("platform.profile_failed", platform=platform.platform_name, profile=profile.name)
                                 self.stats.errors.append(f"{platform.platform_name} failed for {profile.name}: {exc}")
@@ -589,6 +622,21 @@ class Orchestrator:
                             self.stats.errors.append(
                                 f"questionnaire sweep failed ({m_platform.platform_name}): {str(exc)[:120]}"
                             )
+
+            # =========================================================
+            # PHASE 2.5: Sidekick Flush (drain external-job outbox)
+            # Runs after all platforms so HiringCafe/LinkedIn/Wellfound
+            # externals collected this run are delivered in one pass.
+            # Outbox rows survive a down Sidekick; nothing blocks the run.
+            # =========================================================
+            if self.policy.may_mutate and getattr(self.config, "sidekick_integration", None) \
+                    and self.config.sidekick_integration.enabled:
+                flush_budget_s = self.config.run.run_timeout_minutes * 60 - self.elapsed_s
+                if flush_budget_s >= 60:
+                    flush_result = await self._flush_sidekick()
+                    log.info("run.sidekick_flush_done", **flush_result)
+                else:
+                    log.info("run.sidekick_flush_skipped", reason="insufficient run budget")
 
             # =========================================================
             # PHASE 3: LinkedIn Cold-Email Campaign (optional)
@@ -1280,6 +1328,16 @@ class Orchestrator:
                     "recruiter_emails": getattr(job, "recruiter_emails", []),
                 }
             )
+            # Universal Sidekick handoff: ANY platform's external link is
+            # enqueued for Sidekick (contract v1). Fire-and-forget here; the
+            # outbox + flush phase own delivery. Skipped entirely in dry-run.
+            if self.policy.may_mutate and getattr(self.config, "sidekick_integration", None) \
+                    and self.config.sidekick_integration.enabled:
+                task = asyncio.create_task(
+                    self._enqueue_sidekick(job, profile, platform_name)
+                )
+                self._background_tasks.add(task)
+                task.add_done_callback(self._background_tasks.discard)
         elif outcome.status == ApplicationStatus.ALREADY_APPLIED:
             self.stats.bump(profile.name, "already_applied", platform=platform_name)
             self.consecutive_failures = 0
@@ -1364,6 +1422,69 @@ class Orchestrator:
             )
         except Exception as exc:
             log.warning("repo.log_event_failed", error=str(exc), job_id=job.job_id)
+
+    async def _enqueue_sidekick(self, job: Job, profile: JobProfile, platform_name: str) -> None:
+        """Enqueues one external job into the Sidekick outbox (contract v1).
+
+        Enqueue-only: delivery is owned by the flush phase / dispatcher, so a
+        down Sidekick never fails the run. Idempotent on job_id.
+        """
+        try:
+            target_url = (getattr(job, "url", "") or "").strip()
+            # No form_links fallback: a Google/Typeform link is a screening
+            # form, not a company ATS job — Sidekick would 422-dead-letter it.
+            if not target_url or not target_url.lower().startswith("http"):
+                return
+            created = await self.repo.enqueue_external_job(
+                job_id=job.job_id,
+                url=target_url,
+                company=job.company or "",
+                title=job.title or "",
+                platform=(platform_name or "").lower(),
+                profile=profile.name,
+                account=self.account_key,
+                metadata={
+                    "posted_days_ago": job.posted_days_ago,
+                    "location": job.location or "",
+                    "source_keyword": job.source_keyword or "",
+                },
+            )
+            if created:
+                log.info("sidekick.enqueued", job_id=job.job_id, platform=platform_name)
+        except Exception as exc:
+            log.warning("sidekick.enqueue_failed", job_id=job.job_id, error=str(exc)[:200])
+
+    def _sidekick_dispatcher(self) -> Any | None:
+        from .external_dispatcher import ExternalJobDispatcher
+
+        cfg = getattr(self.config, "sidekick_integration", None)
+        if cfg is None or not cfg.enabled:
+            return None
+        return ExternalJobDispatcher(
+            repo=self.repo,
+            api_url=cfg.api_url,
+            request_timeout_s=cfg.request_timeout_s,
+        )
+
+    async def _flush_sidekick(self) -> dict[str, int]:
+        """Delivers due outbox rows to Sidekick. Returns {dispatched, failed}."""
+        dispatcher = self._sidekick_dispatcher()
+        if dispatcher is None or self.repo is None:
+            return {"dispatched": 0, "failed": 0}
+        try:
+            result = await dispatcher.flush_pending(limit=50)
+        except Exception as exc:
+            log.warning("sidekick.flush_failed", error=str(exc)[:200])
+            return {"dispatched": 0, "failed": 0}
+        if result["dispatched"]:
+            self.stats.forwarded += result["dispatched"]
+        if result["failed"]:
+            # Dead or still-retrying rows must surface in Telegram, or a down
+            # Sidekick fails silently run after run.
+            self.stats.errors.append(
+                f"sidekick: {result['failed']} outbox rows undispatched — see external_dispatch_queue"
+            )
+        return result
 
     async def _dispatch_recruiter_emails(self, job: Job, profile: JobProfile, outcome: ApplyOutcome) -> None:
         """Dispatches Gemini-tailored cold emails to HR emails extracted from job descriptions."""

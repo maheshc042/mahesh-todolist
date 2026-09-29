@@ -42,6 +42,31 @@ log = get_logger(__name__)
 # overwrote account A's on every run, so the two logins fought each other.
 SESSION_KEY = "naukri:session:primary"
 
+# Cloudflare cookie names. A cf_clearance minted under flagged automation
+# poisons every later run: presenting it forces re-validation loops no
+# checkbox can exit (runs 457/458: solved repeatedly, back at step 1 — while
+# a fresh browser on the same machine cleared in <2s). Strip exactly these on
+# restore; all site logins (Naukri/LinkedIn/HiringCafe app cookies) persist.
+CF_COOKIE_NAMES = frozenset({
+    "cf_clearance", "__cf_bm", "cf_chl_1", "cf_chl_2", "cf_chl_prog",
+    "cf_use_ob", "__cf_chl_rt_tk",
+})
+
+
+def _strip_cf_cookies(storage_state: dict[str, Any] | None) -> dict[str, Any] | None:
+    """Remove Cloudflare challenge cookies from a restored storage state."""
+    if not isinstance(storage_state, dict):
+        return storage_state
+    cookies = storage_state.get("cookies")
+    if not isinstance(cookies, list):
+        return storage_state
+    kept = [c for c in cookies if str(c.get("name", "")).lower() not in CF_COOKIE_NAMES]
+    dropped = len(cookies) - len(kept)
+    if dropped:
+        log.info("browser.cf_cookies_stripped", dropped=dropped)
+        storage_state = {**storage_state, "cookies": kept}
+    return storage_state
+
 DEFAULT_UA = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
     "(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
@@ -56,9 +81,14 @@ EXTRA_HTTP_HEADERS = {
 
 
 # Executed in every page before any site script runs to evade Cloudflare/DataDome.
-STEALTH_SCRIPT = """
-// 1. Hide navigator.webdriver — the most common bot check
+# Clause 1 (webdriver) lives separately below: on real Google Chrome it is
+# natively false and patching it in JS is itself a tampering signature that
+# Cloudflare Turnstile checks for — only bundled Chromium needs the patch.
+STEALTH_WEBDRIVER_CLAUSE = """
+// 1. Hide navigator.webdriver — bundled-Chromium only (see above).
 Object.defineProperty(navigator, 'webdriver', { get: () => false });
+"""
+STEALTH_SCRIPT = """
 
 // 2. Mock window.chrome (Headless browsers usually lack this)
 window.chrome = {
@@ -165,6 +195,10 @@ class BrowserManager:
         self._browser: Browser | None = None
         self._context: BrowserContext | None = None
         self._restored_session = False
+        # True when launching real Google Chrome (channel="chrome"): its TLS
+        # fingerprint clears Cloudflare Turnstile where bundled Chromium gets
+        # loop-trapped, and its navigator.webdriver is natively false.
+        self._real_chrome = False
         # Guards against writing a LOGGED-OUT storage_state back over a good one.
         # `stop()` persists unconditionally, so a run that invalidated the session
         # (expired cookies, OTP challenge) used to save the anonymous state on
@@ -194,17 +228,27 @@ class BrowserManager:
 
     async def _start_browser_locked(self) -> None:
         assert self._playwright is not None
-        self._browser = await self._playwright.chromium.launch(
-            headless=self.config.headless,
-            slow_mo=self.config.slow_mo_ms,
-            # Use the Chromium bundled with the pinned Playwright image. A
-            # system Chrome channel is not guaranteed to exist in production.
-            args=LAUNCH_ARGS,
-        )
+        launch_kwargs: dict[str, Any] = {
+            "headless": self.config.headless,
+            "slow_mo": self.config.slow_mo_ms,
+            # A system Chrome channel is not guaranteed to exist in
+            # production (Docker); fall back to bundled Chromium there.
+            "args": LAUNCH_ARGS,
+        }
+        try:
+            self._browser = await self._playwright.chromium.launch(
+                channel="chrome", **launch_kwargs
+            )
+            self._real_chrome = True
+            log.info("browser.real_chrome")
+        except Exception as exc:
+            log.info("browser.bundled_chromium_fallback", error=str(exc)[:150])
+            self._browser = await self._playwright.chromium.launch(**launch_kwargs)
 
         storage_state: dict[str, Any] | None = None
         if self.repo is not None:
             storage_state = await self.repo.load_session(self.session_key)
+            storage_state = _strip_cf_cookies(storage_state)
             self._restored_session = storage_state is not None
             # A restored session is trusted until something proves otherwise.
             self._session_trusted = self._restored_session
@@ -226,7 +270,10 @@ class BrowserManager:
         self._context.set_default_timeout(self.config.default_timeout_ms)
         self._context.set_default_navigation_timeout(self.config.navigation_timeout_ms)
         self._context._headed = not self.config.headless
-        await self._context.add_init_script(STEALTH_SCRIPT)
+        stealth_script = STEALTH_SCRIPT if self._real_chrome else (
+            STEALTH_WEBDRIVER_CLAUSE + STEALTH_SCRIPT
+        )
+        await self._context.add_init_script(stealth_script)
 
         if self.config.block_resources:
             await self._context.route("**/*", self._route_filter)

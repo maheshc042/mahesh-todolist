@@ -807,6 +807,7 @@ class PlatformsConfig(_Model):
     cutshort: bool = True
     wellfound: bool = True
     linkedin: bool = True
+    hiringcafe: bool = True
 
 
 class LinkedInConfig(_Model):
@@ -839,11 +840,30 @@ class InstahyreConfig(_Model):
     max_pages: int = Field(default=5, ge=1, le=20)
 
 
+class HiringCafeConfig(_Model):
+    max_days: int = Field(default=3, ge=1, le=30)
+    max_experience: int = Field(default=3, ge=0, le=30)
+    target_jobs_per_run: int = Field(default=25, ge=1, le=200)
+    # SSR search pages per term: page 1 already renders ~40 cards, so 2 is a
+    # margin for thin terms. Each page + each detail visit is one normal
+    # navigation — the human-like path Cloudflare allows.
+    max_pages: int = Field(default=2, ge=1, le=5)
+    base_url: str = "https://hiring.cafe"
+
+
+class SidekickConfig(_Model):
+    enabled: bool = True
+    api_url: str = "http://127.0.0.1:8000"
+    request_timeout_s: int = Field(default=15, ge=1, le=120)
+
+
 
 class AgentConfig(_Model):
     platforms: PlatformsConfig = Field(default_factory=PlatformsConfig)
     linkedin: LinkedInConfig = Field(default_factory=LinkedInConfig)
     instahyre: InstahyreConfig = Field(default_factory=InstahyreConfig)
+    hiringcafe: HiringCafeConfig = Field(default_factory=HiringCafeConfig)
+    sidekick_integration: SidekickConfig = Field(default_factory=SidekickConfig)
     browser: BrowserConfig = Field(default_factory=BrowserConfig)
     run: RunConfig = Field(default_factory=RunConfig)
     recommended: RecommendedConfig = Field(default_factory=RecommendedConfig)
@@ -1222,6 +1242,91 @@ class AgentConfig(_Model):
             secondary_skills=s_skills,
             bonus_skills=b_skills,
             filters=unified_filters,
+            answers=merged_answers,
+        )
+
+    def get_unified_hiringcafe_profile(self) -> JobProfile:
+        """
+        Synthesize a single unified JobProfile for HiringCafe covering both
+        job families in one pass. HiringCafe is login-free and every item is
+        a direct company ATS link, so the platform never applies — the only
+        consumer is the Sidekick outbox. One profile per run keeps discovery
+        to a single scrape instead of N per-profile passes.
+        """
+        active = [p for p in self.profiles if p.enabled]
+        if not active:
+            raise ConfigError("No active profiles configured to synthesize HiringCafe profile.")
+        if len(active) == 1:
+            return active[0]
+
+        # Interleaved title keywords (round-robin across personas) so the
+        # platform's [:8] search-term slice stays persona-balanced instead of
+        # inheriting whichever profile happens to be listed first.
+        per_profile_terms: list[list[str]] = []
+        for p in active:
+            terms = [t.strip().lower() for t in (getattr(p, "title_keywords", []) or [])]
+            per_profile_terms.append([t for t in terms if t])
+        search_terms: list[str] = []
+        seen_terms: set[str] = set()
+        for group in zip(*per_profile_terms):
+            for t in group:
+                if t not in seen_terms:
+                    seen_terms.add(t)
+                    search_terms.append(t)
+        for terms in per_profile_terms:
+            for t in terms:
+                if t not in seen_terms:
+                    seen_terms.add(t)
+                    search_terms.append(t)
+
+        hc_limit = max((p.platform_limits.get("hiringcafe", 25) for p in active), default=25)
+
+        merged_answers: dict[str, str] = {}
+        for p in reversed(active):
+            merged_answers.update(p.answers or {})
+
+        return JobProfile(
+            name="HiringCafe Unified (AI & Full Stack)",
+            enabled=True,
+            priority=1,
+            account="primary",
+            experience_years=2.5,
+            use_recommended=True,
+            platform_limits={"hiringcafe": hc_limit},
+            min_rank_score=0.0,
+            title_keywords=search_terms[:30],
+            core_skills=[
+                "python", "node", "react", "typescript", "fastapi", "nextjs", "aws",
+                "generative ai", "agentic ai", "llm", "rag", "mlops", "langgraph", "django",
+                "mern", "frontend", "backend", "full stack",
+            ],
+            secondary_skills=[
+                "api", "rest", "graphql", "postgresql", "mongodb", "redis", "docker",
+                "kubernetes", "aws bedrock", "prompt engineering", "vector database",
+                "qa", "automation", "sdet", "ci/cd", "microservices",
+            ],
+            bonus_skills=["testing", "pytest", "jest", "git", "github", "jira", "agile", "scrum", "debugging"],
+            filters=FilterRules(
+                # NOTE: "lead" stays allowed (repo-wide policy: seniority is
+                # guarded by the 0-3.5y experience gate, and Sidekick's /apply
+                # path applies lead-titled roles without a title check).
+                title_must_include_any=list(search_terms),
+                title_must_exclude_any=[
+                    "principal", "staff", "architect", "manager",
+                    "trainer", "sales", "presales", "pre-sales", "bpo",
+                    "php", "wordpress", ".net", "dotnet", "dot net",
+                    "intern", "internship",
+                ],
+                description_must_exclude_any=[
+                    "bpo", "commission only", "unpaid", "registration fee", "security deposit",
+                ],
+                experience=ExperienceRange(min_years=0, max_years=3.5),
+                min_salary_lpa=None,
+                max_posted_days=3,
+                min_rating=None,
+                require_easy_apply=False,
+                skip_walkin=True,
+            ),
             answers=merged_answers,
         )
 

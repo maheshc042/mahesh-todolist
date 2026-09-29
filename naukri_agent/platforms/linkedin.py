@@ -80,20 +80,23 @@ TARGET_ROLES = [
 AI_TARGET_QUERY = (
     '("AI Engineer" OR "Generative AI Engineer" OR "GenAI Engineer" OR "AI Developer" OR '
     '"ML Engineer" OR "Machine Learning Engineer" OR "LLM Engineer" OR "Python Developer" OR '
-    '"Python AI Developer" OR "AI Software Engineer" OR "MLOps Engineer")'
+    '"Python AI Developer" OR "AI Software Engineer" OR "MLOps Engineer") AND '
+    '("Python" OR "LLM" OR "FastAPI" OR "Machine Learning" OR "AWS")'
 )
 
 FULLSTACK_TARGET_QUERY = (
     '("Full Stack Developer" OR "Full Stack Engineer" OR "Software Engineer" OR "Software Developer" OR '
     '"Frontend Developer" OR "React Developer" OR "Node.js Developer" OR "Backend Developer" OR '
-    '"SDET" OR "QA Automation Engineer" OR "DevOps Engineer" OR "Web Developer")'
+    '"SDET" OR "QA Automation Engineer" OR "DevOps Engineer" OR "Web Developer") AND '
+    '("Node" OR "React" OR "TypeScript" OR "Full Stack" OR "QA" OR "Testing")'
 )
 
 FULL_TARGET_QUERY = (
     '("AI Engineer" OR "Generative AI Engineer" OR "GenAI Engineer" OR "AI Developer" OR "ML Engineer" OR '
     '"Python Developer" OR "Backend Developer" OR "Software Engineer" OR "Software Developer" OR '
     '"Full Stack Developer" OR "Full Stack Engineer" OR "React Developer" OR "Node.js Developer" OR '
-    '"SDET" OR "QA Automation Engineer" OR "Test Automation Engineer" OR "QA Engineer")'
+    '"SDET" OR "QA Automation Engineer" OR "Test Automation Engineer" OR "QA Engineer") AND '
+    '("Python" OR "React" OR "Node" OR "FastAPI" OR "AWS" OR "Docker")'
 )
 MODAL_CONTAINER_SELECTORS = [
     "dialog:has(button[aria-label*='Dismiss' i])",
@@ -121,6 +124,21 @@ def _looks_like_option_dump(text: str) -> bool:
     months = sum(1 for m in _MONTH_NAMES if m in low)
     years = len(re.findall(r"\b(?:19|20)\d{2}\b", low))
     return months >= 2 or years >= 3
+
+
+def _word_hit(needle: str, haystack: str) -> bool:
+    """Whole-token match with punctuation-safe boundaries.
+
+    Plain \\b fails terms that start/end in punctuation: ``\\bc#\\b`` never
+    matches "c# developer" and ``\\b\\.net\\b`` never matches ".net
+    developer" (no word boundary between start-of-string/space and a
+    non-word char). Boundary side is chosen per-edge instead.
+    """
+    if not needle:
+        return False
+    left = r"\b" if re.match(r"^\w", needle) else r"(?<!\w)"
+    right = r"\b" if re.search(r"\w$", needle) else r"(?!\w)"
+    return bool(re.search(left + re.escape(needle) + right, haystack))
 
 
 def _parse_lpa_range(text: str) -> tuple[float, float] | None:
@@ -293,7 +311,7 @@ class LinkedInPlatform(BaseJobPlatform):
             "it support", "helpdesk", "service desk",
         ]
         for blocked_kw in blocked_title_keywords:
-            if re.search(rf"\b{re.escape(blocked_kw)}\b", title):
+            if _word_hit(blocked_kw, title):
                 return False, f"Excluded role or tech stack ('{blocked_kw}')", 0
 
         # 1.5 Exact or Partial Target Role Match in Title
@@ -342,7 +360,7 @@ class LinkedInPlatform(BaseJobPlatform):
             "technical support", "application support", "production support", "it support", "l2 support", "troubleshooting", "jira", "incident management"
         ]
 
-        matched_skills = [k for k in track_keywords if k in full_text]
+        matched_skills = [k for k in track_keywords if _word_hit(k, full_text)]
         if matched_skills:
             score += min(len(matched_skills) * 2, 20)
 

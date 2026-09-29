@@ -83,6 +83,95 @@ class Repository:
             session_cipher=SessionCipher(settings.browser_session_secret),
         )
 
+    # --------------------------------------- sidekick dispatch outbox (v1)
+    # Transactional outbox for the Sidekick handoff. Producers (any platform
+    # outcome recorded as EXTERNAL) enqueue; ExternalJobDispatcher claims and
+    # POSTs to Sidekick /apply. Claim uses FOR UPDATE SKIP LOCKED so parallel
+    # runs never double-deliver the same row.
+    async def enqueue_external_job(
+        self,
+        job_id: str,
+        url: str,
+        company: str,
+        title: str,
+        platform: str,
+        profile: str = "",
+        account: str = "primary",
+        metadata: dict[str, Any] | None = None,
+    ) -> bool:
+        """Insert idempotently. Returns True when this call created the row."""
+        row = await self._fetchrow_with_retry(
+            """
+            INSERT INTO external_dispatch_queue
+                (job_id, url, company, title, platform, profile, account, source_metadata)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb)
+            ON CONFLICT (job_id) DO NOTHING
+            RETURNING id
+            """,
+            job_id, url, company, title, platform, profile, account,
+            json.dumps(metadata or {}),
+        )
+        return row is not None
+
+    async def claim_pending_dispatches(self, limit: int = 25) -> list[dict[str, Any]]:
+        """Atomically claim due rows (pending or retry-due) for delivery."""
+        async with self.pool.acquire() as conn:
+            async with conn.transaction():
+                rows = await conn.fetch(
+                    """
+                    SELECT id, job_id, url, company, title, platform, profile,
+                           account, source_metadata, attempts
+                      FROM external_dispatch_queue
+                     WHERE status IN ('pending', 'retry')
+                       AND (next_retry_at IS NULL OR next_retry_at <= now())
+                     ORDER BY created_at ASC
+                     LIMIT $1
+                     FOR UPDATE SKIP LOCKED
+                    """,
+                    limit,
+                )
+                if not rows:
+                    return []
+                ids = [r["id"] for r in rows]
+                await conn.execute(
+                    "UPDATE external_dispatch_queue "
+                    "SET status = 'dispatching' WHERE id = ANY($1::bigint[])",
+                    ids,
+                )
+                return [dict(r) for r in rows]
+
+    async def mark_dispatched(self, row_id: int) -> None:
+        await self._execute_with_retry(
+            "UPDATE external_dispatch_queue "
+            "SET status = 'dispatched', dispatched_at = now(), last_error = NULL "
+            "WHERE id = $1",
+            row_id,
+        )
+
+    async def mark_dispatch_failed(self, row_id: int, error: str, next_retry_at: datetime) -> None:
+        await self._execute_with_retry(
+            "UPDATE external_dispatch_queue "
+            "SET status = 'retry', attempts = attempts + 1, "
+            "    last_error = $2, next_retry_at = $3 "
+            "WHERE id = $1",
+            row_id, error[:500], next_retry_at,
+        )
+
+    async def mark_dispatch_dead(self, row_id: int, error: str) -> None:
+        await self._execute_with_retry(
+            "UPDATE external_dispatch_queue "
+            "SET status = 'dead', last_error = $2, next_retry_at = NULL "
+            "WHERE id = $1",
+            row_id, error[:500],
+        )
+
+    async def pending_dispatch_count(self) -> int:
+        row = await self._fetchrow_with_retry(
+            "SELECT COUNT(*) AS c FROM external_dispatch_queue "
+            "WHERE status IN ('pending', 'retry')"
+        )
+        return int(row["c"]) if row else 0
+
     # ------------------------------------------------------------------ runs
     async def start_run(
         self, mode: str, profiles: list[str], account: str = "primary"

@@ -149,6 +149,7 @@ def format_run_summary(
         f"  • ✅ APPLIED        : {stats.applied}",
         f"  • 🔄 Already Applied: {stats.already_applied}",
         f"  • 🔗 External Links : {stats.external}",
+        f"  • 📤 Forwarded to Sidekick: {getattr(stats, 'forwarded', 0)}",
         f"  • ⚠️ Needs Review   : {stats.needs_review}",
         f"  • ❌ Failed         : {stats.failed}",
     ]

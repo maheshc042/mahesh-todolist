@@ -166,7 +166,24 @@ class TestFilterEngine(unittest.TestCase):
                 )
 
 
+
+
 class TestDescriptionMetadata(unittest.TestCase):
+    def test_cf_cookie_strip_keeps_logins(self):
+        """Poisoned Cloudflare cookies must be stripped on restore while
+        site logins persist (runs 457/458 looped on a tainted session)."""
+        from naukri_agent.browser.manager import _strip_cf_cookies
+
+        state = {"cookies": [
+            {"name": "cf_clearance"}, {"name": "__cf_bm"},
+            {"name": "li_at"}, {"name": "JSESSIONID"},
+        ]}
+        out = _strip_cf_cookies(state)
+        self.assertEqual(
+            [c["name"] for c in out["cookies"]], ["li_at", "JSESSIONID"]
+        )
+        self.assertIsNone(_strip_cf_cookies(None))
+
     def test_generic_intake_inboxes_ignored(self):
         """hrintern/careers/jobs inboxes never convert; named recruiters pass."""
         from naukri_agent.core.models import extract_description_metadata
@@ -251,6 +268,55 @@ class TestLinkedInPlatform(unittest.TestCase):
         self.assertGreaterEqual(score, 60)
 
 
+    def test_suitability_punctuation_and_substring(self):
+        """Punctuation terms (c#, .net) must block; short acronyms (rag,
+        mean) must not substring-match ordinary words (audit fixes)."""
+        from naukri_agent.core.models import Job as _Job
+        from naukri_agent.platforms.linkedin import _word_hit
+
+        self.assertTrue(_word_hit("c#", "c# developer"))
+        self.assertTrue(_word_hit(".net", ".net developer"))
+        self.assertTrue(_word_hit(".net", "a .net engineer"))
+        self.assertFalse(_word_hit("rag", "cloud storage solutions"))
+        self.assertFalse(_word_hit("mean", "by all means"))
+        self.assertFalse(_word_hit("java", "javascript developer"))
+
+        blocked = [
+            ("C# Developer", "Block Corp"),
+            (".NET Developer", "Block Corp"),
+            ("Backend Developer (C#, .NET)", "Block Corp"),
+        ]
+        for title, company in blocked:
+            job = _Job(
+                job_id="t-%s" % title[:8], title=title, company=company,
+                location="Bengaluru", url="http://t", platform="linkedin",
+            )
+            suitable, _, _ = self.platform.evaluate_job_suitability(job)
+            self.assertFalse(suitable, "%s should be blocked" % title)
+
+        # Substring-only overlap must not rescue a generic title. ("cloud
+        # storage" would still match the genuine "cloud" DevOps skill, so
+        # use a JD with zero candidate-stack words at all.)
+        vague = _Job(
+            job_id="t-vague", title="Software Engineer", company="Box Corp",
+            location="India (Remote)",
+            description="We offer secure document management solutions for teams.",
+            url="http://t", platform="linkedin",
+        )
+        suitable, _, _ = self.platform.evaluate_job_suitability(vague)
+        self.assertFalse(suitable, "stack-empty JD must not pass")
+
+    def test_track_queries_have_and_clause(self):
+        """Every LinkedIn query variant carries a tech AND clause so no
+        profile run scrapes unfiltered generic vacancies."""
+        from naukri_agent.platforms.linkedin import (
+            AI_TARGET_QUERY,
+            FULL_TARGET_QUERY,
+            FULLSTACK_TARGET_QUERY,
+        )
+
+        for q in (FULL_TARGET_QUERY, AI_TARGET_QUERY, FULLSTACK_TARGET_QUERY):
+            self.assertIn(") AND (", q)
 class TestNaukriChatbotFuzzyMatching(unittest.TestCase):
     def test_match_option_text_affirmative(self):
         """Affirmative choices should match 'yes', 'agree', 'willing'."""
@@ -369,6 +435,41 @@ class TestInstahyreUnifiedConfiguration(unittest.TestCase):
             )
             decision = self.engine.evaluate_card(job)
             self.assertFalse(decision.passed, f"Job {company} - {title} should have been rejected!")
+
+
+class TestHiringCafeUnifiedConfiguration(unittest.TestCase):
+    def setUp(self):
+        self.cfg = AgentConfig.load()
+        self.unified_profile = self.cfg.get_unified_hiringcafe_profile()
+
+    def test_single_unified_profile(self):
+        """One profile per run: per-profile passes would re-scrape the same
+        login-free feed N times for zero additional coverage."""
+        p = self.unified_profile
+        self.assertEqual(p.name, "HiringCafe Unified (AI & Full Stack)")
+        self.assertEqual(p.account, "primary")
+        self.assertTrue(p.use_recommended)
+        self.assertGreater(p.platform_limits.get("hiringcafe", 0), 0)
+        self.assertEqual(p.filters.require_easy_apply, False)
+        self.assertEqual(p.filters.max_posted_days, 3)
+
+    def test_search_terms_persona_balanced(self):
+        """Interleaved title keywords keep the platform's [:8] search-term
+        slice balanced across AI and Full-Stack personas."""
+        from naukri_agent.platforms.hiringcafe import HiringCafePlatform
+
+        terms = self.unified_profile.title_keywords[:8]
+        ai_markers = ("ai", "python", "llm", "genai", "ml")
+        fs_markers = ("full stack", "fullstack", "react", "node", "mern", "sdet", "qa")
+        blob = " | ".join(terms).lower()
+        self.assertTrue(any(m in blob for m in ai_markers), terms)
+        self.assertTrue(any(m in blob for m in fs_markers), terms)
+        # The platform consumes the same keywords with an 8-term slice.
+        from naukri_agent.platforms.hiringcafe import HiringCafePlatform
+
+        used = HiringCafePlatform._search_terms(self.unified_profile)
+        self.assertLessEqual(len(used), 8)
+        self.assertGreater(len(used), 0)
 
 
 class TestCutshortUnifiedConfiguration(unittest.TestCase):
@@ -502,7 +603,11 @@ class TestCutshortUnifiedConfiguration(unittest.TestCase):
         p = self.cfg.get_unified_linkedin_profile()
         self.assertEqual(p.name, "LinkedIn Unified (AI & Full Stack)")
         self.assertEqual(p.account, "primary")
-        self.assertEqual(p.platform_limits.get("linkedin"), 35)
+        expected_limit = max(
+            (pp.platform_limits.get("linkedin", 50) for pp in self.cfg.profiles if pp.enabled),
+            default=50,
+        )
+        self.assertEqual(p.platform_limits.get("linkedin"), expected_limit)
 
         # Mock platform to test _get_search_url query selection
         platform = LinkedInPlatform(MagicMock(), MagicMock(), MagicMock(), MagicMock(), MagicMock(), config=self.cfg)
@@ -517,7 +622,11 @@ class TestCutshortUnifiedConfiguration(unittest.TestCase):
         p = self.cfg.get_unified_wellfound_profile()
         self.assertEqual(p.name, "Wellfound Unified (AI & Full Stack)")
         self.assertEqual(p.account, "primary")
-        self.assertEqual(p.platform_limits.get("wellfound"), 20)
+        expected_limit = max(
+            (pp.platform_limits.get("wellfound", 50) for pp in self.cfg.profiles if pp.enabled),
+            default=50,
+        )
+        self.assertEqual(p.platform_limits.get("wellfound"), expected_limit)
         self.assertEqual(p.filters.max_posted_days, 7)
         self.assertEqual(MAX_POSTED_DAYS, 7)
 

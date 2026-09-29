@@ -132,7 +132,7 @@ def run(
         None, "--profile", "-p", help="Only these profile names (repeatable)"
     ),
     platform: str | None = typer.Option(
-        None, "--platform", "-plat", help="Only run this platform: linkedin, naukri, cutshort, instahyre, wellfound"
+        None, "--platform", "-plat", help="Only run this platform: linkedin, naukri, cutshort, instahyre, wellfound, hiringcafe"
     ),
     dry_run: bool = typer.Option(
         False, "--dry-run", help="Do everything except submitting an application"
@@ -188,6 +188,39 @@ def run(
     _run(_main())
 
 
+@app.command("flush-external")
+def flush_external(
+    limit: int = typer.Option(50, "--limit", help="Max outbox rows to deliver"),
+    config_path: Path | None = typer.Option(None, "--config", help="Path to config.yaml"),
+) -> None:
+    """Deliver pending Sidekick outbox rows to POST /apply (contract v1)."""
+    from .core.external_dispatcher import ExternalJobDispatcher
+
+    async def _main() -> None:
+        settings, config = _bootstrap(config_path)
+        await run_migrations()
+        try:
+            if not config.sidekick_integration.enabled:
+                console.print("[yellow]sidekick_integration.enabled is false; nothing to flush.[/yellow]")
+                return
+            repo = await Repository.create()
+            dispatcher = ExternalJobDispatcher(
+                repo=repo,
+                api_url=config.sidekick_integration.api_url,
+                request_timeout_s=config.sidekick_integration.request_timeout_s,
+            )
+            pending = await repo.pending_dispatch_count()
+            result = await dispatcher.flush_pending(limit=limit)
+            console.print(
+                f"Sidekick flush: {result['dispatched']} dispatched, "
+                f"{result['failed']} failed (had {pending} pending)."
+            )
+        finally:
+            await close_pool()
+
+    _run(_main())
+
+
 def _print_stats(account: str, stats) -> None:
     table = Table(title=f"run summary — {account}", show_header=True, header_style="bold")
     table.add_column("metric")
@@ -198,6 +231,9 @@ def _print_stats(account: str, stats) -> None:
         "filtered_out",
         "plan_rejected",
         "applied",
+        "failed",
+        "external",
+        "forwarded",
         "already_applied",
         "external",
         "needs_review",
@@ -250,7 +286,7 @@ def schedule(
 @app.command()
 def login(
     account: str | None = typer.Option(None, "--account", "-a", help="Which login to use"),
-    platform: str = typer.Option("naukri", "--platform", "-p", help="Platform to log in: naukri, cutshort, wellfound, linkedin, instahyre, or all"),
+    platform: str = typer.Option("naukri", "--platform", "-p", help="Platform to log in: naukri, cutshort, wellfound, linkedin, instahyre, hiringcafe, or all"),
     headed: bool = typer.Option(True, "--headed/--headless", help="Show the browser window"),
     config_path: Path | None = typer.Option(None, "--config", help="Path to config.yaml"),
 ) -> None:

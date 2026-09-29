@@ -19,6 +19,11 @@ class BaseJobPlatform(ABC):
         self.account_key = account_key
         self.policy = policy
 
+    # Login-free sources (HiringCafe) fail on transient bot walls, not dead
+    # credentials: pausing them converts one bad minute into a blackout until
+    # headed recovery. Default True; override False where no login exists.
+    pause_on_login_failure: bool = True
+
     def require_mutation(self, action: str) -> None:
         """Fail closed before any externally visible platform side effect."""
         self.policy.require_mutation(f"{self.platform_name}.{action}")
@@ -59,4 +64,10 @@ class BaseJobPlatform(ABC):
         Optional post-apply hook to handle asynchronous platform messages/questionnaires.
         Does nothing by default. Platforms like Cutshort will override this.
         """
+
+
+class PlatformWalledError(Exception):
+    """Raised when a bot wall makes further work pointless (Cloudflare
+    challenge on every API call, IP block). The orchestrator pauses the
+    platform and moves on instead of burning the queue into the wall."""
 

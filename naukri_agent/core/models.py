@@ -221,6 +221,7 @@ class RunStats:
     applied: int = 0
     failed: int = 0
     external: int = 0
+    forwarded: int = 0
     already_applied: int = 0
     needs_review: int = 0
     per_profile: dict[str, dict[str, int]] = field(default_factory=dict)
@@ -253,6 +254,7 @@ class RunStats:
             "applied": self.applied,
             "failed": self.failed,
             "external": self.external,
+            "forwarded": self.forwarded,
             "already_applied": self.already_applied,
             "needs_review": self.needs_review,
             "per_profile": self.per_profile,
