@@ -82,6 +82,37 @@ class _CapReached(Exception):
     """Internal signal: this profile hit its per-run cap; move to the next one."""
 
 
+# Sidekick (contract v1) only accepts RESOLVED employer ATS links. Raw
+# job-board listing URLs (naukri.com/job-listings-*, linkedin.com/jobs/*,
+# …) are rejected downstream, so they are filtered here instead of being
+# enqueued as junk. Platforms whose job.url already IS the ATS link
+# (HiringCafe) or that set outcome.external_url (Wellfound/Naukri/LinkedIn)
+# flow through untouched.
+_LISTING_DOMAINS = (
+    "naukri.com",
+    "naukrigulf.com",
+    "linkedin.com",
+    "instahyre.com",
+    "cutshort.io",
+    "wellfound.com",
+)
+
+
+def resolve_dispatch_url(external_url: str | None, job_url: str) -> str | None:
+    """Employer ATS link for the Sidekick handoff, or None when unresolved.
+
+    Pure (unit-tested): prefers the platform-resolved external_url, falls
+    back to job.url, and rejects anything that is still a job-board listing.
+    """
+    for candidate in ((external_url or "").strip(), (job_url or "").strip()):
+        if not candidate.lower().startswith("http"):
+            continue
+        if any(dom in candidate.lower() for dom in _LISTING_DOMAINS):
+            continue
+        return candidate
+    return None
+
+
 _COMPANY_SUFFIX_RE = re.compile(
     r"\b(pvt|ltd|limited|private|inc|corp|corporation|llp|llc|technologies|technology|solutions|services|consulting|group|labs)\b|[.,]",
     re.IGNORECASE,
@@ -1329,12 +1360,16 @@ class Orchestrator:
                 }
             )
             # Universal Sidekick handoff: ANY platform's external link is
-            # enqueued for Sidekick (contract v1). Fire-and-forget here; the
-            # outbox + flush phase own delivery. Skipped entirely in dry-run.
+            # enqueued for Sidekick (contract v1) — but ONLY as a resolved
+            # employer ATS URL. Raw listing links are rejected downstream,
+            # so they are skipped here with a visible log, never enqueued.
+            # Fire-and-forget; the outbox + flush phase own delivery.
+            # Skipped entirely in dry-run.
             if self.policy.may_mutate and getattr(self.config, "sidekick_integration", None) \
                     and self.config.sidekick_integration.enabled:
                 task = asyncio.create_task(
-                    self._enqueue_sidekick(job, profile, platform_name)
+                    self._enqueue_sidekick(job, profile, platform_name,
+                                           external_url=outcome.external_url)
                 )
                 self._background_tasks.add(task)
                 task.add_done_callback(self._background_tasks.discard)
@@ -1423,17 +1458,22 @@ class Orchestrator:
         except Exception as exc:
             log.warning("repo.log_event_failed", error=str(exc), job_id=job.job_id)
 
-    async def _enqueue_sidekick(self, job: Job, profile: JobProfile, platform_name: str) -> None:
+    async def _enqueue_sidekick(self, job: Job, profile: JobProfile, platform_name: str,
+                                  external_url: str | None = None) -> None:
         """Enqueues one external job into the Sidekick outbox (contract v1).
 
-        Enqueue-only: delivery is owned by the flush phase / dispatcher, so a
-        down Sidekick never fails the run. Idempotent on job_id.
+        Resolved-URL-only: the target is outcome.external_url first, job.url
+        second, and raw job-board listing links are skipped (Sidekick rejects
+        them). Enqueue-only: delivery is owned by the flush phase /
+        dispatcher, so a down Sidekick never fails the run. Idempotent.
         """
         try:
-            target_url = (getattr(job, "url", "") or "").strip()
+            target_url = resolve_dispatch_url(external_url, getattr(job, "url", "") or "")
             # No form_links fallback: a Google/Typeform link is a screening
             # form, not a company ATS job — Sidekick would 422-dead-letter it.
-            if not target_url or not target_url.lower().startswith("http"):
+            if not target_url:
+                log.info("sidekick.skipped_unresolved", job_id=job.job_id,
+                         platform=platform_name)
                 return
             created = await self.repo.enqueue_external_job(
                 job_id=job.job_id,

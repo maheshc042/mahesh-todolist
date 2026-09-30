@@ -726,6 +726,61 @@ class LinkedInPlatform(BaseJobPlatform):
         log.info("linkedin.fetch.ready", count=len(jobs))
         return jobs
 
+    @staticmethod
+    def _is_company_url(url: str | None) -> str | None:
+        """Normalized employer link, or None for listing/blank URLs."""
+        if not url:
+            return None
+        clean = url.strip()
+        if not clean.lower().startswith("http"):
+            return None
+        if "linkedin.com" in clean.lower():
+            return None
+        return clean
+
+    async def _capture_company_site_url(self) -> str | None:
+        """Resolved employer ATS link behind a company-site Apply button.
+
+        Clicking it only opens the employer's page (no LinkedIn-side
+        submission exists for these jobs). Captures popup URL, else an
+        off-LinkedIn same-tab URL. Never raises; None means unresolved.
+        """
+        try:
+            btn = await first_visible(
+                self.page, ["button.jobs-apply-button"], timeout_ms=1_500
+            )
+        except Exception:
+            btn = None
+        if btn is None:
+            return None
+        try:
+            label = ((await btn.inner_text()) or "").strip().lower()
+        except Exception:
+            label = ""
+        if "easy apply" in label:
+            return None
+        try:
+            async with self.page.expect_popup(timeout=3_000) as pop_info:
+                await btn.click(timeout=3_000)
+            try:
+                popup = await pop_info.value
+            except Exception:
+                popup = None
+            if popup is not None:
+                found = self._is_company_url(popup.url)
+                try:
+                    await popup.close()
+                except Exception:
+                    pass
+                if found:
+                    return found
+        except Exception:
+            pass
+        try:
+            return self._is_company_url(self.page.url)
+        except Exception:
+            return None
+
     async def apply_to_job(
         self,
         job: Job,
@@ -891,8 +946,15 @@ class LinkedInPlatform(BaseJobPlatform):
             if await first_visible(self.page, ["button:has-text('Applied')", "span:has-text('Applied')", "span:has-text('Application submitted')", "div:has-text('Application submitted')"], timeout_ms=800):
                 _record_timing()
                 return ApplyOutcome(status=ApplicationStatus.ALREADY_APPLIED, reason=SkipReason.ALREADY_APPLIED)
+            # Company-site job: resolve the employer's actual ATS link by
+            # opening it (link-out only — nothing is submitted on LinkedIn's
+            # side). Sidekick rejects raw linkedin.com listing links, so an
+            # unresolved URL means skip-the-handoff, not a junk enqueue.
+            ats_url = await self._capture_company_site_url()
+            log.info("linkedin.apply.external_resolved", job_id=job.job_id,
+                     resolved=bool(ats_url))
             _record_timing()
-            return ApplyOutcome(status=ApplicationStatus.SKIPPED, reason=SkipReason.EXTERNAL_APPLY, detail="No Easy Apply button; company-site apply only")
+            return ApplyOutcome(status=ApplicationStatus.SKIPPED, reason=SkipReason.EXTERNAL_APPLY, detail="No Easy Apply button; company-site apply only", external_url=ats_url)
 
         log.info("linkedin.apply.clicking_button", job_id=job.job_id)
         await apply_btn.scroll_into_view_if_needed()

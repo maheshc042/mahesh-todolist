@@ -14,6 +14,7 @@ from naukri_agent.core.external_dispatcher import (
     next_retry_delay,
     normalize_dispatch_url,
 )
+from naukri_agent.core.orchestrator import resolve_dispatch_url
 
 
 def _row(**over):
@@ -157,6 +158,39 @@ class TestDispatch(unittest.TestCase):
         with patcher:
             result = asyncio.run(disp.flush_pending(limit=10))
         self.assertEqual(result, {"dispatched": 2, "failed": 0})
+
+
+class TestResolveDispatchUrl(unittest.TestCase):
+    """Contract v1 resolved-URL-only policy: Sidekick must never receive raw
+    job-board listing links (verified live: 18 raw naukri.com rows)."""
+
+    def test_prefers_resolved_external_url(self):
+        self.assertEqual(
+            resolve_dispatch_url("https://boards.greenhouse.io/acme/1",
+                                 "https://www.naukri.com/job-listings-1"),
+            "https://boards.greenhouse.io/acme/1",
+        )
+
+    def test_falls_back_to_job_url_when_resolved(self):
+        self.assertEqual(
+            resolve_dispatch_url(None, "https://careers.acme.com/jobs/9"),
+            "https://careers.acme.com/jobs/9",
+        )
+
+    def test_rejects_raw_listing_links(self):
+        for raw in ("https://www.naukri.com/job-listings-240926500983",
+                    "https://www.linkedin.com/jobs/view/123",
+                    "https://www.instahyre.com/candidate/opportunities/"):
+            self.assertIsNone(resolve_dispatch_url(None, raw), raw)
+            # A resolved external_url still wins even beside a raw job.url.
+            self.assertEqual(
+                resolve_dispatch_url("https://jobs.lever.co/acme/2", raw),
+                "https://jobs.lever.co/acme/2",
+            )
+
+    def test_none_when_nothing_usable(self):
+        self.assertIsNone(resolve_dispatch_url(None, ""))
+        self.assertIsNone(resolve_dispatch_url(None, "not-a-url"))
 
 
 if __name__ == "__main__":

@@ -54,6 +54,7 @@ class ApplyEngine:
         self.attempts = attempts
         self.metrics = metrics
         self._popup_opened = False
+        self._last_popup_url: str | None = None
         self._popup_tasks: set[asyncio.Task] = set()
         self.page.on("popup", self._on_popup)
 
@@ -74,9 +75,76 @@ class ApplyEngine:
 
     async def _close_popup(self, popup: Page) -> None:
         try:
+            # Stash first: the URL is the employer's actual ATS destination,
+            # which the Sidekick handoff requires (raw naukri.com listing
+            # links are rejected downstream).
+            if popup.url and popup.url.lower().startswith("http"):
+                self._last_popup_url = popup.url
+        except Exception:
+            pass
+        try:
             await popup.close()
         except Exception:
             pass
+
+    @staticmethod
+    def _is_company_url(url: str | None) -> str | None:
+        """Normalized employer link, or None for listing/blank URLs."""
+        if not url:
+            return None
+        clean = url.strip()
+        if not clean.lower().startswith("http"):
+            return None
+        if "naukri.com" in clean.lower():
+            return None
+        return clean
+
+    async def _company_site_url(self) -> str | None:
+        """Resolved employer ATS link behind 'Apply on company site'.
+
+        Anchor variant carries the href directly; the button variant only
+        link-outs, so clicking it submits nothing — capture where it leads
+        (popup, else same-tab URL) and return it. Never raises.
+        """
+        for sel in ("a#company-site-button", "a:text-is('Apply on company site')"):
+            try:
+                anchor = self.page.locator(sel).first
+                if await anchor.count() > 0:
+                    found = self._is_company_url(await anchor.get_attribute("href"))
+                    if found:
+                        return found
+            except Exception:
+                continue
+        try:
+            btn = await first_visible(
+                self.page, ["button#company-site-button", *S.JD_COMPANY_SITE_BUTTON],
+                timeout_ms=2_000,
+            )
+        except Exception:
+            btn = None
+        if btn is None:
+            return None
+        try:
+            async with self.page.expect_popup(timeout=3_000) as pop_info:
+                await btn.click(timeout=3_000)
+            try:
+                popup = await pop_info.value
+            except Exception:
+                popup = None
+            if popup is not None:
+                found = self._is_company_url(popup.url)
+                try:
+                    await popup.close()
+                except Exception:
+                    pass
+                if found:
+                    return found
+        except Exception:
+            pass
+        try:
+            return self._is_company_url(self.page.url)
+        except Exception:
+            return None
 
     async def _open_job(self, job: Job) -> None:
         await self.page.goto(job.url, wait_until="domcontentloaded", timeout=self.nav_timeout_ms)
@@ -132,6 +200,7 @@ class ApplyEngine:
         t_job_start = time.perf_counter()
         jt = JobTiming(job_id=job.job_id, title=job.title)
         self._popup_opened = False
+        self._last_popup_url = None
         attempt_used = 0
 
         async def navigate_and_classify() -> str:
@@ -175,7 +244,10 @@ class ApplyEngine:
             jt.total_s = time.perf_counter() - t_job_start
             if self.metrics:
                 self.metrics.job_timings.append(jt)
-            return ApplyOutcome(status=ApplicationStatus.EXTERNAL, reason=SkipReason.EXTERNAL_APPLY, detail="apply-on-company-site only", attempts=attempt_used)
+            ats_url = await self._company_site_url()
+            log.info("naukri.apply.external_resolved", job_id=job.job_id,
+                     resolved=bool(ats_url))
+            return ApplyOutcome(status=ApplicationStatus.EXTERNAL, reason=SkipReason.EXTERNAL_APPLY, detail="apply-on-company-site only", attempts=attempt_used, external_url=ats_url)
 
         if pre_submit_check is not None:
             decision = pre_submit_check(job)
@@ -324,7 +396,7 @@ class ApplyEngine:
         jt.q_detect_s += time.perf_counter() - t_qdet_0
 
         if event_type == "popup" or self._popup_opened:
-            return ApplyOutcome(status=ApplicationStatus.EXTERNAL, reason=SkipReason.EXTERNAL_APPLY, detail="Third-party tab opened", attempts=attempts)
+            return ApplyOutcome(status=ApplicationStatus.EXTERNAL, reason=SkipReason.EXTERNAL_APPLY, detail="Third-party tab opened", attempts=attempts, external_url=self._is_company_url(self._last_popup_url))
 
         if event_type == "already_applied" or await self._fast_check(S.JD_ALREADY_APPLIED):
             return ApplyOutcome(

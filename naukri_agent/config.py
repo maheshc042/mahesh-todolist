@@ -854,7 +854,11 @@ class HiringCafeConfig(_Model):
 class SidekickConfig(_Model):
     enabled: bool = True
     api_url: str = "http://127.0.0.1:8000"
-    request_timeout_s: int = Field(default=15, ge=1, le=120)
+    auto_flush_on_startup: bool = True
+    # Sidekick answers 202 fast, but a cold pipeline build + queued
+    # background work can stall the socket; 60s avoids false retries
+    # (retries are idempotent anyway via Idempotency-Key).
+    request_timeout_s: int = Field(default=60, ge=1, le=300)
 
 
 

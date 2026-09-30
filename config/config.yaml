@@ -37,7 +37,13 @@ platforms:
   # but Cloudflare challenges EVERY parameterized navigation inside the
   # automated browser — 3x90s manual-solve waits burned with zero cards, and
   # a run needs dozens of solves. Unworkable attended, impossible headless.
-  # Revisit only if Cloudflare posture changes. Code kept; flip to re-try.
+  # Root causes, all confirmed: (a) every run starts with zero clearance
+  # (cf_* cookies are stripped on restore by design); (b) solves don't
+  # survive the NEXT navigation in CDP-driven Chrome; (c) not IP-based —
+  # incognito on the same IP works fine. No fewer-navigations escape exists
+  # (detail visits wall identically; in-page search would reuse the walled
+  # XHR path). Revisit only if Cloudflare posture changes. Code kept; flip
+  # to re-try.
   hiringcafe: false
 
 # HiringCafe feed (read-only source for the Sidekick handoff).
@@ -56,7 +62,8 @@ hiringcafe:
 sidekick_integration:
   enabled: true
   api_url: "http://127.0.0.1:8000"
-  request_timeout_s: 15
+  auto_flush_on_startup: true
+  request_timeout_s: 60
 
 
 linkedin:
