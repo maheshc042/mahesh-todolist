@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import time
 from typing import Any
 from urllib.parse import quote, urljoin
 
@@ -64,6 +65,9 @@ class HiringCafePlatform(BaseJobPlatform):
         # Consecutive challenged navigations in this fetch (reset per run):
         # aborts fast when the wall is structural instead of per-page.
         self._walls = 0
+        # Last Turnstile click: re-clicking while a validation is in flight
+        # resets the widget — one click per window, then hands off polling.
+        self._last_cf_click = 0.0
 
     @property
     def platform_name(self) -> str:
@@ -127,9 +131,14 @@ class HiringCafePlatform(BaseJobPlatform):
         """Click a Turnstile checkbox, in its iframe or inline in the page.
 
         Waits briefly for the iframe to attach first (it renders seconds
-        after the challenge page). Bounded helper — never raises, never
+        after the challenge page). Cooldown-guarded: a click starts a
+        server-side validation that takes seconds — clicking again (or
+        reloading) mid-flight resets it, which is exactly the
+        solve-reload-challenge loop. Bounded helper — never raises, never
         waits long. Returns True when a click was actually performed.
         """
+        if time.monotonic() - self._last_cf_click < 10.0:
+            return False
         try:
             try:
                 await self.page.frame_locator(
@@ -147,6 +156,7 @@ class HiringCafePlatform(BaseJobPlatform):
                 try:
                     if await box.is_visible():
                         await box.click(timeout=2000)
+                        self._last_cf_click = time.monotonic()
                         return True
                 except Exception:
                     continue
@@ -165,6 +175,7 @@ class HiringCafePlatform(BaseJobPlatform):
             try:
                 if await inline.count() > 0 and await inline.is_visible():
                     await inline.click(timeout=2000)
+                    self._last_cf_click = time.monotonic()
                     return True
             except Exception:
                 pass
@@ -262,17 +273,33 @@ class HiringCafePlatform(BaseJobPlatform):
         return False
 
     async def _settle_challenge(self, where: str) -> bool:
-        """One bounded recovery shot on a challenged page: click checkbox,
-        reload once, re-check. True when the page looks clean afterwards."""
+        """One bounded recovery shot on a challenged page.
+
+        Click once, then WAIT without touching anything: Turnstile needs
+        seconds for its server exchange, and both re-clicking and reloading
+        mid-flight reset the widget — the old click-reload-click sequence is
+        what manufactured the solve-reload-challenge loop. A single reload
+        happens only if the page is still challenged after the full wait.
+        True when the page looks clean afterwards.
+        """
         await self._click_turnstile_checkbox()
-        await human_pause(2000, 2500)
+        for _ in range(8):
+            await human_pause(2000, 2500)
+            ok, _ = await self._has_clearance()
+            if ok:
+                cards_ok, _ = await self._probe_cards()
+                if cards_ok:
+                    log.info("hiringcafe.challenge_settled", where=where)
+                    return True
         try:
             await self.page.reload(wait_until="domcontentloaded", timeout=30_000)
         except Exception:
             pass
-        await human_pause(2000, 2500)
-        await self._click_turnstile_checkbox()
+        await human_pause(3000, 4000)
         ok, _ = await self._has_clearance()
+        if ok:
+            cards_ok, _ = await self._probe_cards()
+            ok = ok and cards_ok
         log.info("hiringcafe.challenge_settled" if ok else "hiringcafe.challenge_persists", where=where)
         return ok
 

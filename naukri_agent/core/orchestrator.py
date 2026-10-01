@@ -201,6 +201,9 @@ class Orchestrator:
         self._run_lock_conn = None
         self._run_lock_key: int | None = None
         self._background_tasks: set[asyncio.Task[Any]] = set()
+        # Rows this run newly enqueued for Sidekick pickup (mode="pickup":
+        # counted into stats.forwarded after the background tasks settle).
+        self._sidekick_queued = 0
         self.started_at = time.monotonic()
         self.notifier = build_notifier(
             telegram_enabled=config.notifications.telegram_enabled,
@@ -656,12 +659,13 @@ class Orchestrator:
 
             # =========================================================
             # PHASE 2.5: Sidekick Flush (drain external-job outbox)
-            # Runs after all platforms so HiringCafe/LinkedIn/Wellfound
-            # externals collected this run are delivered in one pass.
-            # Outbox rows survive a down Sidekick; nothing blocks the run.
+            # Push mode only. In pickup mode the agent just enqueues and
+            # Sidekick drains the outbox on its own schedule — no POSTs,
+            # no retries, no choreography (see SIDEKICK_PICKUP.md).
             # =========================================================
             if self.policy.may_mutate and getattr(self.config, "sidekick_integration", None) \
-                    and self.config.sidekick_integration.enabled:
+                    and self.config.sidekick_integration.enabled \
+                    and self.config.sidekick_integration.push_enabled:
                 flush_budget_s = self.config.run.run_timeout_minutes * 60 - self.elapsed_s
                 if flush_budget_s >= 60:
                     flush_result = await self._flush_sidekick()
@@ -729,6 +733,12 @@ class Orchestrator:
                 self._run_lock_conn = None
             if self._background_tasks:
                 await asyncio.gather(*self._background_tasks, return_exceptions=True)
+            # Pickup-mode accounting: every row enqueued this run is already
+            # handed to the outbox, so it counts as forwarded — Sidekick
+            # drains it on its own schedule, no POST phase involved.
+            if self._sidekick_queued:
+                self.stats.forwarded += self._sidekick_queued
+                log.info("run.sidekick_pickup_queued", count=self._sidekick_queued)
             # Detach popup listeners before the page dies.
             platforms_to_clean = locals().get('executed_platforms') or locals().get('active_platforms') or []
             for platform in platforms_to_clean:
@@ -1490,6 +1500,7 @@ class Orchestrator:
                 },
             )
             if created:
+                self._sidekick_queued += 1
                 log.info("sidekick.enqueued", job_id=job.job_id, platform=platform_name)
         except Exception as exc:
             log.warning("sidekick.enqueue_failed", job_id=job.job_id, error=str(exc)[:200])

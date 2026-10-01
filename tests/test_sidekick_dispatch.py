@@ -14,6 +14,7 @@ from naukri_agent.core.external_dispatcher import (
     next_retry_delay,
     normalize_dispatch_url,
 )
+from naukri_agent.config import SidekickConfig
 from naukri_agent.core.orchestrator import resolve_dispatch_url
 
 
@@ -191,6 +192,23 @@ class TestResolveDispatchUrl(unittest.TestCase):
     def test_none_when_nothing_usable(self):
         self.assertIsNone(resolve_dispatch_url(None, ""))
         self.assertIsNone(resolve_dispatch_url(None, "not-a-url"))
+
+
+class TestSidekickMode(unittest.TestCase):
+    def test_pickup_mode_parses(self):
+        cfg = SidekickConfig(mode="pickup")
+        self.assertTrue(cfg.enabled)
+        self.assertFalse(cfg.push_enabled)
+
+    def test_push_is_default(self):
+        cfg = SidekickConfig()
+        self.assertEqual(cfg.mode, "push")
+        self.assertTrue(cfg.push_enabled)
+
+    def test_bogus_mode_rejected(self):
+        from pydantic import ValidationError
+        with self.assertRaises(ValidationError):
+            SidekickConfig(mode="carrier-pigeon")
 
 
 if __name__ == "__main__":

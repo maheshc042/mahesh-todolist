@@ -54,13 +54,16 @@ hiringcafe:
   max_days: 3
   max_experience: 3
   target_jobs_per_run: 25
-  max_pages: 2
+  max_pages: 6
 
-# Sidekick handoff (contract v1, see career-apply-agent/CONTRACT.md).
-# External outcomes from ANY platform are enqueued in Postgres and POSTed
-# to Sidekick /apply with retry. Dry-run never POSTs.
+# Sidekick handoff (contract v1, see career-apply-agent/CONTRACT.md +
+# SIDEKICK_PICKUP.md). External outcomes from ANY platform are enqueued in
+# Postgres; mode "pickup" (below) means Sidekick drains the outbox itself
+# whenever IT runs — no POSTs from here, no schedule choreography, no
+# undispatched warnings. "push" restores agent-side POST-at-flush.
 sidekick_integration:
   enabled: true
+  mode: pickup
   api_url: "http://127.0.0.1:8000"
   auto_flush_on_startup: true
   request_timeout_s: 60
@@ -187,6 +190,11 @@ answers:
   relieving date: "30/04/2026"
   end date of notice: "30/04/2026"
   buyout option: "No"
+  # Chatbot file requests the agent cannot fulfil in-drawer (no upload
+  # mechanism): take the provided dodge option, never the upload action.
+  upload your resume: "I'll do it later"
+  upload resume: "I'll do it later"
+
   # Contact & Links
   phone: "9481777227"
   mobile: "9481777227"
@@ -514,6 +522,9 @@ experience:
     microsoft azure: 3
     unix: 3
     linux: 3
+    data structures: 3
+    dsa: 3
+    algorithms: 3
     cloud: 3
     aws: 3
     aml: 0

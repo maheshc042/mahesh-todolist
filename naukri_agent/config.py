@@ -846,8 +846,9 @@ class HiringCafeConfig(_Model):
     target_jobs_per_run: int = Field(default=25, ge=1, le=200)
     # SSR search pages per term: page 1 already renders ~40 cards, so 2 is a
     # margin for thin terms. Each page + each detail visit is one normal
-    # navigation — the human-like path Cloudflare allows.
-    max_pages: int = Field(default=2, ge=1, le=5)
+    # navigation — the human-like path Cloudflare allows. Ceiling 10 to
+    # admit operator-tuned values without silent clamping.
+    max_pages: int = Field(default=2, ge=1, le=10)
     base_url: str = "https://hiring.cafe"
 
 
@@ -859,6 +860,26 @@ class SidekickConfig(_Model):
     # background work can stall the socket; 60s avoids false retries
     # (retries are idempotent anyway via Idempotency-Key).
     request_timeout_s: int = Field(default=60, ge=1, le=300)
+    # Delivery mode. "push" (default): this agent POSTs due outbox rows to
+    # Sidekick at flush. "pickup": this agent ONLY enqueues — Sidekick drains
+    # `external_dispatch_queue` itself whenever it runs (see
+    # SIDEKICK_PICKUP.md). Pickup removes all schedule choreography between
+    # the two apps; no POSTs, no retries, no undispatched warnings.
+    mode: str = "push"
+
+    @field_validator("mode")
+    @classmethod
+    def _known_mode(cls, value: str) -> str:
+        mode = str(value or "").strip().lower()
+        if mode not in ("push", "pickup"):
+            raise ValueError(
+                f"sidekick_integration.mode must be 'push' or 'pickup', got {value!r}"
+            )
+        return mode
+
+    @property
+    def push_enabled(self) -> bool:
+        return self.mode == "push"
 
 
 

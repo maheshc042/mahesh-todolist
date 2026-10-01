@@ -36,9 +36,21 @@ _EXPERIENCE_INTENT = re.compile(
     r"|(?:years?|yrs?)\s+of\s+(?:experience|exp)"
     r"|experience\s+(?:do\s+you\s+have|in|with|on|using|of|\w+ing\b)"
     r"|(?:years?|yrs?)\s+(?:in|with|of)\s+\w+"
-    r"|\bexp\s+in\b",
+    r"|\bexp\s+in\b"
+    # Recruiter reframings (sweep 2026-09-30): tenure asked without the
+    # word "experience" — still tenure when a skill is named.
+    r"|how\s+long\s+(?:have\s+you\s+)?(?:worked|been\s+working)\s+(?:with|on|in|as)"
+    r"|number\s+of\s+(?:years?|yrs?)"
+    r"|experienc(?:e|ed)\s+(?:in|with|on)",
     re.IGNORECASE,
 )
+
+# Fallback answers (default/unlisted/total years) are tenure claims: only
+# allowed when the question carries the experience NOUN. Without one, an
+# unknown skill ("3 years with Cobol?", "experienced in Cobol?") must fall
+# through to review — never inherit a default. Noun-boundary on purpose:
+# the adjective "experienced" must not open the fallback door.
+_EXP_WORD = re.compile(r"\b(?:experience|knowledge|expertise|tenure|total|overall)\b", re.IGNORECASE)
 
 _TOTAL_EXPERIENCE_INTENT = re.compile(
     r"\b(?:total|overall|cumulative|aggregate)\s+(?:work\s+|professional\s+)?"
@@ -77,6 +89,7 @@ _WILLINGNESS_INTENT = re.compile(
     r"work\s+from\s+office|wfo|onsite|on[\s-]site|"
     r"hybrid\s+(?:work|model|mode|setup|policy)|"
     r"join\s+immediately|immediate\s+joiner|"
+    r"take\s+up\s+an?\s+interview|available\s+to\s+(?:take\s+up|attend|give)\s+(?:an?\s+)?interview|"
     r"available\s+within\s+\d+\s*days?|join\s+within\s+\d+\s*days?|notice\s+period|"
     r"night\s*shifts?|rotational\s*shifts?|day\s*shifts?|shifts?|24\/7|rotational|weekend|weekends|"
     r"bond|service\s*agreement|contract|undertaking|policy|terms?|"
@@ -220,6 +233,14 @@ class AnswerEngine:
         if lwd is not None:
             return lwd
 
+        # Stage 0.5: notice SERVING status ("are you serving your notice?").
+        # Must precede Stage 1: the generic "notice period → 0 days" entry
+        # substring-matches these questions and its numeric-zero polarity
+        # converts to "No" — answering a status question with a duration.
+        serving = self._resolve_notice_status(text, question)
+        if serving is not None:
+            return serving
+
         # Stage 1: User Configuration & KB! User config beats generic fallbacks.
         entry = self._best_entry(text)
         if entry is not None:
@@ -238,17 +259,37 @@ class AnswerEngine:
         availability = self._resolve_availability(text, question)
         if availability is not None:
             return availability
+        # Stage 1.52: Fluency + self-rating intents (recruiter reframings
+        # that generic willingness/fuzzy stages either miss or answer
+        # wrongly — e.g. typing "Yes" into a 1-10 rating box).
+        for intent in (self._resolve_fluent, self._resolve_self_rating):
+            hit = intent(text, question)
+            if hit is not None:
+                return hit
 
         # Stage 1.6: Generic Affirmative & Location Fallback
         willingness = self._resolve_willingness(text, question)
         if willingness is not None:
             return willingness
+        # Stage 1.65: Motivation ("why us / why this role") free text.
+        # Mandatory, unskippable, and unanswerable from any table — so the
+        # engine composes one from verified facts only (tenure + top mapped
+        # skills + company named in the question). Never invents domains,
+        # projects, or enthusiasm specifics beyond the template.
+        motivation = self._resolve_motivation(text, question)
+        if motivation is not None:
+            return motivation
         # Stage 1.7: Known-absent skill ("Do you have X experience?" where X
         # is in no skill map -> honest "No"). Runs before the tenure math so
         # unknown skills never inherit default_years.
         absence = self._resolve_skill_absence(text, question)
         if absence is not None:
             return absence
+        # Stage 1.8: "Are you experienced in X?" — Yes for mapped skills,
+        # review for unknown ones (never affirm what the map can't verify).
+        experienced = self._resolve_experienced_yes(text, question)
+        if experienced is not None:
+            return experienced
         # Stage 2: Experience Math
         experience = self._resolve_experience(text, question)
         if experience is not None:
@@ -459,6 +500,153 @@ class AnswerEngine:
             self._record_hit(best_entry)
         return fitted
 
+    def _resolve_notice_status(self, text: str, question: ScreeningQuestion) -> ResolvedAnswer | None:
+        """Serving-notice STATUS (yes/no), distinct from notice duration.
+
+        Reads the explicit serving entry ("serving notice" → Yes/No), never
+        the duration entry. No serving entry configured → review, never derive.
+        """
+        if not re.search(r"\bserving\b|\bunder\s+notice\b", text):
+            return None
+        for entry in self.entries:
+            if "serving" in entry.pattern:
+                fitted = self._fit_to_options(entry.answer, question, entry.pattern, entry.source)
+                if fitted is not None:
+                    log.info("answers.notice_status", question=question.text[:120], value=entry.answer[:20])
+                    return fitted
+        return None
+
+    def _resolve_fluent(self, text: str, question: ScreeningQuestion) -> ResolvedAnswer | None:
+        """"Are you fluent in X?" — Yes for mapped skills with real tenure,
+        No for mapped-zero ones, review for anything unlisted."""
+        m = re.search(r"\bfluen[tcy]*\s+(?:in|with)\s+(.+?)\s*\??$", text)
+        if not m:
+            return None
+        frag = (m.group(1) or "").strip()
+        if not frag or len(frag) > 40:
+            return None
+        for skill, years in (self.experience.skills or {}).items():
+            phrase = _normalise(skill)
+            if phrase and (_contains_word(frag, phrase) or _contains_word(text, phrase)):
+                try:
+                    want = "Yes" if float(years) > 0 else "No"
+                except (TypeError, ValueError):
+                    return None
+                fitted = self._fit_to_options(want, question, f"fluent:{phrase}", "skill-map")
+                if fitted is not None:
+                    log.info("answers.fluent", question=question.text[:120], skill=phrase[:40], value=want)
+                return fitted
+        return None
+
+    def _resolve_self_rating(self, text: str, question: ScreeningQuestion) -> ResolvedAnswer | None:
+        """"Rate yourself 1-10 in X" — 8 for mapped skills with real tenure
+        (strong-but-credible house rule, same as fit-rating), review for
+        unlisted skills. Never lets willingness type "Yes" into a rating box.
+        """
+        if not re.search(r"\brate\b", text):
+            return None
+        if not re.search(r"\b(?:yourself|your)\b", text):
+            return None
+        if not re.search(r"1\s*(?:-|to|/)\s*10|scale\s+of\s+1\s*-\s*10|out\s+of\s+10", text):
+            return None
+        for skill, years in (self.experience.skills or {}).items():
+            phrase = _normalise(skill)
+            if not phrase:
+                continue
+            if _contains_word(text, phrase):
+                try:
+                    if float(years) <= 0:
+                        return None
+                except (TypeError, ValueError):
+                    return None
+                fitted = self._fit_to_options("8", question, f"self-rating:{phrase}", "skill-map")
+                if fitted is not None:
+                    log.info("answers.self_rating", question=question.text[:120], skill=phrase[:40])
+                return fitted
+        return None
+
+    def _resolve_motivation(self, text: str, question: ScreeningQuestion) -> ResolvedAnswer | None:
+        # Job-change questions have their own configured answers — never
+        # let the motivation template speak for why the candidate is leaving.
+        if re.search(
+            r"look(?:ing)?\s+for\s+(?:a\s+)?change|\bleav|\bresign|\bquit\b|"
+            r"notice\s+period|reliev|why\s+did\s+you\s+leave|reason\s+for\s+(?:leaving|change)",
+            text,
+        ):
+            return None
+        if not re.search(
+            r"why\s+(?:do\s+you\s+want\s+(?:to\s+(?:work|join|apply)|this|the)|"
+            r"are\s+you\s+interested|should\s+we\s+hire|"
+            r"do\s+you\s+want\s+to\s+(?:work|join)|are\s+you\s+a\s+good\s+fit)|"
+            r"what\s+interests\s+you|what\s+(?:excites|attracts|motivates)\s+you|"
+            r"why\s+(?:this|the)\s+(?:role|position|job|opportunity|company)|"
+            r"why\s+us\b|cover\s*letter",
+            text,
+        ):
+            return None
+        # Company as named in the question ("... at Vena Solutions?").
+        company = ""
+        m = re.search(
+            r"\bat\s+([A-Z][\w&.,'\-]*(?:\s+[A-Z][\w&.,'\-]*){0,4})",
+            question.text or "",
+        )
+        if m:
+            company = m.group(1).strip().strip(".,?")
+        if company and len(company) > 40:
+            company = ""
+        # Top verified skills by tenure — facts only, no invented domains.
+        ranked = sorted(
+            ((s, float(y)) for s, y in (self.experience.skills or {}).items()),
+            key=lambda pair: (-pair[1], pair[0]),
+        )
+        top = [s for s, y in ranked if y > 0][:4]
+        total = None
+        try:
+            if self.experience.total_years is not None:
+                total = _format_years(float(self.experience.total_years))
+        except (TypeError, ValueError):
+            total = None
+        if not top or total is None:
+            return None
+        at = f" at {company}" if company else ""
+        skills = ", ".join(top)
+        value = (
+            f"I'm excited about this opportunity{at} because it aligns with "
+            f"my experience: {total} years building software with {skills}. "
+            f"I enjoy solving hard product problems end-to-end and would "
+            f"love to bring that to your team."
+        )
+        fitted = self._fit_to_options(value, question, "intent:motivation", "intent-map")
+        if fitted is not None:
+            log.info("answers.motivation", question=question.text[:120], company=company[:40])
+        return fitted
+
+    def _resolve_experienced_yes(self, text: str, question: ScreeningQuestion) -> ResolvedAnswer | None:
+        m = re.search(
+            r"\bexperienc(?:ed|e)\s+(?:in|with|on)\s+(.+?)\s*\??$",
+            text,
+        )
+        if not m:
+            return None
+        frag = (m.group(1) or "").strip()
+        if not frag or len(frag) > 40:
+            return None
+        for skill, years in (self.experience.skills or {}).items():
+            phrase = _normalise(skill)
+            if not phrase:
+                continue
+            if _contains_word(frag, phrase) or _contains_word(text, phrase):
+                try:
+                    if float(years) <= 0:
+                        return None
+                except (TypeError, ValueError):
+                    return None
+                fitted = self._fit_to_options("Yes", question, f"experienced:{phrase}", "skill-map")
+                if fitted is not None:
+                    log.info("answers.experienced_yes", question=question.text[:120], skill=phrase[:40])
+                return fitted
+        return None
+
     def _resolve_experience(self, text: str, question: ScreeningQuestion) -> ResolvedAnswer | None:
         config = self.experience
         if not _EXPERIENCE_INTENT.search(text):
@@ -489,6 +677,20 @@ class AnswerEngine:
             log.info("answers.experience_map", skills=[phrase for phrase, _ in matched][:6], strategy=strategy, value=value)
             return self._fit_to_options(_format_years(value), question, f"experience:{longest}", "experience-map")
 
+        # Named-ROLE tenure ("... as a Site Reliability Engineer?") with no
+        # map hit: recruiters verify titles against the resume, so a default
+        # here is fabrication, not generosity. Review — while "in <skill>"
+        # keeps the unlisted-1y default below. Skill hits already returned.
+        if re.search(
+            r"\bas\s+(?:an?\s+|the\s+)?[a-z][a-z0-9\s/&+#.\-]{1,40}?"
+            r"(?:developer|engineer|analyst|architect|scientist|manager|"
+            r"lead|consultant|specialist|tester|administrator|designer|"
+            r"devops|sre|qa)s?\s*\??$",
+            text,
+        ):
+            log.info("answers.role_tenure_review", question=question.text[:120])
+            return None
+
         # For unlisted skills on matched jobs, default to 1 year so automated
         # ATS screening doesn't drop an otherwise-strong candidate.
         m = re.search(
@@ -498,7 +700,7 @@ class AnswerEngine:
             r"(?:in|with|of)\s+([a-z][a-z0-9+#.\- ]{1,30})\s*\??$",
             text,
         )
-        if m:
+        if m and _EXP_WORD.search(text):
             maps: set[str] = set()
             for s in (config.skills or {}):
                 maps |= _tokenise(s)
@@ -511,10 +713,10 @@ class AnswerEngine:
                 )
                 return self._fit_to_options("1", question, f"experience:unlisted_default:{unlisted_skill}", "experience-map")
 
-        if config.default_years is not None:
+        if config.default_years is not None and _EXP_WORD.search(text):
             return self._fit_to_options(_format_years(config.default_years), question, "experience:default", "experience-map")
 
-        if config.total_years is not None:
+        if config.total_years is not None and _EXP_WORD.search(text):
             return self._fit_to_options(_format_years(config.total_years), question, "experience:total_fallback", "experience-map")
 
         # Unknown required facts block the application; never invent experience.
@@ -674,6 +876,18 @@ class AnswerEngine:
                 for option in options:
                     if self._polarity(_normalise(option)) == target_polarity:
                         return ResolvedAnswer(option, pattern, "option-match")
+
+        # Skip-only option sets (run 469 #31, #34: radio with a single
+        # "Skip this question"): no honest answer is selectable, so take the
+        # provided Skip instead of queueing a review a human can only skip.
+        # Fires ONLY when every option is an explicit skip phrasing — never
+        # for "none of the above" (which asserts something about tenure).
+        _skip_only = {"skip", "skip this", "skip question", "skip this question",
+                      "prefer not to answer", "prefer not to say"}
+        if options and all(_normalise(opt) in _skip_only for opt in options):
+            log.info("answers.skip_only_option", question=question.text[:120],
+                     option=options[0][:60])
+            return ResolvedAnswer(options[0], pattern, "option-match-skip")
 
         if self.strict:
             return None
