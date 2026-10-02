@@ -172,6 +172,22 @@ class Repository:
         )
         return int(row["c"]) if row else 0
 
+    async def revive_dead_dispatches(self) -> int:
+        """Resets ConnectError dead rows to pending (server was down, not the job).
+
+        Only connection failures qualify: validation-dead rows stay dead.
+        """
+        result = await self._execute_with_retry(
+            "UPDATE external_dispatch_queue "
+            "SET status = 'pending', attempts = 0, "
+            "    last_error = NULL, next_retry_at = NULL "
+            "WHERE status = 'dead' AND last_error LIKE 'ConnectError%'"
+        )
+        try:
+            return int(str(result).split()[-1])
+        except Exception:
+            return 0
+
     # ------------------------------------------------------------------ runs
     async def start_run(
         self, mode: str, profiles: list[str], account: str = "primary"

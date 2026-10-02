@@ -3,7 +3,11 @@ LinkedIn Cold Email Campaign Runner.
 
 Design Decisions:
 - DB Deduplication: Checks `contacted_recruiters` in Postgres to prevent duplicate recruiter contact.
-- Human Rate Limits: Daily cap of 15 emails and 8-second delay between emails to protect Gmail Sender Score.
+- Human Rate Limits: Daily cap of 20 emails and 30-90s randomized pacing
+  between sends to protect Gmail Sender Score. 20/day via Gmail SMTP stays
+  far under limits; spam risk at this volume comes from bounces/complaints,
+  not count — so role-inbox skips, 60-day dedupe, and reply monitoring matter
+  more than shaving the number.
 - Dual-Track Routing: Dynamically selects AI vs Full Stack resume attachments based on role classification.
 """
 from __future__ import annotations
@@ -42,11 +46,27 @@ SEARCH_KEYWORDS = [
 
 import urllib.parse
 
-# Focus search strictly on active hiring posts containing email/resume contact points within the past 24h
+# Focus search strictly on active hiring posts containing email/resume contact points within the past 24h.
+# sortBy=relevance WITH the past-24h bound: the time filter already caps
+# staleness, so relevance ranks the best matches before scroll depth runs
+# out (date-first buries good posts below the read window).
+# Content-type facet deliberately LEFT DEFAULT (all posts): setting it to
+# "Job posts" would re-scrape the listings the apply flow already covers
+# (same duplication the removed jobs-tab hunter caused). Personal recruiter
+# posts with emails are this campaign's unique coverage; the email-gate in
+# the scraper already filters out videos/images/docs without emails.
 SEARCH_URLS = [
-    f'https://www.linkedin.com/search/results/content/?keywords={urllib.parse.quote(f"{kw} (hiring OR email OR resume)")}&origin=GLOBAL_SEARCH_HEADER&sortBy=%5B%22date_posted%22%5D&datePosted=%5B%22past-24h%22%5D'
+    f'https://www.linkedin.com/search/results/content/?keywords={urllib.parse.quote(f"{kw} (hiring OR email OR resume)")}&origin=GLOBAL_SEARCH_HEADER&sortBy=%5B%22relevance%22%5D&datePosted=%5B%22past-24h%22%5D'
     for kw in SEARCH_KEYWORDS
 ]
+
+# NOTE (2026-10-01): a jobs-tab (/jobs/search/) hunter lived here and was
+# REMOVED. Reason: the LinkedIn APPLY flow already processes those exact
+# listings (Easy Apply submits; company-site ones go to the Sidekick
+# outbox as resolved ATS links) — re-scraping them for emails duplicated
+# coverage while doubling automation exposure on the account. The campaign
+# hunts feed posts only: recruiter posts with emails, a source nothing else
+# in this repo touches.
 
 
 def _configured_resume_fallback(want_ai: bool, resume_dir: Path) -> Path:
@@ -80,7 +100,7 @@ def _get_resume_path(role: str, resume_dir: Path) -> Path:
 
 
 async def run_campaign(
-    daily_email_limit: int = 15,
+    daily_email_limit: int = 20,
     headed: bool = False,
     dry_run: bool = False,
 ) -> int:
@@ -178,12 +198,13 @@ async def run_campaign(
         print(f"\n[🔍 DRY RUN MODE] Hunting recruiter posts (limit: {effective_limit} emails preview). No emails will be sent.\n")
 
     try:
-        for url in SEARCH_URLS:
+        sources: list[tuple[str, str]] = [("posts", u) for u in SEARCH_URLS]
+        for source, url in sources:
             if emails_sent_today >= effective_limit:
                 log.info("linkedin.daily_limit_reached", limit=daily_email_limit)
                 break
 
-            log.info("linkedin.starting_search", url=url[:60])
+            log.info("linkedin.starting_search", source=source, url=url[:60])
             try:
                 posts = await hunter.hunt_for_jobs(url)
             except CookieExpiredError as exc:
@@ -192,6 +213,13 @@ async def run_campaign(
                 # dead. Refresh LINKEDIN_LI_AT or run login-linkedin headed.
                 log.error("linkedin.cookie_expired", error=str(exc))
                 return emails_sent_today
+            except Exception as exc:
+                # One dead search (driver crash, ban page, OOM) must never
+                # kill the remaining sources — log and move on.
+                log.error("linkedin.search_failed_continuing", source=source,
+                          error=str(exc)[:200])
+                await asyncio.sleep(10.0)
+                continue
 
             for post_data in posts:
                 if emails_sent_today >= effective_limit:
@@ -202,6 +230,8 @@ async def run_campaign(
                 post_url = post_data.get("post_url", "")
 
                 role = post_data["role"]
+                company = (post_data.get("company") or "").strip()
+                first_name = (post_data.get("first_name") or "").strip()
 
                 resume_path = _get_resume_path(role, resume_dir)
 
@@ -231,11 +261,17 @@ async def run_campaign(
                     attempted_this_run.add(clean_email)
 
                     if dry_run:
-                        body_preview = mailer._generate_body(role_name=role, job_description=text)
+                        body_preview = mailer._generate_body(
+                            role_name=role, job_description=text,
+                            company_name=company, recipient_name=first_name,
+                            angle="application",
+                        )
                         print("=" * 70)
                         print(f"📧 [DRY RUN MATCH #{emails_sent_today + 1}]")
                         print(f"  To:         {clean_email}")
                         print(f"  Role:       {role}")
+                        print(f"  Company:    {company or 'unknown'}")
+                        print(f"  Name:       {first_name or 'unknown'}")
                         print(f"  Resume:     {resume_path.name}")
                         print(f"  Post URL:   {post_url or 'N/A'}")
                         print("  Pitch Snippet:")
@@ -259,6 +295,9 @@ async def run_campaign(
                             role_name=role,
                             resume_path=resume_path,
                             job_description=text,
+                            company_name=company,
+                            recipient_name=first_name,
+                            angle="application",
                         )
                         if success:
                             await repo.record_contacted_recruiter(clean_email, role, text, post_url)
@@ -273,7 +312,7 @@ async def run_campaign(
                             log.info("linkedin.email_sent", to=clean_email, role=role, sent_today=emails_sent_today)
                             # Human sending rhythm: randomized 30-90s between
                             # sends so Gmail never sees burst automation.
-                            # (15/day cap keeps total volume safe regardless.)
+                            # (20/day cap keeps total volume safe regardless.)
                             pace = random.uniform(30.0, 90.0)
                             log.debug("linkedin.send_pacing", seconds=round(pace, 1))
                             await asyncio.sleep(pace)
@@ -282,6 +321,21 @@ async def run_campaign(
             if not dry_run:
                 await asyncio.sleep(10.0)
 
+    except Exception as exc:
+        # Crash outside any single search (SMTP blowup, DB outage): alert
+        # loudly with a SHORT message (never a traceback — tracebacks print
+        # Settings locals, i.e. passwords and keys, to the console).
+        log.exception("linkedin.campaign_crashed", error=str(exc)[:200])
+        try:
+            await notifier.send(
+                "🚨 LinkedIn campaign crashed",
+                f"Crashed after {emails_sent_today} sends: {str(exc)[:200]}. "
+                f"DB pool may need a check; already-sent leads are recorded.",
+                is_error=True,
+            )
+        except Exception:
+            pass
+        return emails_sent_today
     finally:
         if sent_records:
             prefix = "[DRY RUN PREVIEW] " if dry_run else ""

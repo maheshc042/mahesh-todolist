@@ -9,6 +9,7 @@ Design Decisions:
 """
 import asyncio
 import os
+import re
 from pathlib import Path
 from typing import Any
 
@@ -17,7 +18,10 @@ from playwright.async_api import BrowserContext, Page, async_playwright
 from ..logging_setup import get_logger
 from .analyzer import (
     classify_role,
+    extract_company,
+    extract_first_name,
     extract_recruiter_emails,
+    is_abroad_onsite,
     is_experience_match,
     is_spam_or_unpaid,
 )
@@ -58,8 +62,30 @@ class LinkedInHunter:
                 "AppleWebKit/537.36 (KHTML, like Gecko) "
                 "Chrome/131.0.0.0 Safari/537.36"
             ),
-            args=["--disable-blink-features=AutomationControlled"],
+            # Software rendering + lean shared memory: this browser only
+            # reads DOM text (screenshots/video never used), and headed GPU
+            # renderers on LinkedIn's feed are what die with
+            # "Input.dispatchMouseEvent: Internal error", taking the search
+            # down. SwiftShader fallback keeps headed mode fully working.
+            args=[
+                "--disable-blink-features=AutomationControlled",
+                "--disable-gpu",
+                "--disable-dev-shm-usage",
+                "--no-sandbox",
+            ],
         )
+
+        # Memory armor: LinkedIn feed pages are renderer hogs (infinite
+        # images/video/fonts) and a dead renderer kills the whole search with
+        # "Input.dispatchMouseEvent: Internal error". Text + structure is all
+        # the hunter reads — drop the heavy bytes at the network layer.
+        try:
+            await context.route(
+                "**/*.{png,jpg,jpeg,gif,webp,svg,ico,woff,woff2,ttf,mp4,webm}",
+                lambda route: route.abort(),
+            )
+        except Exception:
+            pass
 
         if inject_cookies and self.li_at_cookie:
             # A session saved by login_interactive() is always fresher than the
@@ -100,11 +126,91 @@ class LinkedInHunter:
             await context.add_cookies(cookies_to_add)
         return context
 
-    async def _human_scroll(self, page: Page, max_scrolls: int = 6) -> None:
-        """Scrolls down slowly to load older posts."""
-        for i in range(max_scrolls):
-            await page.mouse.wheel(0, 1000)
-            await asyncio.sleep(2.0 + (i % 2) * 0.5)
+    async def _human_scroll(
+        self,
+        page: Page,
+        max_scrolls: int = 20,
+        count_selector: str = "li.reusable-search__result-container, div.feed-shared-update-v2",
+        stall_rounds: int = 2,
+    ) -> int:
+        """Scroll-until-stall: read rich searches deep, skip thin ones fast.
+
+        After each scroll the loaded post count is compared; `stall_rounds`
+        consecutive scrolls adding nothing ends the read (thin searches exit
+        in ~3 scrolls instead of burning the full budget, rich ones read to
+        `max_scrolls`). Returns scrolls performed. A dead page (closed
+        browser/renderer) ends the read instead of raising.
+        """
+        try:
+            last_count = await page.locator(count_selector).count()
+        except Exception:
+            last_count = 0
+        stagnant = 0
+        done = 0
+        for _ in range(max_scrolls):
+            try:
+                await page.mouse.wheel(0, 1000)
+            except Exception:
+                break
+            await asyncio.sleep(2.0 + (done % 2) * 0.5)
+            done += 1
+            try:
+                count = await page.locator(count_selector).count()
+            except Exception:
+                break
+            if count <= last_count:
+                stagnant += 1
+                if stagnant >= stall_rounds:
+                    break
+            else:
+                stagnant = 0
+                last_count = count
+        return done
+
+    _AUTHOR_SELECTORS = [
+        ".feed-shared-actor__name",
+        "span.update-components-actor__name",
+        ".update-components-actor__title span[aria-hidden='true']",
+    ]
+    _HEADLINE_SELECTORS = [
+        ".feed-shared-actor__description",
+        "span.update-components-actor__description",
+        ".update-components-actor__subtitle span[aria-hidden='true']",
+    ]
+
+    @staticmethod
+    def _clean_author(raw: str) -> str:
+        """Strip connection-degree suffixes ('• 1st') and metadata."""
+        if not raw:
+            return ""
+        first_line = raw.strip().splitlines()[0]
+        cleaned = re.sub(r"\s*[•·|]\s*.*$", "", first_line).strip()
+        return cleaned[:80]
+
+    async def _extract_author(self, container) -> tuple[str, str]:
+        """Poster name + headline, best-effort across LinkedIn layouts."""
+        author, headline = "", ""
+        for sel in self._AUTHOR_SELECTORS:
+            try:
+                loc = container.locator(sel).first
+                if await loc.count():
+                    text = await loc.inner_text()
+                    if text and text.strip():
+                        author = self._clean_author(text)
+                        break
+            except Exception:
+                continue
+        for sel in self._HEADLINE_SELECTORS:
+            try:
+                loc = container.locator(sel).first
+                if await loc.count():
+                    text = await loc.inner_text()
+                    if text and text.strip():
+                        headline = text.strip().splitlines()[0][:160]
+                        break
+            except Exception:
+                continue
+        return author, headline
 
     async def _expand_long_posts(self, page: Page) -> None:
         """Finds and clicks all '...see more' buttons to reveal hidden post text and email addresses."""
@@ -165,6 +271,28 @@ class LinkedInHunter:
                 await context.close()
         return ok
 
+    @staticmethod
+    async def _goto_search(page: Page, search_url: str) -> bool:
+        """Navigate with one retry and a commit fallback.
+
+        LinkedIn search pages intermittently hang past 45s (heavy SPA,
+        throttled automation traffic). A single retry with
+        wait_until="commit" recovers transient stalls; a second failure
+        means the page is genuinely unreachable — caller moves on.
+        """
+        try:
+            await page.goto(search_url, wait_until="domcontentloaded", timeout=45_000)
+            return True
+        except Exception as first:
+            log.warning("linkedin.goto_retry", error=str(first)[:150], url=search_url[:70])
+        try:
+            await page.goto(search_url, wait_until="commit", timeout=45_000)
+            await asyncio.sleep(3.0)
+            return True
+        except Exception as second:
+            log.warning("linkedin.goto_failed", error=str(second)[:150], url=search_url[:70])
+            return False
+
     async def hunt_for_jobs(self, search_url: str) -> list[dict[str, Any]]:
         """
         Navigates to the search URL, waits for posts, extracts text, classifies roles, and extracts emails.
@@ -180,7 +308,8 @@ class LinkedInHunter:
 
             try:
                 # Go directly to search URL
-                await page.goto(search_url, wait_until="domcontentloaded", timeout=45_000)
+                if not await self._goto_search(page, search_url):
+                    return results
 
                 # Check if redirected to login
                 page_title = await page.title()
@@ -212,7 +341,7 @@ class LinkedInHunter:
                 except Exception:
                     log.warning("linkedin.no_posts", detail="No posts appeared within 15 seconds. Page might be empty.")
 
-                await self._human_scroll(page, max_scrolls=8)
+                await self._human_scroll(page)
                 await self._expand_long_posts(page)
 
                 containers = await page.locator(
@@ -243,6 +372,10 @@ class LinkedInHunter:
                         log.debug("linkedin.lead.rejected_spam_or_unpaid", preview=text[:70].replace("\n", " "))
                         continue
 
+                    if is_abroad_onsite(text):
+                        log.debug("linkedin.lead.rejected_abroad_onsite", preview=text[:70].replace("\n", " "))
+                        continue
+
                     if not is_experience_match(text):
                         log.debug("linkedin.lead.rejected_experience", preview=text[:70].replace("\n", " "))
                         continue
@@ -264,7 +397,14 @@ class LinkedInHunter:
                     except Exception:
                         post_url = ""
 
-                    results.append({"text": text, "role": role, "emails": emails, "post_url": post_url})
+                    author, headline = await self._extract_author(container)
+                    results.append({
+                        "text": text, "role": role, "emails": emails,
+                        "post_url": post_url, "author": author,
+                        "headline": headline,
+                        "company": extract_company(text, headline),
+                        "first_name": extract_first_name(author),
+                    })
 
                 log.info("linkedin.hunt_completed", total_posts_read=len(containers), qualified_leads=len(results))
 
@@ -277,6 +417,11 @@ class LinkedInHunter:
                 else:
                     log.error("linkedin.scrape_crashed", error=err_msg[:200])
             finally:
-                await context.close()
+                # The driver itself may be dead (OOM/closed browser) — a
+                # throwing close would mask the real error and kill the run.
+                try:
+                    await context.close()
+                except Exception:
+                    pass
 
         return results

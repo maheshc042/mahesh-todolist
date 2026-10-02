@@ -1,258 +1,192 @@
 job_id,tab,position,total_jobs_in_tab,company,title,url,scraped_at
-reco-170926028379,default,1,,Tech SMCSquared GCC,Data Engineer,https://www.naukri.com/job-listings-170926028379,2026-09-19T09:06:28.643167+00:00
-reco-170926036714,default,2,,Hinduja Global Solutions (HGS),Azure Data Engineer,https://www.naukri.com/job-listings-170926036714,2026-09-19T09:06:30.664974+00:00
-reco-260826028368,default,3,,Zeominds It Solutions,Data Scientist / Data Engineer,https://www.naukri.com/job-listings-260826028368,2026-09-19T09:06:32.675955+00:00
-reco-160926011950,default,4,,Srinav,Data Engineer,https://www.naukri.com/job-listings-160926011950,2026-09-19T09:06:34.636872+00:00
-reco-180926918787,default,5,,Top Rated Company in Recruitment Domain,Data Engineer,https://www.naukri.com/job-listings-180926918787,2026-09-19T09:06:36.627164+00:00
-reco-160926026666,default,6,,CONFIDENTIAL,Data Engineer -3 To 7 years,https://www.naukri.com/job-listings-160926026666,2026-09-19T09:06:38.624113+00:00
-reco-160926044161,default,7,,Naukri Assist,Data Engineer,https://www.naukri.com/job-listings-160926044161,2026-09-19T09:06:40.575413+00:00
-reco-160926044706,default,8,,Microland,Data Engineer,https://www.naukri.com/job-listings-160926044706,2026-09-19T09:06:42.463142+00:00
-reco-170926019653,default,9,,Cyient,Master Data Engineer,https://www.naukri.com/job-listings-170926019653,2026-09-19T09:06:44.410623+00:00
-reco-170926923518,default,10,,Razorthink,Data Engineer,https://www.naukri.com/job-listings-170926923518,2026-09-19T09:06:46.409697+00:00
-reco-150926039019,default,11,,EXL,Data Engineer Fabric,https://www.naukri.com/job-listings-150926039019,2026-09-19T09:06:48.546901+00:00
-reco-160926940053,default,12,,Axtria,Data Engineers,https://www.naukri.com/job-listings-160926940053,2026-09-19T09:06:50.479490+00:00
-reco-160926046194,default,13,,Infosys,Pyspark Developer,https://www.naukri.com/job-listings-160926046194,2026-09-19T09:06:52.409062+00:00
-reco-160926933142,default,14,,AXA Global Business Services,Data Developer,https://www.naukri.com/job-listings-160926933142,2026-09-19T09:06:54.349621+00:00
-reco-150926014750,default,15,,CONFIDENTIAL,Data Engineer,https://www.naukri.com/job-listings-150926014750,2026-09-19T09:06:56.330617+00:00
-reco-150926015883,default,16,,Mindpool Technologies,Power Bi Developer,https://www.naukri.com/job-listings-150926015883,2026-09-19T09:06:58.265754+00:00
-reco-170926023580,default,17,,Crescendo Global,Business Analyst,https://www.naukri.com/job-listings-170926023580,2026-09-19T09:07:00.176683+00:00
-reco-170926008293,default,18,,PRODUCT BASED COMPANY,Power Bi Developer,https://www.naukri.com/job-listings-170926008293,2026-09-19T09:07:02.074321+00:00
-reco-090926029663,default,19,,Wipfli India,Analyst-Data Center Operations,https://www.naukri.com/job-listings-090926029663,2026-09-19T09:07:04.017921+00:00
-reco-180926019225,default,20,,EY,Data Engineer,https://www.naukri.com/job-listings-180926019225,2026-09-19T09:07:05.956636+00:00
-reco-170926022875,default,21,,Persistent,Data Engineer,https://www.naukri.com/job-listings-170926022875,2026-09-19T09:07:07.901679+00:00
-reco-150926023199,default,22,,IRT Digital Analytics Solutions,Data & BI Consultant,https://www.naukri.com/job-listings-150926023199,2026-09-19T09:07:09.849426+00:00
-reco-160926933020,default,23,,Axa Xl,Data Developer,https://www.naukri.com/job-listings-160926933020,2026-09-19T09:07:11.808980+00:00
-reco-170926013943,default,24,,Crosslynx Technologies Services,Junior Java Developer,https://www.naukri.com/job-listings-170926013943,2026-09-19T09:07:13.774115+00:00
-reco-160926014547,default,25,,Coforge,Infrastructure Engineer,https://www.naukri.com/job-listings-160926014547,2026-09-19T09:07:15.719510+00:00
-reco-170926922434,default,26,,IT Industry,Java Developer - Azure,https://www.naukri.com/job-listings-170926922434,2026-09-19T09:07:17.634636+00:00
-reco-180926019619,default,27,,Olx,Devops Engineer,https://www.naukri.com/job-listings-180926019619,2026-09-19T09:07:19.524299+00:00
-reco-150926018043,default,28,,Ample Softech System,Power Bi Developer,https://www.naukri.com/job-listings-150926018043,2026-09-19T09:07:21.464253+00:00
-reco-170926012112,default,29,,PwC,SpringBoot Integration - Associate,https://www.naukri.com/job-listings-170926012112,2026-09-19T09:07:23.400705+00:00
-reco-170926029246,default,30,,Infinite,Java Full Stack Developer,https://www.naukri.com/job-listings-170926029246,2026-09-19T09:07:25.365250+00:00
-reco-020926014445,default,31,,Lenskart,Software Development Test Engineer,https://www.naukri.com/job-listings-020926014445,2026-09-19T09:07:27.317236+00:00
-reco-170926923074,default,32,,Sarvaha Systems,Java Full stack Developer,https://www.naukri.com/job-listings-170926923074,2026-09-19T09:07:29.264462+00:00
-reco-160926933173,default,33,,VOLKSWAGEN GROUP DIGITAL SOLUTIONS PRIVATE LIMITED,Developer,https://www.naukri.com/job-listings-160926933173,2026-09-19T09:07:31.188921+00:00
-reco-160926047221,default,34,,Nielseniq India,Java Back End Developer,https://www.naukri.com/job-listings-160926047221,2026-09-19T09:07:33.108230+00:00
-reco-170926014888,default,35,,Interface Infosoft,Java Developer,https://www.naukri.com/job-listings-170926014888,2026-09-19T09:07:35.037342+00:00
-reco-170926025531,default,36,,Green Leaf Consultants Kolkata,Java Full Stack Developer,https://www.naukri.com/job-listings-170926025531,2026-09-19T09:07:37.048838+00:00
-reco-150926934711,default,37,,Agiliad,Java developer,https://www.naukri.com/job-listings-150926934711,2026-09-19T09:07:39.096467+00:00
-reco-170926923028,default,38,,Predictive Data Sciences,Backend Engineer,https://www.naukri.com/job-listings-170926923028,2026-09-19T09:07:41.170714+00:00
-reco-170926917707,default,39,,Accenture,Data Engineer,https://www.naukri.com/job-listings-170926917707,2026-09-19T09:07:43.229365+00:00
-reco-160926032871,default,40,,Astar Data,Qe Automation Engineer,https://www.naukri.com/job-listings-160926032871,2026-09-19T09:07:45.212619+00:00
-reco-170926033981,default,41,,Bahwan CyberTek,Software Engineer,https://www.naukri.com/job-listings-170926033981,2026-09-19T09:07:47.145877+00:00
-reco-180926017070,default,42,,Addepar,Software Engineer - ADM,https://www.naukri.com/job-listings-180926017070,2026-09-19T09:07:49.110194+00:00
-reco-180926011856,default,43,,Trigent,Automation Test Engineer,https://www.naukri.com/job-listings-180926011856,2026-09-19T09:07:51.056378+00:00
-reco-170926021710,default,44,,Tech Mahindra,Postgresql Database Administrator,https://www.naukri.com/job-listings-170926021710,2026-09-19T09:07:53.049589+00:00
-reco-180926502224,default,45,,Ema Unlimited,Site Reliability Engineer,https://www.naukri.com/job-listings-180926502224,2026-09-19T09:07:55.014009+00:00
-reco-160926007535,default,46,,INADEV,Hiring - Java Developer - Thane,https://www.naukri.com/job-listings-160926007535,2026-09-19T09:07:57.069537+00:00
-reco-150926018616,default,47,,Tata Elxsi,Data Engineer,https://www.naukri.com/job-listings-150926018616,2026-09-19T09:07:58.993836+00:00
-reco-170926923426,default,48,,Reve Cloud Inc.,Software Engineer – Java Builds,https://www.naukri.com/job-listings-170926923426,2026-09-19T09:08:00.958992+00:00
-reco-050826008794,default,49,,TVS Credit Services Ltd,Data Scientist - Generative AI (LLM | RAG | Agentic AI),https://www.naukri.com/job-listings-050826008794,2026-09-19T09:08:02.922496+00:00
-reco-150926025109,default,50,,Smart Ims,SRE (Site Reliability Engineer) at Bangalore,https://www.naukri.com/job-listings-150926025109,2026-09-19T09:08:04.845154+00:00
-reco-170926923526,other,1,59,Razorthink,Trainee Software Engineers – Freshers,https://www.naukri.com/job-listings-170926923526,2026-09-19T09:10:00.072103+00:00
-reco-180926500608,other,2,59,Techup Labs,AI Developer - Intern,https://www.naukri.com/job-listings-180926500608,2026-09-19T09:10:05.160874+00:00
-reco-161225021183,other,3,59,Destm Technologies,Technical Support Engineer,https://www.naukri.com/job-listings-161225021183,2026-09-19T09:10:07.116662+00:00
-reco-150926503071,other,4,59,Toolsbots,Software Engineering Intern,https://www.naukri.com/job-listings-150926503071,2026-09-19T09:10:12.145920+00:00
-reco-110926008201,other,5,59,Bajaj General Insurance,Senior Gen Ai Engineer,https://www.naukri.com/job-listings-110926008201,2026-09-19T09:10:14.131178+00:00
-reco-180926034447,other,6,59,CorroHealth,AI Engineer,https://www.naukri.com/job-listings-180926034447,2026-09-19T09:10:16.058042+00:00
-reco-170926012021,other,7,59,RiDiK,Python Support Engineer,https://www.naukri.com/job-listings-170926012021,2026-09-19T09:10:17.968095+00:00
-reco-140926904816,other,8,59,Mangoapps India,AI/ML Engineer,https://www.naukri.com/job-listings-140926904816,2026-09-19T09:10:21.697067+00:00
-reco-180926012549,other,9,59,Swazei Tech,Devops Engineer,https://www.naukri.com/job-listings-180926012549,2026-09-19T09:10:27.343523+00:00
-reco-160926016904,other,10,59,Neurealm,Data Scientist,https://www.naukri.com/job-listings-160926016904,2026-09-19T09:10:29.241911+00:00
-reco-150926007323,other,11,59,Eidiko Systems Integrators,AI Engineer,https://www.naukri.com/job-listings-150926007323,2026-09-19T09:10:31.127516+00:00
-reco-020725034661,other,12,59,National Payments Corporation of India (NPCI),Data Scientist,https://www.naukri.com/job-listings-020725034661,2026-09-19T09:10:33.020123+00:00
-reco-150926018735,other,13,59,Varroc,Opening For AI/ML Engineer,https://www.naukri.com/job-listings-150926018735,2026-09-19T09:10:34.910708+00:00
-reco-110926021941,other,14,59,Brillio,AWS Developer,https://www.naukri.com/job-listings-110926021941,2026-09-19T09:10:36.831812+00:00
-reco-030326006130,other,15,59,Asuun Wellness,AI / GenAI Developer (Machine Learning & Deep Learning) (WFH),https://www.naukri.com/job-listings-030326006130,2026-09-19T09:10:38.741297+00:00
-reco-170926024191,other,16,59,CGI,ETL Automation tester,https://www.naukri.com/job-listings-170926024191,2026-09-19T09:10:40.681957+00:00
-reco-140926006390,other,17,59,Real One Homestates,Walk-in || Ai Ml Developer,https://www.naukri.com/job-listings-140926006390,2026-09-19T09:10:45.056955+00:00
-reco-160926500027,other,18,59,HYLAND,Associate Cloud Specialist,https://www.naukri.com/job-listings-160926500027,2026-09-19T09:10:47.071801+00:00
-reco-170926034218,other,19,59,Consultbae,AI Engineer,https://www.naukri.com/job-listings-170926034218,2026-09-19T09:10:48.952026+00:00
-reco-160926928284,other,20,59,Leading Client,AI & ML Developer / Python Engineer,https://www.naukri.com/job-listings-160926928284,2026-09-19T09:10:50.862381+00:00
-reco-170926026375,other,21,59,cult fit,AI/ML,https://www.naukri.com/job-listings-170926026375,2026-09-19T09:10:52.775453+00:00
-reco-150925027795,profile,1,56,Infosys,PLSQL Developer _ Infosys,https://www.naukri.com/job-listings-150925027795,2026-09-19T09:11:02.538501+00:00
-reco-130926003791,profile,2,56,PwC,Developer,https://www.naukri.com/job-listings-130926003791,2026-09-19T09:11:04.415461+00:00
-reco-150926017772,profile,3,56,Cognizant,Hiring OpenText Powerdocs,https://www.naukri.com/job-listings-150926017772,2026-09-19T09:11:06.288565+00:00
-reco-150926006328,profile,4,56,LTM,IDMC Developer,https://www.naukri.com/job-listings-150926006328,2026-09-19T09:11:08.144187+00:00
-reco-140926503694,profile,5,56,Tsaaro,Senior Data Privacy Consultant,https://www.naukri.com/job-listings-140926503694,2026-09-19T09:11:10.027417+00:00
-reco-160926939851,profile,6,56,Capgemini,PRE Sales Data Privacy Professional,https://www.naukri.com/job-listings-160926939851,2026-09-19T09:11:11.924634+00:00
-reco-150926037040,profile,7,56,Cogenthub,WFH - Report Writer (IT),https://www.naukri.com/job-listings-150926037040,2026-09-19T09:11:13.822590+00:00
-reco-080726037312,profile,8,56,KPMG India,Infrastructure Strategy Experts,https://www.naukri.com/job-listings-080726037312,2026-09-19T09:11:15.711716+00:00
-reco-030726030077,profile,9,56,Deloitte US-India Offices,DocuSign CLM- Developer,https://www.naukri.com/job-listings-030726030077,2026-09-19T09:11:17.556212+00:00
-reco-180926502232,profile,10,56,Blue Altair,Consultant - Data Governance (INDM),https://www.naukri.com/job-listings-180926502232,2026-09-19T09:11:19.461056+00:00
-reco-150926005275,profile,11,56,PwC India,OKTA,https://www.naukri.com/job-listings-150926005275,2026-09-19T09:11:21.348068+00:00
-reco-180926501822,profile,12,56,Cradlepoint,Enterprise Specialist - GSD,https://www.naukri.com/job-listings-180926501822,2026-09-19T09:11:23.233422+00:00
-reco-020926013672,profile,13,56,Nagarro,IICS Developer,https://www.naukri.com/job-listings-020926013672,2026-09-19T09:11:25.103377+00:00
-reco-160926000208,profile,14,56,Elbowcurve,Business Intelligence Developer,https://www.naukri.com/job-listings-160926000208,2026-09-19T09:11:27.076689+00:00
-reco-080426038241,profile,15,56,Deloitte US-India Offices,Amazon Connect- Developer,https://www.naukri.com/job-listings-080426038241,2026-09-19T09:11:29.129378+00:00
-reco-160926045723,profile,16,56,Tanisha Systems,PowerPoint Consultant-Freelance,https://www.naukri.com/job-listings-160926045723,2026-09-19T09:11:31.004732+00:00
-reco-150926018161,profile,17,56,Top-Rated Financial Services Company,Senior Analyst/Manager - SAS Enterprise Guide & SQL with BFSI,https://www.naukri.com/job-listings-150926018161,2026-09-19T09:11:32.886105+00:00
-reco-150926012051,profile,18,56,ZS,BTS Associate Consultant_IICS,https://www.naukri.com/job-listings-150926012051,2026-09-19T09:11:34.810738+00:00
-reco-150926036885,profile,19,56,Tata Communications,Network Design Engineer,https://www.naukri.com/job-listings-150926036885,2026-09-19T09:11:36.752454+00:00
-reco-150926037608,profile,20,56,EY,ITGC Senior Consultant,https://www.naukri.com/job-listings-150926037608,2026-09-19T09:11:38.654647+00:00
-reco-160926022217,profile,21,56,Aon,Data Governance Analyst,https://www.naukri.com/job-listings-160926022217,2026-09-19T09:11:40.558023+00:00
-reco-180926907812,profile,22,56,ZS,Decision Analytics Associate Consultant - Advanced Analytics,https://www.naukri.com/job-listings-180926907812,2026-09-19T09:11:42.470971+00:00
-reco-110926022024,profile,23,56,Tech Mahindra,"Immediate Hiring For ""Ignition Developer"" Pan India",https://www.naukri.com/job-listings-110926022024,2026-09-19T09:11:44.366640+00:00
-reco-170926024398,profile,24,56,First Insight Software Solutions (I) Pvt Ltd,Senior Database Administrator,https://www.naukri.com/job-listings-170926024398,2026-09-19T09:11:46.269078+00:00
-reco-160926504016,profile,25,56,Mastercard,Software Integration Engineer-II,https://www.naukri.com/job-listings-160926504016,2026-09-19T09:11:48.169918+00:00
-reco-150926035725,profile,26,56,Hinduja Global Solutions (HGS),Oracle BRM Developer,https://www.naukri.com/job-listings-150926035725,2026-09-19T09:11:50.059481+00:00
-reco-030626029444,profile,27,56,Innova Solutions,Reltio MDM Developer,https://www.naukri.com/job-listings-030626029444,2026-09-19T09:11:51.944101+00:00
-reco-140926021396,profile,28,56,Talentzo Delhi,Senior Engineer - Compliance at An IT Service Company,https://www.naukri.com/job-listings-140926021396,2026-09-19T09:11:53.858177+00:00
-reco-180926031888,profile,29,56,Mindpool Technologies,Power Bi Developer,https://www.naukri.com/job-listings-180926031888,2026-09-19T09:11:55.792686+00:00
-reco-180926918707,profile,30,56,Acesoft,Data Engineer/ETL Developer - Talend/Power BI,https://www.naukri.com/job-listings-180926918707,2026-09-19T09:11:57.771793+00:00
-reco-050926008195,profile,31,56,Innodata India,Technical Visual Reasoning Specialist (Telecommunication) | Remote,https://www.naukri.com/job-listings-050926008195,2026-09-19T09:11:59.784023+00:00
-reco-140926502221,profile,32,56,Barclays,Lead data engineer- Ab Initio & AWS,https://www.naukri.com/job-listings-140926502221,2026-09-19T09:12:01.753157+00:00
-reco-180926042281,profile,33,56,Omnicom Global Solutions,BI Analyst - Omnicom Global Solutions,https://www.naukri.com/job-listings-180926042281,2026-09-19T09:12:03.682825+00:00
-reco-270726915086,profile,34,56,Capgemini,SAP BW4 HANA Consultant,https://www.naukri.com/job-listings-270726915086,2026-09-19T09:12:05.629576+00:00
-reco-180926500483,profile,35,56,Zalaris,Qualtrics Platform Lead,https://www.naukri.com/job-listings-180926500483,2026-09-19T09:12:07.581388+00:00
-reco-180926015404,profile,36,56,Coforge,Opportunity For Data Analyst (SQL & ETL) Professionals,https://www.naukri.com/job-listings-180926015404,2026-09-19T09:12:09.512138+00:00
-reco-160926046239,profile,37,56,Tata Consultancy Services,Oracle Insurance Policy Administration (OIPA),https://www.naukri.com/job-listings-160926046239,2026-09-19T09:12:11.385328+00:00
-reco-060926004979,profile,38,56,Epam Systems,Data Quality Engineer(ETL Automation) -PAN India Locations,https://www.naukri.com/job-listings-060926004979,2026-09-19T09:12:13.285568+00:00
-reco-140926915589,profile,39,56,Infosys,MSBI Developer,https://www.naukri.com/job-listings-140926915589,2026-09-19T09:12:15.174790+00:00
-reco-150926004376,profile,40,56,ERM Placement Services,Data Privacy - A/ SA/ M,https://www.naukri.com/job-listings-150926004376,2026-09-19T09:12:17.139578+00:00
-reco-020726025664,profile,41,56,Xpertdox,Senior Sas Programmer,https://www.naukri.com/job-listings-020726025664,2026-09-19T09:12:19.047816+00:00
-reco-170926034830,profile,42,56,Teamlease Digital Private Limted,Profisee MDM Developer,https://www.naukri.com/job-listings-170926034830,2026-09-19T09:12:20.949478+00:00
-reco-160926502343,profile,43,56,JPMorgan Chase Bank,Data Governance Associate,https://www.naukri.com/job-listings-160926502343,2026-09-19T09:12:22.826464+00:00
-reco-150926021737,profile,44,56,Meera Hr Verticals,Plsql Developer,https://www.naukri.com/job-listings-150926021737,2026-09-19T09:12:24.717944+00:00
-reco-180926021801,profile,45,56,Uniqus,Data Security and Privacy Consultant,https://www.naukri.com/job-listings-180926021801,2026-09-19T09:12:26.648348+00:00
-reco-150926015860,profile,46,56,Capco,Test Analyst,https://www.naukri.com/job-listings-150926015860,2026-09-19T09:12:28.596274+00:00
-reco-160926500278,profile,47,56,Workiy Technologies,Sr. Technical Architect,https://www.naukri.com/job-listings-160926500278,2026-09-19T09:12:30.479794+00:00
-reco-170926500060,profile,48,56,Kldiscovery,Litigation Data Analyst,https://www.naukri.com/job-listings-170926500060,2026-09-19T09:12:32.379465+00:00
-reco-150926007575,profile,49,56,Deloitte Shared Services India,Conga CPQ Developer (Salesforce),https://www.naukri.com/job-listings-150926007575,2026-09-19T09:12:34.628775+00:00
-reco-180926931021,profile,50,56,A large Media House,Operations Executive | WFH,https://www.naukri.com/job-listings-180926931021,2026-09-19T09:12:36.532792+00:00
-reco-110926013077,profile,51,56,Medline Industries India Private Limited,Ironclad ECLM,https://www.naukri.com/job-listings-110926013077,2026-09-19T09:12:38.437391+00:00
-reco-160926936732,top_candidate,1,78,Accenture,Customer Service Associate,https://www.naukri.com/job-listings-160926936732,2026-09-19T09:12:50.401858+00:00
-reco-150926926257,top_candidate,2,78,Soul Ai,Blockchain Developer (Freelancer),https://www.naukri.com/job-listings-150926926257,2026-09-19T09:12:52.311907+00:00
-reco-150926931146,top_candidate,3,78,Soul Ai,Blockchain Developer (Freelancer),https://www.naukri.com/job-listings-150926931146,2026-09-19T09:12:54.213610+00:00
-reco-170926035179,top_candidate,4,78,Recruito,Micro Strategy Developer,https://www.naukri.com/job-listings-170926035179,2026-09-19T09:12:56.140779+00:00
-reco-150926933046,top_candidate,5,78,Soul Ai,Blockchain Developer (Freelancer),https://www.naukri.com/job-listings-150926933046,2026-09-19T09:12:58.049076+00:00
-reco-160926012309,top_candidate,6,78,Lonza,Contract Data Specialist,https://www.naukri.com/job-listings-160926012309,2026-09-19T09:12:59.977877+00:00
-reco-140926918802,top_candidate,7,78,Accenture,Custom Software Engineer,https://www.naukri.com/job-listings-140926918802,2026-09-19T09:13:01.984606+00:00
-reco-140926916628,top_candidate,8,78,Accenture,Custom Software Engineer,https://www.naukri.com/job-listings-140926916628,2026-09-19T09:13:03.953792+00:00
-reco-140926917104,top_candidate,9,78,Accenture,Custom Software Engineer,https://www.naukri.com/job-listings-140926917104,2026-09-19T09:13:05.945716+00:00
-reco-140926917125,top_candidate,10,78,Accenture,Custom Software Engineer,https://www.naukri.com/job-listings-140926917125,2026-09-19T09:13:07.874045+00:00
-reco-140926915211,top_candidate,11,78,Accenture,Custom Software Engineer,https://www.naukri.com/job-listings-140926915211,2026-09-19T09:13:09.855038+00:00
-reco-140926916559,top_candidate,12,78,Accenture,Application Developer,https://www.naukri.com/job-listings-140926916559,2026-09-19T09:13:11.782003+00:00
-reco-140926917072,top_candidate,13,78,Accenture,Custom Software Engineer,https://www.naukri.com/job-listings-140926917072,2026-09-19T09:13:13.730896+00:00
-reco-140926914796,top_candidate,14,78,Accenture,Quality Engineer,https://www.naukri.com/job-listings-140926914796,2026-09-19T09:13:15.685347+00:00
-reco-140926917214,top_candidate,15,78,Accenture,Custom Software Engineer,https://www.naukri.com/job-listings-140926917214,2026-09-19T09:13:17.636435+00:00
-reco-140926916210,top_candidate,16,78,Accenture,Custom Software Engineer,https://www.naukri.com/job-listings-140926916210,2026-09-19T09:13:19.578598+00:00
-reco-140926916339,top_candidate,17,78,Accenture,Custom Software Engineer,https://www.naukri.com/job-listings-140926916339,2026-09-19T09:13:21.522172+00:00
-reco-140926916535,top_candidate,18,78,Accenture,Custom Software Engineer,https://www.naukri.com/job-listings-140926916535,2026-09-19T09:13:23.462008+00:00
-reco-140926916648,top_candidate,19,78,Accenture,Custom Software Engineer,https://www.naukri.com/job-listings-140926916648,2026-09-19T09:13:25.392155+00:00
-reco-140926916650,top_candidate,20,78,Accenture,Custom Software Engineer,https://www.naukri.com/job-listings-140926916650,2026-09-19T09:13:27.360257+00:00
-reco-140926916651,top_candidate,21,78,Accenture,Custom Software Engineer,https://www.naukri.com/job-listings-140926916651,2026-09-19T09:13:29.310130+00:00
-reco-140926916652,top_candidate,22,78,Accenture,Custom Software Engineer,https://www.naukri.com/job-listings-140926916652,2026-09-19T09:13:31.284085+00:00
-reco-140926916712,top_candidate,23,78,Accenture,Custom Software Engineer,https://www.naukri.com/job-listings-140926916712,2026-09-19T09:13:33.262260+00:00
-reco-140926916727,top_candidate,24,78,Accenture,Custom Software Engineer,https://www.naukri.com/job-listings-140926916727,2026-09-19T09:13:35.239252+00:00
-reco-140926916900,top_candidate,25,78,Accenture,Custom Software Engineer,https://www.naukri.com/job-listings-140926916900,2026-09-19T09:13:37.212441+00:00
-reco-140926916906,top_candidate,26,78,Accenture,Custom Software Engineer,https://www.naukri.com/job-listings-140926916906,2026-09-19T09:13:39.235754+00:00
-reco-140926916908,top_candidate,27,78,Accenture,Custom Software Engineer,https://www.naukri.com/job-listings-140926916908,2026-09-19T09:13:41.225762+00:00
-reco-140926916910,top_candidate,28,78,Accenture,Custom Software Engineer,https://www.naukri.com/job-listings-140926916910,2026-09-19T09:13:43.155521+00:00
-reco-140926916911,top_candidate,29,78,Accenture,Custom Software Engineer,https://www.naukri.com/job-listings-140926916911,2026-09-19T09:13:45.078269+00:00
-reco-140926916912,top_candidate,30,78,Accenture,Custom Software Engineer,https://www.naukri.com/job-listings-140926916912,2026-09-19T09:13:47.099591+00:00
-reco-140926916914,top_candidate,31,78,Accenture,Custom Software Engineer,https://www.naukri.com/job-listings-140926916914,2026-09-19T09:13:49.135033+00:00
-reco-140926916918,top_candidate,32,78,Accenture,Custom Software Engineer,https://www.naukri.com/job-listings-140926916918,2026-09-19T09:13:51.084335+00:00
-reco-140926916920,top_candidate,33,78,Accenture,Custom Software Engineer,https://www.naukri.com/job-listings-140926916920,2026-09-19T09:13:53.029841+00:00
-reco-140926916967,top_candidate,34,78,Accenture,Custom Software Engineer,https://www.naukri.com/job-listings-140926916967,2026-09-19T09:13:55.041498+00:00
-reco-140926916968,top_candidate,35,78,Accenture,Custom Software Engineer,https://www.naukri.com/job-listings-140926916968,2026-09-19T09:13:57.006637+00:00
-reco-140926916969,top_candidate,36,78,Accenture,Custom Software Engineer,https://www.naukri.com/job-listings-140926916969,2026-09-19T09:13:58.960870+00:00
-reco-140926916970,top_candidate,37,78,Accenture,Custom Software Engineer,https://www.naukri.com/job-listings-140926916970,2026-09-19T09:14:01.000049+00:00
-reco-140926916971,top_candidate,38,78,Accenture,Custom Software Engineer,https://www.naukri.com/job-listings-140926916971,2026-09-19T09:14:02.983827+00:00
-reco-140926916975,top_candidate,39,78,Accenture,Custom Software Engineer,https://www.naukri.com/job-listings-140926916975,2026-09-19T09:14:04.925616+00:00
-reco-140926916977,top_candidate,40,78,Accenture,Custom Software Engineer,https://www.naukri.com/job-listings-140926916977,2026-09-19T09:14:06.879954+00:00
-reco-140926916978,top_candidate,41,78,Accenture,Custom Software Engineer,https://www.naukri.com/job-listings-140926916978,2026-09-19T09:14:08.836575+00:00
-reco-140926916979,top_candidate,42,78,Accenture,Custom Software Engineer,https://www.naukri.com/job-listings-140926916979,2026-09-19T09:14:10.743825+00:00
-reco-140926917003,top_candidate,43,78,Accenture,Custom Software Engineer,https://www.naukri.com/job-listings-140926917003,2026-09-19T09:14:12.695831+00:00
-reco-140926917004,top_candidate,44,78,Accenture,Custom Software Engineer,https://www.naukri.com/job-listings-140926917004,2026-09-19T09:14:14.632341+00:00
-reco-140926917006,top_candidate,45,78,Accenture,Custom Software Engineer,https://www.naukri.com/job-listings-140926917006,2026-09-19T09:14:16.538130+00:00
-reco-140926917020,top_candidate,46,78,Accenture,Custom Software Engineer,https://www.naukri.com/job-listings-140926917020,2026-09-19T09:14:18.470516+00:00
-reco-140926917021,top_candidate,47,78,Accenture,Custom Software Engineer,https://www.naukri.com/job-listings-140926917021,2026-09-19T09:14:20.405851+00:00
-reco-140926917023,top_candidate,48,78,Accenture,Custom Software Engineer,https://www.naukri.com/job-listings-140926917023,2026-09-19T09:14:22.352398+00:00
-reco-140926917030,top_candidate,49,78,Accenture,Custom Software Engineer,https://www.naukri.com/job-listings-140926917030,2026-09-19T09:14:24.288617+00:00
-reco-140926917120,top_candidate,50,78,Accenture,Custom Software Engineer,https://www.naukri.com/job-listings-140926917120,2026-09-19T09:14:26.226842+00:00
-reco-140926917826,top_candidate,51,78,Accenture,Custom Software Engineer,https://www.naukri.com/job-listings-140926917826,2026-09-19T09:14:28.168138+00:00
-reco-140926919189,top_candidate,52,78,Accenture,Custom Software Engineer,https://www.naukri.com/job-listings-140926919189,2026-09-19T09:14:30.089799+00:00
-reco-140926919259,top_candidate,53,78,Accenture,Custom Software Engineer,https://www.naukri.com/job-listings-140926919259,2026-09-19T09:14:32.110274+00:00
-reco-140926919260,top_candidate,54,78,Accenture,Custom Software Engineer,https://www.naukri.com/job-listings-140926919260,2026-09-19T09:14:34.149972+00:00
-reco-140926915537,top_candidate,55,78,Accenture,Custom Software Engineer,https://www.naukri.com/job-listings-140926915537,2026-09-19T09:14:36.208393+00:00
-reco-140926916144,top_candidate,56,78,Accenture,Custom Software Engineer,https://www.naukri.com/job-listings-140926916144,2026-09-19T09:14:38.199713+00:00
-reco-140926916744,top_candidate,57,78,Accenture,Custom Software Engineer,https://www.naukri.com/job-listings-140926916744,2026-09-19T09:14:40.168884+00:00
-reco-140926916747,top_candidate,58,78,Accenture,Custom Software Engineer,https://www.naukri.com/job-listings-140926916747,2026-09-19T09:14:42.163931+00:00
-reco-140926916748,top_candidate,59,78,Accenture,Custom Software Engineer,https://www.naukri.com/job-listings-140926916748,2026-09-19T09:14:44.132277+00:00
-reco-140926916757,top_candidate,60,78,Accenture,Custom Software Engineer,https://www.naukri.com/job-listings-140926916757,2026-09-19T09:14:46.082219+00:00
-reco-140926916769,top_candidate,61,78,Accenture,Custom Software Engineer,https://www.naukri.com/job-listings-140926916769,2026-09-19T09:14:48.046399+00:00
-reco-140926916866,top_candidate,62,78,Accenture,Custom Software Engineer,https://www.naukri.com/job-listings-140926916866,2026-09-19T09:14:50.033942+00:00
-reco-140926916982,top_candidate,63,78,Accenture,Custom Software Engineer,https://www.naukri.com/job-listings-140926916982,2026-09-19T09:14:51.968616+00:00
-reco-140926916639,top_candidate,64,78,Accenture,Custom Software Engineer,https://www.naukri.com/job-listings-140926916639,2026-09-19T09:14:53.929269+00:00
-reco-140926914798,top_candidate,65,78,Accenture,Custom Software Engineer,https://www.naukri.com/job-listings-140926914798,2026-09-19T09:14:55.914379+00:00
-reco-140926916554,top_candidate,66,78,Accenture,Custom Software Engineer,https://www.naukri.com/job-listings-140926916554,2026-09-19T09:14:57.905033+00:00
-reco-160926045990,preferences,1,64,Coforge,Senior Java Fullstack Developer,https://www.naukri.com/job-listings-160926045990,2026-09-19T09:15:09.104639+00:00
-reco-160926021906,preferences,2,64,Globallogic,Full stack engineer- .NET+React.JS,https://www.naukri.com/job-listings-160926021906,2026-09-19T09:15:13.283917+00:00
-reco-140926915904,preferences,3,64,Infosys,AI/ML Professional,https://www.naukri.com/job-listings-140926915904,2026-09-19T09:15:15.268546+00:00
-reco-160926027870,preferences,4,64,Startek (Aegis Customer Support Services Pvt. Ltd.),Walk-in || AI Engineer Agentic AI,https://www.naukri.com/job-listings-160926027870,2026-09-19T09:15:19.579138+00:00
-reco-140926919337,preferences,5,64,Accenture,AI / ML Engineer,https://www.naukri.com/job-listings-140926919337,2026-09-19T09:15:21.497891+00:00
-reco-180926040623,preferences,6,64,Altisource,Quality Assurance Engineer (Java + AI),https://www.naukri.com/job-listings-180926040623,2026-09-19T09:15:23.417288+00:00
-reco-150926005668,preferences,7,64,Feuji Software Solutions,Java FullStack Developer,https://www.naukri.com/job-listings-150926005668,2026-09-19T09:15:25.368632+00:00
-reco-150926904939,preferences,8,64,Capgemini,.NET Developer with C++,https://www.naukri.com/job-listings-150926904939,2026-09-19T09:15:27.299215+00:00
-reco-160926500163,preferences,9,64,Intelhunt,AI / ML Engineer,https://www.naukri.com/job-listings-160926500163,2026-09-19T09:15:29.238531+00:00
-reco-140926906138,preferences,10,64,MANGO SCIENCES INDIA LLP,Artificial Intelligence Engineer,https://www.naukri.com/job-listings-140926906138,2026-09-19T09:15:31.178070+00:00
-reco-170926923996,preferences,11,64,YO It Consulting,Artificial Intelligence Engineer,https://www.naukri.com/job-listings-170926923996,2026-09-19T09:15:33.170595+00:00
-reco-180926916470,preferences,12,64,Twixor,React.js Developer,https://www.naukri.com/job-listings-180926916470,2026-09-19T09:15:35.117373+00:00
-reco-160926908465,preferences,13,64,Eximietas Design,AI/ML Engineer,https://www.naukri.com/job-listings-160926908465,2026-09-19T09:15:37.030666+00:00
-reco-190926012228,preferences,14,64,Tekskills,Ai Ml Engineer,https://www.naukri.com/job-listings-190926012228,2026-09-19T09:15:38.981950+00:00
-reco-260526022034,preferences,15,64,Deloitte US-India Offices,Sr java/.net Full Stack Developer,https://www.naukri.com/job-listings-260526022034,2026-09-19T09:15:40.949223+00:00
-reco-180926917910,preferences,16,64,Firm in IT Services Sector,AIML Engineer,https://www.naukri.com/job-listings-180926917910,2026-09-19T09:15:42.865586+00:00
-reco-170926500942,preferences,17,64,Sumcircle Technologies,ReactJS Developer,https://www.naukri.com/job-listings-170926500942,2026-09-19T09:15:44.771960+00:00
-reco-180926915730,preferences,18,64,Razorthink,Node Developer,https://www.naukri.com/job-listings-180926915730,2026-09-19T09:15:46.697994+00:00
-reco-150926923483,preferences,19,64,Xylem Water Solutions,"Walk-in || Data Scientist / Software Developer (Kedro, Python, SQL)",https://www.naukri.com/job-listings-150926923483,2026-09-19T09:15:51.127100+00:00
-reco-150926922987,preferences,20,64,Soul Ai,Spring Boot Developer,https://www.naukri.com/job-listings-150926922987,2026-09-19T09:15:53.105065+00:00
-reco-160926924904,preferences,21,64,Leading Client,AI & ML Developer / Python Engineer,https://www.naukri.com/job-listings-160926924904,2026-09-19T09:15:55.020209+00:00
-reco-170926501026,preferences,22,64,Spysr Services,AI Systems Engineer,https://www.naukri.com/job-listings-170926501026,2026-09-19T09:15:56.933856+00:00
-reco-150926505219,preferences,23,64,Adsparx,Node.js Developer,https://www.naukri.com/job-listings-150926505219,2026-09-19T09:15:58.829200+00:00
-reco-150926931204,preferences,24,64,Soul Ai,Natural Language Processing Engineer (Freelancer),https://www.naukri.com/job-listings-150926931204,2026-09-19T09:16:00.730181+00:00
-reco-180926503571,preferences,25,64,Birlasoft,Java GHCP Developer,https://www.naukri.com/job-listings-180926503571,2026-09-19T09:16:02.649117+00:00
-reco-170926503842,preferences,26,64,ITC Infotech,Java Microservice Developer,https://www.naukri.com/job-listings-170926503842,2026-09-19T09:16:04.563494+00:00
-reco-150926927841,you_might_like,1,48,Soul Ai,Compliance Officer (Freelancer),https://www.naukri.com/job-listings-150926927841,2026-09-19T09:16:14.474683+00:00
-reco-170926023755,you_might_like,2,48,Tenth Planet Technologies,Data Engineer (Snowflake),https://www.naukri.com/job-listings-170926023755,2026-09-19T09:16:16.406926+00:00
-reco-170926010617,you_might_like,3,48,Trine Infotech,DOC1 Engineer Contract Remote,https://www.naukri.com/job-listings-170926010617,2026-09-19T09:16:18.334272+00:00
-reco-160926938518,you_might_like,4,48,Leading Client,Data Engineer,https://www.naukri.com/job-listings-160926938518,2026-09-19T09:16:20.271037+00:00
-reco-150926016064,you_might_like,5,48,Solverminds Solutions And Technologies,Looking For MySQL Administration,https://www.naukri.com/job-listings-150926016064,2026-09-19T09:16:22.170226+00:00
-reco-170926917618,you_might_like,6,48,Accenture,Data Engineer,https://www.naukri.com/job-listings-170926917618,2026-09-19T09:16:24.075000+00:00
-reco-170926500098,you_might_like,7,48,Progress Software,Global Privacy Specialist,https://www.naukri.com/job-listings-170926500098,2026-09-19T09:16:25.953907+00:00
-reco-160926930238,you_might_like,8,48,Leading Client,Pyspark Developer,https://www.naukri.com/job-listings-160926930238,2026-09-19T09:16:27.899406+00:00
-reco-180926929305,you_might_like,9,48,Accenture,Infrastructure Architect,https://www.naukri.com/job-listings-180926929305,2026-09-19T09:16:29.803298+00:00
-reco-150926913990,you_might_like,10,48,Yantran,Cloud Data Engineer,https://www.naukri.com/job-listings-150926913990,2026-09-19T09:16:31.690373+00:00
-reco-170926503414,you_might_like,11,48,AMERICAN EXPRESS,Analyst - Data Governance & Management,https://www.naukri.com/job-listings-170926503414,2026-09-19T09:16:33.583235+00:00
-reco-170926022995,you_might_like,12,48,Affable Management Services,Data Engineer (MS Fabric + Power BI),https://www.naukri.com/job-listings-170926022995,2026-09-19T09:16:35.484051+00:00
-reco-110926504838,you_might_like,13,48,Ruckus Networks,"Application Developer, Data & Analytics",https://www.naukri.com/job-listings-110926504838,2026-09-19T09:16:37.412188+00:00
-reco-150926932685,you_might_like,14,48,Leading Client,Data Engineer,https://www.naukri.com/job-listings-150926932685,2026-09-19T09:16:39.404126+00:00
-reco-150926913989,you_might_like,15,48,Yantran,Big Data Engineer,https://www.naukri.com/job-listings-150926913989,2026-09-19T09:16:41.515692+00:00
-reco-160926937293,you_might_like,16,48,Leading Client,Data Engineer,https://www.naukri.com/job-listings-160926937293,2026-09-19T09:16:43.656215+00:00
-reco-170926923970,you_might_like,17,48,Twixor,DevOps Engineer,https://www.naukri.com/job-listings-170926923970,2026-09-19T09:16:45.791996+00:00
-reco-160926930247,you_might_like,18,48,Leading Client,Pyspark Developer,https://www.naukri.com/job-listings-160926930247,2026-09-19T09:16:47.941704+00:00
-reco-160926934116,you_might_like,19,48,Leading Client,Data Engineer,https://www.naukri.com/job-listings-160926934116,2026-09-19T09:16:49.974834+00:00
-reco-170926010040,you_might_like,20,48,HTC Global Services,Java Full Stack Developer,https://www.naukri.com/job-listings-170926010040,2026-09-19T09:16:51.988114+00:00
-reco-160926930243,you_might_like,21,48,Leading Client,Pyspark Developer,https://www.naukri.com/job-listings-160926930243,2026-09-19T09:16:54.014042+00:00
-reco-170926020527,you_might_like,22,48,Tenth Planet Technologies,"QA Automation Engineer (Mobile, Web & POS)",https://www.naukri.com/job-listings-170926020527,2026-09-19T09:16:56.076725+00:00
-reco-160926930234,you_might_like,23,48,Leading Client,Pyspark Developer,https://www.naukri.com/job-listings-160926930234,2026-09-19T09:16:58.083388+00:00
-reco-170926019617,you_might_like,24,48,Kiya.ai,Java with Angular Full stack Developer_2 To 5 years,https://www.naukri.com/job-listings-170926019617,2026-09-19T09:17:00.053029+00:00
-reco-060526022957,you_might_like,25,48,Schneider Electric,Data Engineer (On Contract),https://www.naukri.com/job-listings-060526022957,2026-09-19T09:17:02.028401+00:00
-reco-160926930248,you_might_like,26,48,Leading Client,Pyspark Developer,https://www.naukri.com/job-listings-160926930248,2026-09-19T09:17:04.036633+00:00
-reco-160926045427,you_might_like,27,48,Sightspectrum,Automation Test Engineer,https://www.naukri.com/job-listings-160926045427,2026-09-19T09:17:05.961220+00:00
-reco-160926938480,you_might_like,28,48,Leading Client,Java Developer,https://www.naukri.com/job-listings-160926938480,2026-09-19T09:17:07.921325+00:00
-reco-150926913987,you_might_like,29,48,Yantran,Data Engineer,https://www.naukri.com/job-listings-150926913987,2026-09-19T09:17:09.847131+00:00
-reco-180926914935,you_might_like,30,48,IT Industry,Java Developer - Chennai,https://www.naukri.com/job-listings-180926914935,2026-09-19T09:17:11.752398+00:00
-reco-180926012742,you_might_like,31,48,Tech Mahindra,Java Developer,https://www.naukri.com/job-listings-180926012742,2026-09-19T09:17:13.672990+00:00
-reco-160926501144,you_might_like,32,48,Shenll Technology Solutions,Data Engineer - Microsoft Fabric / Databricks,https://www.naukri.com/job-listings-160926501144,2026-09-19T09:17:15.618784+00:00
-reco-160926930246,you_might_like,33,48,Leading Client,Pyspark Developer,https://www.naukri.com/job-listings-160926930246,2026-09-19T09:17:17.586329+00:00
-reco-150926913994,you_might_like,34,48,Yantran,Databricks Data Engineer,https://www.naukri.com/job-listings-150926913994,2026-09-19T09:17:19.535863+00:00
-reco-150926012528,you_might_like,35,48,SM It Services,Data Engineer ( Python+Pyspark ),https://www.naukri.com/job-listings-150926012528,2026-09-19T09:17:21.407644+00:00
-reco-150926913999,you_might_like,36,48,Yantran,AWS Data Engineer,https://www.naukri.com/job-listings-150926913999,2026-09-19T09:17:23.309865+00:00
-reco-140926902312,you_might_like,37,48,Conduent,App Dev & Support Engineer III,https://www.naukri.com/job-listings-140926902312,2026-09-19T09:17:25.211703+00:00
-reco-160926930237,you_might_like,38,48,Leading Client,Pyspark Developer,https://www.naukri.com/job-listings-160926930237,2026-09-19T09:17:27.120976+00:00
-reco-180926935293,you_might_like,39,48,Hiring for - Leading NBFC,MIS Executive | Leading NBFC | Delhi,https://www.naukri.com/job-listings-180926935293,2026-09-19T09:17:29.006655+00:00
-reco-140926902332,you_might_like,40,48,Conduent,App Dev & Support Engineer III,https://www.naukri.com/job-listings-140926902332,2026-09-19T09:17:30.902812+00:00
-reco-180926922440,you_might_like,41,48,Capgemini,Power BI Developer,https://www.naukri.com/job-listings-180926922440,2026-09-19T09:17:32.797124+00:00
-reco-180926938833,you_might_like,42,48,Hiring for - Leading IT Co.,DevOps Engineer | Leading IT Co. | Bangalore,https://www.naukri.com/job-listings-180926938833,2026-09-19T09:17:34.674021+00:00
-reco-170926034723,you_might_like,43,48,Clover Infotech,Devops Engineer,https://www.naukri.com/job-listings-170926034723,2026-09-19T09:17:36.537283+00:00
+reco-300926025833,default,1,,Net Connect,Application Developer,https://www.naukri.com/job-listings-300926025833,2026-10-02T13:49:09.077370+00:00
+reco-120925026363,default,2,,Infosys,Angular Developer,https://www.naukri.com/job-listings-120925026363,2026-10-02T13:49:10.889648+00:00
+reco-300926501676,default,3,,Dentsu Webchutney,MERN Developer,https://www.naukri.com/job-listings-300926501676,2026-10-02T13:49:12.731826+00:00
+reco-300926500102,default,4,,Think41,Full Stack AI Engineer,https://www.naukri.com/job-listings-300926500102,2026-10-02T13:49:14.555722+00:00
+reco-280926926249,default,5,,Accenture,Custom Software Engineer,https://www.naukri.com/job-listings-280926926249,2026-10-02T13:49:16.390052+00:00
+reco-300926500071,default,6,,Podhikai Scientific,Application Engineer,https://www.naukri.com/job-listings-300926500071,2026-10-02T13:49:18.221483+00:00
+reco-011026503446,default,7,,Embitel Technologies,Commerce Tool Developer,https://www.naukri.com/job-listings-011026503446,2026-10-02T13:49:20.059925+00:00
+reco-300926502766,default,8,,WMS Gaming,SOFTWARE ENGINEER,https://www.naukri.com/job-listings-300926502766,2026-10-02T13:49:21.900959+00:00
+reco-300926501961,default,9,,Proffer It Consultancy,Full-Stack Engineer,https://www.naukri.com/job-listings-300926501961,2026-10-02T13:49:23.761265+00:00
+reco-300926926910,default,10,,Capgemini,Software Engineer,https://www.naukri.com/job-listings-300926926910,2026-10-02T13:49:25.638308+00:00
+reco-290926030946,default,11,,Indian Financial Technology And Alliedservices,Software Engineer - Java Fullstack,https://www.naukri.com/job-listings-290926030946,2026-10-02T13:49:27.605931+00:00
+reco-300926035864,default,12,,Insemi Technology Services,Java Developer,https://www.naukri.com/job-listings-300926035864,2026-10-02T13:49:29.552022+00:00
+reco-300926017847,default,13,,Tech Mahindra,Machine Learning Engineer (0-5),https://www.naukri.com/job-listings-300926017847,2026-10-02T13:49:31.394262+00:00
+reco-011026502368,default,14,,2care.ai,"Software Engineer, Voice AI",https://www.naukri.com/job-listings-011026502368,2026-10-02T13:49:33.194906+00:00
+reco-280926503121,default,15,,Sparta Systems,Software Engr I,https://www.naukri.com/job-listings-280926503121,2026-10-02T13:49:35.001685+00:00
+reco-011026500876,default,16,,Comviva Technology,Backend Developer,https://www.naukri.com/job-listings-011026500876,2026-10-02T13:49:36.804219+00:00
+reco-290926029223,default,17,,Bahwan CyberTek,Java Full Stack Developer - (Java + Angular),https://www.naukri.com/job-listings-290926029223,2026-10-02T13:49:38.663812+00:00
+reco-300926503431,default,18,,Qualitykiosk Technologies,Senior Solution Engineer,https://www.naukri.com/job-listings-300926503431,2026-10-02T13:49:40.493103+00:00
+reco-280926008135,default,19,,CGI,Java Developer,https://www.naukri.com/job-listings-280926008135,2026-10-02T13:49:42.322639+00:00
+reco-011026012196,default,20,,Ibrowsejobs Technologies,Software Engineer,https://www.naukri.com/job-listings-011026012196,2026-10-02T13:49:44.128670+00:00
+reco-011026021850,default,21,,Neerinfo,Java Developer,https://www.naukri.com/job-listings-011026021850,2026-10-02T13:49:45.971831+00:00
+reco-011026022700,default,22,,Cotiviti,Front End Developer,https://www.naukri.com/job-listings-011026022700,2026-10-02T13:49:47.802376+00:00
+reco-290926016701,default,23,,IBM,Java Back End Developer,https://www.naukri.com/job-listings-290926016701,2026-10-02T13:49:49.653085+00:00
+reco-011026503411,default,24,,Dista,Software Engineer,https://www.naukri.com/job-listings-011026503411,2026-10-02T13:49:51.559279+00:00
+reco-290926917476,default,25,,Luxoft,Java Backend Engineer,https://www.naukri.com/job-listings-290926917476,2026-10-02T13:49:53.489860+00:00
+reco-280926016444,default,26,,B2Y Infy Solutions,Java Developer,https://www.naukri.com/job-listings-280926016444,2026-10-02T13:49:55.353083+00:00
+reco-011026503915,default,27,,Legato,Software Engineer I (IND),https://www.naukri.com/job-listings-011026503915,2026-10-02T13:49:57.183168+00:00
+reco-280926006833,default,28,,HR SOLUTIONS,Java API Developer with Github Copilot,https://www.naukri.com/job-listings-280926006833,2026-10-02T13:49:58.999412+00:00
+reco-011026500827,default,29,,Social Donut,Full Stack Developer,https://www.naukri.com/job-listings-011026500827,2026-10-02T13:50:00.807294+00:00
+reco-011026500061,default,30,,BMW Techworks India,Software Developer - Yocto [Base System],https://www.naukri.com/job-listings-011026500061,2026-10-02T13:50:02.610578+00:00
+reco-300926501562,default,31,,Saankhya Labs,Engineer,https://www.naukri.com/job-listings-300926501562,2026-10-02T13:50:04.436138+00:00
+reco-011026925752,default,32,,Bajaj Finance,Senior Software Engineer,https://www.naukri.com/job-listings-011026925752,2026-10-02T13:50:06.338688+00:00
+reco-011026500999,default,33,,ION,Software Developer,https://www.naukri.com/job-listings-011026500999,2026-10-02T13:50:08.289878+00:00
+reco-280926023134,default,34,,Agiliad,Java Developer /Senior Java Developer,https://www.naukri.com/job-listings-280926023134,2026-10-02T13:50:10.220779+00:00
+reco-060625026859,default,35,,Infosys,Java Developer - ADM(P),https://www.naukri.com/job-listings-060625026859,2026-10-02T13:50:12.120521+00:00
+reco-011026501711,default,36,,Think Monk Edutech,Backend Developer,https://www.naukri.com/job-listings-011026501711,2026-10-02T13:50:13.984637+00:00
+reco-290926020942,default,37,,Stratos Infra Technologies,Software Development Engineer,https://www.naukri.com/job-listings-290926020942,2026-10-02T13:50:15.847445+00:00
+reco-011026501837,default,38,,Brillio,Senior Engineer,https://www.naukri.com/job-listings-011026501837,2026-10-02T13:50:17.703565+00:00
+reco-300926006148,default,39,,CONFIDENTIAL,Java Developer,https://www.naukri.com/job-listings-300926006148,2026-10-02T13:50:19.578538+00:00
+reco-011026500326,default,40,,Headout,"Staff Engineer, Web",https://www.naukri.com/job-listings-011026500326,2026-10-02T13:50:21.437128+00:00
+reco-011026504273,default,41,,Aureole Technologies,Senior Software Engineer ( Full stack ASP.NET),https://www.naukri.com/job-listings-011026504273,2026-10-02T13:50:23.260777+00:00
+reco-011026502313,default,42,,Ness Digital Engineering,AI Full Stack Engineer,https://www.naukri.com/job-listings-011026502313,2026-10-02T13:50:25.061261+00:00
+reco-011026500372,default,43,,Firstsource,Senior Software Engineer,https://www.naukri.com/job-listings-011026500372,2026-10-02T13:50:26.850844+00:00
+reco-290926934506,default,44,,Infosys,Java Senior Developer,https://www.naukri.com/job-listings-290926934506,2026-10-02T13:50:28.705656+00:00
+reco-290926015723,default,45,,Transformhub,InsureMO Developer,https://www.naukri.com/job-listings-290926015723,2026-10-02T13:50:30.488560+00:00
+reco-290926917571,default,46,,Sasken Technologies,ENGINEER - APP DEV LINUX,https://www.naukri.com/job-listings-290926917571,2026-10-02T13:50:32.287807+00:00
+reco-300926500151,default,47,,PSRTEK,Java Backend Developer,https://www.naukri.com/job-listings-300926500151,2026-10-02T13:50:34.094831+00:00
+reco-280926503162,default,48,,Orosoft,Java Developer - Swing,https://www.naukri.com/job-listings-280926503162,2026-10-02T13:50:35.884160+00:00
+reco-011026501587,default,49,,Rekise Marine,Embedded Engineer,https://www.naukri.com/job-listings-011026501587,2026-10-02T13:50:37.691957+00:00
+reco-300926501796,default,50,,Infor,"Software Engineer, Associate",https://www.naukri.com/job-listings-300926501796,2026-10-02T13:50:39.489619+00:00
+reco-250926501649,default,51,,Newton School,SDE + SME - Software Development & System Designs,https://www.naukri.com/job-listings-250926501649,2026-10-02T13:50:41.277830+00:00
+reco-011026012108,default,52,,Tekskills,embedded systems software Developer,https://www.naukri.com/job-listings-011026012108,2026-10-02T13:50:43.072309+00:00
+reco-300926013992,default,53,,Quest Global,Ai Ml Engineer,https://www.naukri.com/job-listings-300926013992,2026-10-02T13:50:44.906688+00:00
+reco-300926907811,default,54,,IT Company,Java Devloper,https://www.naukri.com/job-listings-300926907811,2026-10-02T13:50:46.700900+00:00
+reco-300926502703,profile,1,73,Logicmonitor,AI Engineer,https://www.naukri.com/job-listings-300926502703,2026-10-02T13:52:42.190628+00:00
+reco-300926017085,profile,2,73,Coforge,Coforge is Hiring GEN AI Engineers,https://www.naukri.com/job-listings-300926017085,2026-10-02T13:52:44.013022+00:00
+reco-290926041296,profile,3,73,Infosys,Generative Ai 2- 5 yrs,https://www.naukri.com/job-listings-290926041296,2026-10-02T13:52:45.836768+00:00
+reco-011026504403,profile,4,73,Neurealm,Jr. Gen AI Engineer,https://www.naukri.com/job-listings-011026504403,2026-10-02T13:52:49.471113+00:00
+reco-300926033322,profile,5,73,Bandhan Technologies Private Limited,AI Engineer | Immediate | Hybrid,https://www.naukri.com/job-listings-300926033322,2026-10-02T13:52:51.275304+00:00
+reco-170926500632,profile,6,73,Fractal Analytics,Gen AI Engineer,https://www.naukri.com/job-listings-170926500632,2026-10-02T13:52:53.090800+00:00
+reco-300926502464,profile,7,73,Witqualis Technologies,AI & LLM Solutions Engineer,https://www.naukri.com/job-listings-300926502464,2026-10-02T13:52:54.897083+00:00
+reco-290926504094,profile,8,73,Lawyered,AI Engineer,https://www.naukri.com/job-listings-290926504094,2026-10-02T13:52:56.701891+00:00
+reco-280926920743,profile,9,73,Infosys,Gen AI Developer,https://www.naukri.com/job-listings-280926920743,2026-10-02T13:52:58.508404+00:00
+reco-280926502045,profile,10,73,Trackmind,Junior AI Engineer,https://www.naukri.com/job-listings-280926502045,2026-10-02T13:53:00.347596+00:00
+reco-300926501255,profile,11,73,Zensar,AI Engineers || Offshore,https://www.naukri.com/job-listings-300926501255,2026-10-02T13:53:02.180477+00:00
+reco-270926002931,profile,12,73,Bootlabs,Ai Ml Engineer,https://www.naukri.com/job-listings-270926002931,2026-10-02T13:53:04.027667+00:00
+reco-011026503453,profile,13,73,Techcarrot Fz-llc,AI Engineer,https://www.naukri.com/job-listings-011026503453,2026-10-02T13:53:05.867915+00:00
+reco-300926016792,profile,14,73,Tech Mahindra,AI Engineer (0- 6),https://www.naukri.com/job-listings-300926016792,2026-10-02T13:53:07.707073+00:00
+reco-090926029403,profile,15,73,National Payments Corporation of India (NPCI),NBBL- Senior Associate AI Engineers,https://www.naukri.com/job-listings-090926029403,2026-10-02T13:53:09.524917+00:00
+reco-110726012189,profile,16,73,Anthea Pharma,Artificial Intelligence Engineer,https://www.naukri.com/job-listings-110726012189,2026-10-02T13:53:11.325458+00:00
+reco-290926503040,profile,17,73,Turgon Ai,Generative AI Engineer,https://www.naukri.com/job-listings-290926503040,2026-10-02T13:53:13.145605+00:00
+reco-011026008731,profile,18,73,PwC India,Hiring For Python Developer,https://www.naukri.com/job-listings-011026008731,2026-10-02T13:53:14.928412+00:00
+reco-280926500661,profile,19,73,Mphatek Systems,Jr Python / AI Developer,https://www.naukri.com/job-listings-280926500661,2026-10-02T13:53:16.732856+00:00
+reco-290926503080,profile,20,73,Exillar Infotech,AI/ML Developer,https://www.naukri.com/job-listings-290926503080,2026-10-02T13:53:18.540513+00:00
+reco-280926500532,profile,21,73,Goml,AI Engineer,https://www.naukri.com/job-listings-280926500532,2026-10-02T13:53:20.355684+00:00
+reco-011026030383,profile,22,73,Globallogic,AI Engineer + Claude + Python,https://www.naukri.com/job-listings-011026030383,2026-10-02T13:53:22.170730+00:00
+reco-011026502527,profile,23,73,Redica Systems,AI Engineer,https://www.naukri.com/job-listings-011026502527,2026-10-02T13:53:24.001769+00:00
+reco-150926036786,profile,24,73,Azilen,AI/ Ml Engineer,https://www.naukri.com/job-listings-150926036786,2026-10-02T13:53:29.408239+00:00
+reco-230926936547,profile,25,73,F5,AI Engineer,https://www.naukri.com/job-listings-230926936547,2026-10-02T13:53:31.427206+00:00
+reco-270926002220,profile,26,73,Fintech Cloud,Ai Ml Engineer,https://www.naukri.com/job-listings-270926002220,2026-10-02T13:53:33.370623+00:00
+reco-290926022023,profile,27,73,Cloud Angles Digital Transformation,Agentic AI Developer II CloudAngles,https://www.naukri.com/job-listings-290926022023,2026-10-02T13:53:35.358902+00:00
+reco-280926502370,profile,28,73,Cloudangle It Solutions,Backend AI Engineer,https://www.naukri.com/job-listings-280926502370,2026-10-02T13:53:37.407138+00:00
+reco-280926501498,profile,29,73,Skylark Drones,AI Engineer,https://www.naukri.com/job-listings-280926501498,2026-10-02T13:53:39.410213+00:00
+reco-280926017947,profile,30,73,Wintech Services,AIML Engineer,https://www.naukri.com/job-listings-280926017947,2026-10-02T13:53:41.435112+00:00
+reco-011026500254,profile,31,73,Verisk,"Gen AI Developer- Python, FAST API",https://www.naukri.com/job-listings-011026500254,2026-10-02T13:53:43.540687+00:00
+reco-280926006246,profile,32,73,Mirafra,1st OCT Drive(White field -Bangalore) - Gen AI Engineer,https://www.naukri.com/job-listings-280926006246,2026-10-02T13:53:45.623204+00:00
+reco-280926000061,profile,33,73,Expergo Technologies,AI Engineer: Document Intelligence & Machine Learning,https://www.naukri.com/job-listings-280926000061,2026-10-02T13:53:47.702724+00:00
+reco-300926504586,profile,34,73,Vinove Software,Full Stack AI Engineer,https://www.naukri.com/job-listings-300926504586,2026-10-02T13:53:49.773757+00:00
+reco-260826022278,profile,35,73,Vyntrapro Innovations,Ai Ml Engineer,https://www.naukri.com/job-listings-260826022278,2026-10-02T13:53:51.883879+00:00
+reco-280926503549,profile,36,73,Maxtra Technologies,AI / ML Developer,https://www.naukri.com/job-listings-280926503549,2026-10-02T13:53:53.919872+00:00
+reco-011026502518,profile,37,73,Apitoria Pharma,AI Engineer,https://www.naukri.com/job-listings-011026502518,2026-10-02T13:53:56.027510+00:00
+reco-011026037748,profile,38,73,FIRSTMERIDIAN GLOBAL SERVICES,FullStack GEN AI Engineer,https://www.naukri.com/job-listings-011026037748,2026-10-02T13:53:58.139304+00:00
+reco-290926031457,profile,39,73,Coffeebeans Consulting,Agentic AI Engineer,https://www.naukri.com/job-listings-290926031457,2026-10-02T13:54:02.352507+00:00
+reco-250926017935,profile,40,73,Ather Energy,AI Enablement Engineer,https://www.naukri.com/job-listings-250926017935,2026-10-02T13:54:04.421708+00:00
+reco-300926033913,profile,41,73,Verisk,Gen AI,https://www.naukri.com/job-listings-300926033913,2026-10-02T13:54:06.520306+00:00
+reco-011026500265,profile,42,73,Novelvox,Software Developer,https://www.naukri.com/job-listings-011026500265,2026-10-02T13:54:08.631492+00:00
+reco-300926023589,profile,43,73,Tata Elxsi,AI Developer with Go & Python,https://www.naukri.com/job-listings-300926023589,2026-10-02T13:54:10.724038+00:00
+reco-240625025518,profile,44,73,Deloitte US-India Offices,AI/Python Engineer,https://www.naukri.com/job-listings-240625025518,2026-10-02T13:54:12.827544+00:00
+reco-280926502903,profile,45,73,Remotestar,AI/ML Engineer- Fegmo,https://www.naukri.com/job-listings-280926502903,2026-10-02T13:54:14.934410+00:00
+reco-280926025071,profile,46,73,Vrish Consulting,FDE AI Consultant,https://www.naukri.com/job-listings-280926025071,2026-10-02T13:54:16.996126+00:00
+reco-011026503092,profile,47,73,Genesys,"AI Platform Engineer (Python, AWS)",https://www.naukri.com/job-listings-011026503092,2026-10-02T13:54:19.092791+00:00
+reco-280926500859,profile,48,73,Logibee,AI Engineer,https://www.naukri.com/job-listings-280926500859,2026-10-02T13:54:21.195276+00:00
+reco-011026503139,profile,49,73,Methodhub Software,ML/LLM Engineer,https://www.naukri.com/job-listings-011026503139,2026-10-02T13:54:23.303082+00:00
+reco-300926030051,profile,50,73,Aptus Data Labs,Artificial Intelligence Engineer,https://www.naukri.com/job-listings-300926030051,2026-10-02T13:54:25.404698+00:00
+reco-290926501310,profile,51,73,Salezx,AI/ML Engineer,https://www.naukri.com/job-listings-290926501310,2026-10-02T13:54:27.514210+00:00
+reco-011026503914,profile,52,73,Legato,Software Engineer I (IND),https://www.naukri.com/job-listings-011026503914,2026-10-02T13:54:29.597604+00:00
+reco-150926006123,profile,53,73,Sunrise Biztech Systems,Ai Ml Engineer,https://www.naukri.com/job-listings-150926006123,2026-10-02T13:54:31.668384+00:00
+reco-011026500075,profile,54,73,Initium Digital Pune,Senior Full-Stack Engineer (React + Node),https://www.naukri.com/job-listings-011026500075,2026-10-02T13:54:33.863032+00:00
+reco-290926934472,preferences,1,64,Infosys,Java Fullstack Developer,https://www.naukri.com/job-listings-290926934472,2026-10-02T13:54:45.072489+00:00
+reco-220926024645,preferences,2,64,PwC,Fullstack Developer(Java Angular),https://www.naukri.com/job-listings-220926024645,2026-10-02T13:54:47.051825+00:00
+reco-011026018857,preferences,3,64,Deloitte US-India Offices,Java FullStack Developer,https://www.naukri.com/job-listings-011026018857,2026-10-02T13:54:49.090899+00:00
+reco-240926925147,preferences,4,64,Capgemini,Java FullStack Developer with React,https://www.naukri.com/job-listings-240926925147,2026-10-02T13:54:51.164394+00:00
+reco-290926917690,preferences,5,64,CGI,.NET Fullstack Developer,https://www.naukri.com/job-listings-290926917690,2026-10-02T13:54:53.276434+00:00
+reco-011026011430,preferences,6,64,Airtel,Senior Software Engineer - Fullstack+SEO,https://www.naukri.com/job-listings-011026011430,2026-10-02T13:54:55.338616+00:00
+reco-011026018167,preferences,7,64,NCR Atleos,Software Engineer II- .Net Fullstack,https://www.naukri.com/job-listings-011026018167,2026-10-02T13:54:57.385836+00:00
+reco-011026034859,preferences,8,64,Wipro,Developer,https://www.naukri.com/job-listings-011026034859,2026-10-02T13:54:59.345073+00:00
+reco-280926031690,preferences,9,64,Cognizant,.NET+React+Azure,https://www.naukri.com/job-listings-280926031690,2026-10-02T13:55:01.373137+00:00
+reco-140126027308,preferences,10,64,Jaytech,Fullstack Developer,https://www.naukri.com/job-listings-140126027308,2026-10-02T13:55:03.434224+00:00
+reco-021026010693,preferences,11,64,Authentic Staffing Agency,Fullstack Developer,https://www.naukri.com/job-listings-021026010693,2026-10-02T13:55:05.739586+00:00
+reco-260926009395,preferences,12,64,Infosys,.NET Software Developer,https://www.naukri.com/job-listings-260926009395,2026-10-02T13:55:07.823203+00:00
+reco-300926031472,preferences,13,64,Cargill,.net Fullstack Developer,https://www.naukri.com/job-listings-300926031472,2026-10-02T13:55:09.814520+00:00
+reco-280926924904,preferences,14,64,Accenture,Web Developer,https://www.naukri.com/job-listings-280926924904,2026-10-02T13:55:11.782773+00:00
+reco-170926026593,preferences,15,64,CGI,.NET Software Developer,https://www.naukri.com/job-listings-170926026593,2026-10-02T13:55:13.766291+00:00
+reco-280926928907,preferences,16,64,Infosys,.NET Developer,https://www.naukri.com/job-listings-280926928907,2026-10-02T13:55:15.828665+00:00
+reco-011026501819,preferences,17,64,Brickwork India,Web Developer,https://www.naukri.com/job-listings-011026501819,2026-10-02T13:55:17.935347+00:00
+reco-011026929328,preferences,18,64,Leading Client,Full Stack Developer,https://www.naukri.com/job-listings-011026929328,2026-10-02T13:55:20.049110+00:00
+reco-280926503156,preferences,19,64,Webtoils Development Llp,Developer,https://www.naukri.com/job-listings-280926503156,2026-10-02T13:55:22.124605+00:00
+reco-011026038185,preferences,20,64,First Advantage,Dot Net Fullstack Developer,https://www.naukri.com/job-listings-011026038185,2026-10-02T13:55:24.190775+00:00
+reco-011026022676,preferences,21,64,Coforge,Java React Fullstack Developer - Bangalore Hybrid,https://www.naukri.com/job-listings-011026022676,2026-10-02T13:55:26.261975+00:00
+reco-011026501046,preferences,22,64,Krisnela Technologies,Full Stack Developer - Angular & java,https://www.naukri.com/job-listings-011026501046,2026-10-02T13:55:28.284205+00:00
+reco-300926500145,preferences,23,64,PSRTEK,Java Backend Developer,https://www.naukri.com/job-listings-300926500145,2026-10-02T13:55:30.341923+00:00
+reco-011026502122,preferences,24,64,OTS Solutions,Java Fullstack Developer,https://www.naukri.com/job-listings-011026502122,2026-10-02T13:55:32.388682+00:00
+reco-300926501119,preferences,25,64,NEC Software Solutions,Software Engineer - Full Stack Developer (Java+React),https://www.naukri.com/job-listings-300926501119,2026-10-02T13:55:36.485466+00:00
+reco-011026503388,preferences,26,64,Birlasoft,Java API Developer,https://www.naukri.com/job-listings-011026503388,2026-10-02T13:55:38.570532+00:00
+reco-290926503564,preferences,27,64,Xfactr,C# Developer,https://www.naukri.com/job-listings-290926503564,2026-10-02T13:55:42.582563+00:00
+reco-280926503057,preferences,28,64,Domis Tech,Software Developer (.NET),https://www.naukri.com/job-listings-280926503057,2026-10-02T13:55:44.561931+00:00
+reco-280926929306,preferences,29,64,Visa Consolidated Support Services India,"Sr. SW Engineer / Full-stack Developer - .Net,React/Angular,GenAI",https://www.naukri.com/job-listings-280926929306,2026-10-02T13:55:46.550081+00:00
+reco-280926015312,preferences,30,64,Mufin Green Finance,Back End Developer,https://www.naukri.com/job-listings-280926015312,2026-10-02T13:55:48.521430+00:00
+reco-290926503253,preferences,31,64,Softcore Infotech,Dot NET & ERP Software Developer,https://www.naukri.com/job-listings-290926503253,2026-10-02T13:55:50.486309+00:00
+reco-300926030239,preferences,32,64,Aelius Consultants,Software Engineer - (C#/.NET & React),https://www.naukri.com/job-listings-300926030239,2026-10-02T13:55:52.530311+00:00
+reco-290926024530,preferences,33,64,Persistent,Full Stack DoTNET & Angular Developer,https://www.naukri.com/job-listings-290926024530,2026-10-02T13:55:56.628118+00:00
+reco-280926501504,preferences,34,64,MUFG Bank,Full Stack Java Developer,https://www.naukri.com/job-listings-280926501504,2026-10-02T13:56:00.787358+00:00
+reco-300926502221,preferences,35,64,Indian Financial Technology And Alliedservices,Java Fullstack Developer - L1,https://www.naukri.com/job-listings-300926502221,2026-10-02T13:56:02.888162+00:00
+reco-011026500253,preferences,36,64,Verisk,Lead Next JS Developer,https://www.naukri.com/job-listings-011026500253,2026-10-02T13:56:04.978418+00:00
+reco-270926003179,preferences,37,64,US based Software Company,Dot Net Developer (React),https://www.naukri.com/job-listings-270926003179,2026-10-02T13:56:07.045466+00:00
+reco-011026501527,preferences,38,64,Renesas,Software Engineer - Frontend Developer (Angular),https://www.naukri.com/job-listings-011026501527,2026-10-02T13:56:11.154780+00:00
+reco-011026503023,preferences,39,64,Ratnam Solutions,Python Full Stack Developer,https://www.naukri.com/job-listings-011026503023,2026-10-02T13:56:13.243399+00:00
+reco-050626017626,you_might_like,1,60,"Reputed Engineering consultant in Thane, Maharashtra",Generative AI Engineer,https://www.naukri.com/job-listings-050626017626,2026-10-02T13:56:25.402879+00:00
+reco-290926934751,you_might_like,2,60,Capgemini,Agentic AI Developer,https://www.naukri.com/job-listings-290926934751,2026-10-02T13:56:27.195456+00:00
+reco-011026500308,you_might_like,3,60,Ficasoft Infotech,React.js Developer,https://www.naukri.com/job-listings-011026500308,2026-10-02T13:56:28.990728+00:00
+reco-011026500373,you_might_like,4,60,Firstsource,Senior Software Engineer - Gen AI,https://www.naukri.com/job-listings-011026500373,2026-10-02T13:56:30.827631+00:00
+reco-300926010400,you_might_like,5,60,Liberating Solution,Artificial Intelligence Engineer,https://www.naukri.com/job-listings-300926010400,2026-10-02T13:56:32.664552+00:00
+reco-300926503359,you_might_like,6,60,Kitron Group,AI Engineer - GenAI & Agentic AI,https://www.naukri.com/job-listings-300926503359,2026-10-02T13:56:34.497287+00:00
+reco-280926500870,you_might_like,7,60,Pon Pure,AI Engineer,https://www.naukri.com/job-listings-280926500870,2026-10-02T13:56:36.305784+00:00
+reco-300926503482,you_might_like,8,60,Sequere Technologies,LLM & Generative AI Engineer,https://www.naukri.com/job-listings-300926503482,2026-10-02T13:56:38.134857+00:00
+reco-300926501145,you_might_like,9,60,Change Networks,AI Engineer,https://www.naukri.com/job-listings-300926501145,2026-10-02T13:56:39.933251+00:00
+reco-300926500141,you_might_like,10,60,MEG World It Services,AI & ML Engineer,https://www.naukri.com/job-listings-300926500141,2026-10-02T13:56:41.734482+00:00
+reco-011026913060,you_might_like,11,60,Leading Client,Python Developer - Generative AI,https://www.naukri.com/job-listings-011026913060,2026-10-02T13:56:43.560865+00:00
+reco-011026503104,you_might_like,12,60,Jethitech,Frontend Developer,https://www.naukri.com/job-listings-011026503104,2026-10-02T13:56:45.383117+00:00
+reco-140826017353,you_might_like,13,60,John Cockerill,Artificial Intelligence Engineer,https://www.naukri.com/job-listings-140826017353,2026-10-02T13:56:47.186229+00:00
+reco-011026502972,you_might_like,14,60,Pragnaa Shree Venture India,Software Engineer,https://www.naukri.com/job-listings-011026502972,2026-10-02T13:56:49.002869+00:00
+reco-280926001902,you_might_like,15,60,teamplus staffing solution,AI Engineer West Bengal,https://www.naukri.com/job-listings-280926001902,2026-10-02T13:56:50.815677+00:00
+reco-300926503471,you_might_like,16,60,Ninos It Solution,React.js and React Native Developer,https://www.naukri.com/job-listings-300926503471,2026-10-02T13:56:52.635767+00:00
+reco-170926923953,you_might_like,17,60,Twixor,Chatbot Developer,https://www.naukri.com/job-listings-170926923953,2026-10-02T13:56:54.433070+00:00
+reco-011026503499,you_might_like,18,60,Vserve,Fullstack Dev-Reat and Node,https://www.naukri.com/job-listings-011026503499,2026-10-02T13:56:56.259521+00:00
+reco-280926924633,you_might_like,19,60,Accenture,LLM Model Developer,https://www.naukri.com/job-listings-280926924633,2026-10-02T13:56:58.066197+00:00
+reco-290926934645,you_might_like,20,60,Ford Business Solutions,AI Engineer,https://www.naukri.com/job-listings-290926934645,2026-10-02T13:56:59.896058+00:00
+reco-300926036005,you_might_like,21,60,Vara Infrovate,Full-stack Developer Kolkata,https://www.naukri.com/job-listings-300926036005,2026-10-02T13:57:01.693264+00:00
+reco-011026500823,you_might_like,22,60,Acenet,Python Full Stack Developer,https://www.naukri.com/job-listings-011026500823,2026-10-02T13:57:03.511173+00:00
+reco-011026023664,you_might_like,23,60,Eucloid Data Solutions,AI Engineer,https://www.naukri.com/job-listings-011026023664,2026-10-02T13:57:05.305742+00:00
+reco-280926921432,you_might_like,24,60,Accenture,LLM Model Developer,https://www.naukri.com/job-listings-280926921432,2026-10-02T13:57:07.115437+00:00
+reco-290926019589,you_might_like,25,60,"NTT DATA, Inc.",Hiring For Azure with Gen AI experienced - Chennai,https://www.naukri.com/job-listings-290926019589,2026-10-02T13:57:08.904753+00:00
+reco-300926500110,you_might_like,26,60,Softrica,Full Stack Developer,https://www.naukri.com/job-listings-300926500110,2026-10-02T13:57:10.698758+00:00
+reco-280926503210,you_might_like,27,60,Fablead Developers Technolab,AI / ML Developer,https://www.naukri.com/job-listings-280926503210,2026-10-02T13:57:12.521682+00:00
+reco-011026502885,you_might_like,28,60,Comviva Technology,Backend Developer,https://www.naukri.com/job-listings-011026502885,2026-10-02T13:57:14.345949+00:00
+reco-300926500103,you_might_like,29,60,Avow Solutions Inc,Full-stack Developer - Technologies,https://www.naukri.com/job-listings-300926500103,2026-10-02T13:57:16.172347+00:00
+reco-300926500186,you_might_like,30,60,Click Informatics,AI/ML Engineer,https://www.naukri.com/job-listings-300926500186,2026-10-02T13:57:17.973699+00:00
+reco-280926501576,you_might_like,31,60,Tarento Technologies,AI ML Ops Engineer,https://www.naukri.com/job-listings-280926501576,2026-10-02T13:57:19.805149+00:00
+reco-290926040920,you_might_like,32,60,Amnet Smartshoring Services,Ai Specialist,https://www.naukri.com/job-listings-290926040920,2026-10-02T13:57:21.656113+00:00
+reco-300926500111,you_might_like,33,60,Softrica,AI / ML Engineer,https://www.naukri.com/job-listings-300926500111,2026-10-02T13:57:23.462136+00:00
+reco-290926017315,you_might_like,34,60,Osiz Technology,Ai Ml Engineer,https://www.naukri.com/job-listings-290926017315,2026-10-02T13:57:25.271803+00:00
+reco-300926501149,you_might_like,35,60,Change Networks,Firmware Engineer,https://www.naukri.com/job-listings-300926501149,2026-10-02T13:57:27.066325+00:00
+reco-280926004745,you_might_like,36,60,Information Technology,Python Full Stack Trainer - GenAI / AI-ML,https://www.naukri.com/job-listings-280926004745,2026-10-02T13:57:28.849593+00:00
+reco-300926035945,you_might_like,37,60,Pristine It Code,Walk-in || Claude Code Java Developer,https://www.naukri.com/job-listings-300926035945,2026-10-02T13:57:33.082712+00:00
+reco-280926502630,you_might_like,38,60,Indea Design,Mid-Level Full Stack Software Developer,https://www.naukri.com/job-listings-280926502630,2026-10-02T13:57:34.909600+00:00
+reco-280926504243,you_might_like,39,60,EdgeVerve Systems,Associate Product Developer - Emerging Tech,https://www.naukri.com/job-listings-280926504243,2026-10-02T13:57:36.790581+00:00
+reco-290926013521,you_might_like,40,60,Mammoth Equipment & Exhausts,AI Senior Engineer,https://www.naukri.com/job-listings-290926013521,2026-10-02T13:57:38.709716+00:00
+reco-300926027868,you_might_like,41,60,Human Capital Consultancy Services,Java Developer,https://www.naukri.com/job-listings-300926027868,2026-10-02T13:57:40.629494+00:00
+reco-290926501402,you_might_like,42,60,Febtech It Solutions,AI / Python Engineer,https://www.naukri.com/job-listings-290926501402,2026-10-02T13:57:42.563076+00:00
+reco-300926028434,you_might_like,43,60,Top Start Up,Principal Product & Implementation Engineer,https://www.naukri.com/job-listings-300926028434,2026-10-02T13:57:44.450072+00:00
+reco-280926031877,you_might_like,44,60,Teksystems,Looking For Mid Level AI Engineer,https://www.naukri.com/job-listings-280926031877,2026-10-02T13:57:46.277211+00:00

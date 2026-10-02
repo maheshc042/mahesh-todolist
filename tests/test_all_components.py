@@ -710,6 +710,141 @@ class TestMailerTrackRouting(unittest.TestCase):
             self.assertIn("React, Node.js", mailer._generate_body("Training Manager", "", "Co"))
             self.assertIn("React, Node.js", mailer._generate_body("Full Stack Developer", "", "Co"))
 
+    def test_handle_names_cleaned(self):
+        """Alphanumeric poster handles still produce a human salutation."""
+        from unittest.mock import patch
+
+        from naukri_agent.core.gemini_writer import clean_first_name
+        from naukri_agent.core.mailer import ColdEmailer
+
+        self.assertEqual(clean_first_name("shubhampundir220"), "Shubhampundir")
+        self.assertEqual(clean_first_name("Chandana Rao"), "Chandana")
+        self.assertEqual(clean_first_name(""), "")
+        self.assertEqual(clean_first_name("12345"), "")
+        mailer = ColdEmailer(sender_email="a@b.com", app_password="x")
+        with patch(
+            "naukri_agent.core.gemini_writer.GeminiWriter.generate_email_body",
+            return_value=None,
+        ):
+            body = mailer._generate_body(
+                "AI Engineer", "", "", angle="referral", recipient_name="shubhampundir220")
+            self.assertTrue(body.startswith("Hi Shubhampundir,"))
+
+    def test_name_salutation_and_company(self):
+        """Recipient name + company thread into the fallback template."""
+        from unittest.mock import patch
+
+        from naukri_agent.core.mailer import ColdEmailer
+
+        mailer = ColdEmailer(sender_email="a@b.com", app_password="x")
+        with patch(
+            "naukri_agent.core.gemini_writer.GeminiWriter.generate_email_body",
+            return_value=None,
+        ):
+            body = mailer._generate_body(
+                "AI Engineer", "", "Acme", angle="referral", recipient_name="Chandana")
+            self.assertTrue(body.startswith("Hi Chandana,"))
+            anon = mailer._generate_body("AI Engineer", "", "", angle="referral")
+            self.assertTrue(anon.startswith("Hi,"))
+            self.assertNotIn("Hi there", anon)
+
+    def test_subject_shapes(self):
+        from naukri_agent.core.mailer import ColdEmailer
+
+        build = ColdEmailer.build_subject
+        self.assertEqual(
+            build("AI Engineer", "Mahesh Chitakoti", immediate=True),
+            "AI Engineer application, Mahesh Chitakoti (immediate joiner)")
+        self.assertEqual(
+            build("AI Engineer", "", immediate=False),
+            "AI Engineer application")
+        self.assertIn("Immediate Joiner", build("X", "Z", immediate=True, referral=True))
+        self.assertNotIn("Acme", build("AI Engineer", "Mahesh Chitakoti"))
+
+    def test_no_duplicate_contact_footer(self):
+        """Mobile/location live in the snapshot bullets only — the signoff
+        carries name + links, never a repeated contact line."""
+        from unittest.mock import patch
+
+        from naukri_agent.core.mailer import ColdEmailer
+
+        mailer = ColdEmailer(sender_email="a@b.com", app_password="x")
+        with patch(
+            "naukri_agent.core.gemini_writer.GeminiWriter.generate_email_body",
+            return_value=None,
+        ):
+            body = mailer._generate_body("AI Engineer", "", "Co")
+            self.assertEqual(body.count("+91 9481777227"), 1)
+            self.assertIn("Best regards,\nMahesh Chitakoti\n", body)
+
+    def test_referral_angle_fallback(self):
+        """Referral framing in the deterministic template (Gemini off):
+        referral ask present, facts identical, no call pressure."""
+        from unittest.mock import patch
+
+        from naukri_agent.core.mailer import ColdEmailer
+
+        mailer = ColdEmailer(sender_email="a@b.com", app_password="x")
+        with patch(
+            "naukri_agent.core.gemini_writer.GeminiWriter.generate_email_body",
+            return_value=None,
+        ):
+            body = mailer._generate_body("AI Engineer", "", "Co", angle="referral")
+            self.assertIn("referring me", body)
+            self.assertIn("Python, FastAPI", body)
+            self.assertNotIn("intro call", body)
+            plain = mailer._generate_body("AI Engineer", "", "Co")
+            self.assertIn("intro call", plain)
+            self.assertNotIn("referring me", plain)
+
+
+class TestGeminiPrompt(unittest.TestCase):
+    def _prompt_text(self, **kwargs):
+        import io
+        import json
+        from unittest.mock import patch
+
+        from naukri_agent.core.gemini_writer import GeminiWriter
+
+        captured = {}
+
+        class FakeResp:
+            status = 200
+
+            def read(self):
+                return json.dumps(
+                {"candidates": [{"content": {"parts": [{"text": "x"}]}}]}
+            ).encode()
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *a):
+                return False
+
+        def fake_urlopen(req, timeout=None):
+            captured["payload"] = json.loads(req.data.decode())
+            return FakeResp()
+
+        writer = GeminiWriter(api_key="test-key", model="test-model")
+        with patch("urllib.request.urlopen", side_effect=fake_urlopen):
+            writer.generate_email_body("AI Engineer", "Build RAG pipelines", "Acme", **kwargs)
+        parts = captured["payload"]["contents"][0]["parts"]
+        return parts[0]["text"]
+
+    def test_referral_prompt_shape(self):
+        prompt = self._prompt_text(angle="referral", recipient_name="Chandana")
+        self.assertIn("to ask for a referral", prompt)
+        self.assertIn('Salutation: "Hi Chandana,"', prompt)
+        self.assertIn("under 150 words", prompt)
+
+    def test_application_prompt_shape(self):
+        prompt = self._prompt_text()
+        self.assertIn("direct job application", prompt)
+        self.assertIn('Salutation: "Hi Acme Team,"', prompt)
+        self.assertIn("under 150 words", prompt)
+        self.assertNotIn("referral", prompt.split("RULES")[0])
+
 
 class TestExperienceGates(unittest.TestCase):
     def _engine(self, profile_name="AI / Python Engineer", years=2.5):

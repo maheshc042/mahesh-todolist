@@ -20,7 +20,12 @@ from pathlib import Path
 
 from ..config import AgentConfig
 from ..logging_setup import get_logger
-from .gemini_writer import GeminiWriter, applicant_snapshot, is_immediate_joiner
+from .gemini_writer import (
+    GeminiWriter,
+    applicant_snapshot,
+    clean_first_name,
+    is_immediate_joiner,
+)
 
 log = get_logger(__name__)
 
@@ -61,15 +66,21 @@ class ColdEmailer:
         role_name: str,
         job_description: str = "",
         company_name: str = "",
+        angle: str = "application",
+        recipient_name: str = "",
     ) -> str:
         """
         Generates email body using Google Gemini AI if GEMINI_API_KEY is available,
         or falls back to the deterministic high-converting template.
+        angle="referral" reframes both paths as a referral ask (used by the
+        LinkedIn cold campaign); the post-apply path keeps "application".
         """
         gemini_body = self.gemini_writer.generate_email_body(
             role_name=role_name,
             job_description=job_description,
             company_name=company_name,
+            angle=angle,
+            recipient_name=recipient_name,
         )
         if gemini_body:
             return gemini_body
@@ -97,12 +108,32 @@ class ColdEmailer:
             # Config disk read only on the fallback-of-fallback path.
             name = (AgentConfig.load().applicant_name or "").strip()
         links = " ".join(p for p in (who.github, who.linkedin) if p)
-        salutation = f"Hi {company_name} Team," if (company_name or "").strip() else "Hi there,"
-        contact_line = f"{who.mobile} | {who.location}" if who.mobile else who.location
+        first = clean_first_name(recipient_name)
+        if first:
+            salutation = f"Hi {first},"
+        elif (company_name or "").strip():
+            salutation = f"Hi {company_name} Team,"
+        else:
+            salutation = "Hi,"
+
+        referral = str(angle or "application").strip().lower() == "referral"
+        if referral:
+            opener = (
+                f"I came across your LinkedIn post regarding the {role_name} opening and would "
+                f"love to be considered — would you be open to referring me to the hiring team? "
+                f"My stack is {stack}, with {who.experience_label} building production systems around them. {proof}"
+            )
+            closer = "My resume is attached for a quick look — would appreciate a referral if my background fits."
+        else:
+            opener = (
+                f"I am applying for the {role_name} role. My stack is {stack}, "
+                f"with {who.experience_label} building production systems around them. {proof}"
+            )
+            closer = "My resume is attached for your review. I would welcome a short intro call this week to discuss how I can contribute."
 
         return f"""{salutation}
 
-I am applying for the {role_name} role. My stack is {stack}, with {who.experience_label} building production systems around them. {proof}
+{opener}
 
 Candidate Overview:
 • Name: {name}
@@ -114,13 +145,32 @@ Candidate Overview:
 • Mobile: {who.mobile}
 • Key Technical Skills: {skills}
 
-My resume is attached for your review. I would welcome a short intro call this week to discuss how I can contribute.
+{closer}
 
 Best regards,
 {name}
-{contact_line}
 {links}
 """
+
+    @staticmethod
+    def build_subject(role: str, name: str = "",
+                      immediate: bool = False, referral: bool = False) -> str:
+        """Pure subject builder (unit-tested): role first for mobile
+        scanning, then name, then the immediate tag. No company — recruiter
+        threads are found by role + name, and company strings only bloat
+        the scannable prefix."""
+        clean_role = " ".join(str(role or "").splitlines()).strip()[:150]
+        clean_name = " ".join(str(name or "").splitlines()).strip()
+        immediate_tag = " (Immediate Joiner)" if immediate else ""
+        if referral and clean_name:
+            return f"Quick referral request: {clean_role}, {clean_name}{immediate_tag}"
+        if referral:
+            return f"Referral request for {clean_role}{immediate_tag}"
+        if immediate and clean_name:
+            return f"{clean_role} application, {clean_name} (immediate joiner)"
+        if clean_name:
+            return f"Applying for {clean_role}, {clean_name}"
+        return f"{clean_role} application"
 
     def send_application(
         self,
@@ -129,6 +179,8 @@ Best regards,
         resume_path: str | Path,
         job_description: str = "",
         company_name: str = "",
+        angle: str = "application",
+        recipient_name: str = "",
     ) -> bool:
         """
         Constructs and dispatches the email with the PDF attachment synchronously.
@@ -160,20 +212,22 @@ Best regards,
                 log.warning("mailer.invalid_recipient", to=clean_target[:60])
                 return False
 
-            # Human-style subject: no pipes, no tags, no YOE counters, no
-            # dashes — and the name is ALWAYS present so recruiters can find
-            # the thread later by searching it.
+            # Human-style subject: role first (mobile shows ~35 chars), then
+            # company, then name — all three searchable later — plus the
+            # immediate-joiner tag, your single strongest hook. No pipes,
+            # no tags, no YOE counters.
             try:
                 immediate = is_immediate_joiner(applicant_snapshot().notice_label)
             except Exception:
                 immediate = False
             clean_name = " ".join(str(name or "").splitlines()).strip()
-            if immediate and clean_name:
-                subject = f"{clean_role} application, {clean_name} (immediate joiner)"
-            elif clean_name:
-                subject = f"Applying for {clean_role}, {clean_name}"
-            else:
-                subject = f"{clean_role} application"
+            referral = str(angle or "application").strip().lower() == "referral"
+            subject = self.build_subject(
+                role=clean_role,
+                name=clean_name,
+                immediate=immediate,
+                referral=referral,
+            )
             msg = EmailMessage()
             msg["Subject"] = subject
             msg["From"] = self.sender_email
@@ -184,6 +238,8 @@ Best regards,
                 role_name=role_name,
                 job_description=job_description,
                 company_name=company_name,
+                angle=angle,
+                recipient_name=recipient_name,
             )
             msg.set_content(body)
 
@@ -265,6 +321,8 @@ Best regards,
         resume_path: str | Path,
         job_description: str = "",
         company_name: str = "",
+        angle: str = "application",
+        recipient_name: str = "",
     ) -> bool:
         """Non-blocking wrapper for send_application to avoid blocking event loops."""
         return await asyncio.to_thread(
@@ -274,4 +332,6 @@ Best regards,
             resume_path,
             job_description,
             company_name,
+            angle,
+            recipient_name,
         )

@@ -387,14 +387,40 @@ class AnswerEngine:
                 if any(pref in opt_low for pref in ("bengaluru", "bangalore", "remote", "hybrid", "work from home")):
                     return ResolvedAnswer(opt, "intent:willingness_location_preferred", "intent-map")
 
-            # 2. Check for Cutshort-style affirmative presence / relocation options
-            for opt in question.options:
+            # 2. Check for Cutshort-style affirmative presence / relocation options.
+            # Place-aware (run 480): "I am currently in this location" is only
+            # true for home (Bengaluru) or remote. For any other named place
+            # an explicit relocate option is strictly more truthful — take it
+            # first. With no relocate option present, the here-claim stays as
+            # the Yes-carrier (intent is correct: candidate IS relocate-willing).
+            m_place = re.search(
+                r"location of this job will be ([a-z0-9][a-z0-9\s().,&\-]{0,60})", text
+            )
+            place = m_place.group(1) if m_place else ""
+            is_home = (not place) or any(
+                h in place
+                for h in ("bengaluru", "bangalore", "remote", "work from home", "hybrid", "anywhere")
+            )
+            opt_lows = [(opt, opt.strip().lower()) for opt in question.options]
+            has_relocate_opt = any(
+                "can relocate" in low or "willing to relocate" in low for _, low in opt_lows
+            )
+            if not is_home:
+                for opt, opt_low in opt_lows:
+                    if self._polarity(_normalise(opt)) is False:
+                        continue
+                    if any(neg in opt_low for neg in ("not", "unwilling", "cannot", "none", "neither", "no")):
+                        continue
+                    if "can relocate" in opt_low or "willing to relocate" in opt_low:
+                        return ResolvedAnswer(opt, "intent:willingness_can_relocate", "intent-map")
+            for opt, opt_low in opt_lows:
                 if self._polarity(_normalise(opt)) is False:
                     continue
-                opt_low = opt.strip().lower()
                 if any(neg in opt_low for neg in ("not", "unwilling", "cannot", "none", "neither", "no")):
                     continue
                 if "currently in this location" in opt_low or "okay with it" in opt_low:
+                    if not is_home and has_relocate_opt:
+                        continue
                     return ResolvedAnswer(opt, "intent:willingness_current_location", "intent-map")
                 if "can relocate" in opt_low or "willing to relocate" in opt_low:
                     return ResolvedAnswer(opt, "intent:willingness_can_relocate", "intent-map")

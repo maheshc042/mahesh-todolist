@@ -57,6 +57,22 @@ SPAM_OR_UNPAID_REJECT_REGEX = re.compile(
     re.IGNORECASE,
 )
 
+# India-based candidate: onsite-abroad posts can never convert. Fires only
+# on STRONG non-India signals (work authorization, clearance, $ pay,
+# onsite + foreign country). Remote/hybrid/location-silent posts pass
+# (fail-open): most recruiter posts name no place at all.
+ABROAD_ONSITE_REJECT_REGEX = re.compile(
+    r"("
+    r"\b(?:us\s+citizen|us\s+citizens|green\s+card|h1-?b|security\s+clearance|"
+    r"public\s+trust\s+clearance|sc\s+clearance|us\s+person)\b|"
+    r"\$\s*\d|\b\d+k\s*(?:\/|per|a|\s)\s*(?:yr|year|annum|month)|"
+    r"\bon[\s-]?site\s+(?:in|at)\s+(?:the\s+)?"
+    r"(?:usa?|united\s+states|uk|united\s+kingdom|london|canada|toronto|"
+    r"australia|sydney|europe|germany|berlin|france|singapore|dubai|uae)\b"
+    r")",
+    re.IGNORECASE,
+)
+
 TECH_DISQUALIFY_REGEX = re.compile(
     r"\b("
     r"wordpress|wix|shopify|magento|drupal|"
@@ -104,6 +120,74 @@ def is_spam_or_unpaid(text: str) -> bool:
     if not text:
         return False
     return bool(SPAM_OR_UNPAID_REJECT_REGEX.search(text))
+
+
+def is_abroad_onsite(text: str) -> bool:
+    """Returns True only on strong non-India onsite signals (auth, clearance,
+    $ pay, onsite + foreign country). Remote/hybrid/silent posts pass."""
+    if not text:
+        return False
+    return bool(ABROAD_ONSITE_REJECT_REGEX.search(text))
+
+
+_ROLE_WORDS = frozenset({
+    "engineer", "developer", "talent", "team", "role", "roles", "hiring",
+    "job", "jobs", "position", "positions", "opportunity", "acquisition",
+    "people", "human", "resources", "developers", "engineers",
+})
+
+# Clifton-strength style false friends: "great at Python" must never read
+# Python as the employer. A candidate made ONLY of these is skipped.
+_TECH_WORDS = frozenset({
+    "python", "java", "react", "node", "nodejs", "ai", "ml", "llm", "genai",
+    "fastapi", "django", "sql", "aws", "azure", "gcp", "docker", "kubernetes",
+    "typescript", "javascript", "angular", "vue", "go", "golang", "rust",
+    "data", "cloud", "devops", "backend", "frontend", "fullstack", "mern",
+})
+
+
+def _clean_company(cand: str) -> str:
+    words = [w for w in cand.split()
+             if w.lower() not in _ROLE_WORDS and w.lower() not in _TECH_WORDS]
+    if not words:
+        return ""
+    return " ".join(words)[:60]
+
+
+def extract_company(post_text: str, headline: str = "") -> str:
+    """Employer name behind a hiring post (pure, best-effort).
+
+    Headline first ("Recruiter at Infosys"), then explicit post phrasings
+    ("we are hiring at X"). Never returns role words or generic nouns —
+    empty string when unsure, so the email says "your company", never a
+    wrong one.
+    """
+    for source in (headline or "", post_text or ""):
+        for m in re.finditer(
+            r"(?:\bat\b|@|·)\s*([A-Z][\w&.,'\-]*(?:\s+[A-Z][\w&.,'\-]*){0,3})", source
+        ):
+            cleaned = _clean_company(m.group(1).strip().strip(".,"))
+            if cleaned:
+                return cleaned
+    m = re.search(
+        r"we(?:'re|\s+are)\s+hiring\s+(?:at|for)\s+([A-Z][\w&.,'\-]*(?:\s+[A-Z][\w&.,'\-]*){0,3})",
+        post_text or "",
+    )
+    if m:
+        cleaned = _clean_company(m.group(1).strip().strip(".,"))
+        if cleaned:
+            return cleaned
+    return ""
+
+
+def extract_first_name(author: str) -> str:
+    """Poster first name for the salutation (pure). Empty when unusable."""
+    if not author:
+        return ""
+    first = author.strip().split()[0].strip(".,@")
+    if not first or not first[0].isalpha() or len(first) > 20:
+        return ""
+    return first
 
 
 def is_disqualified_tech(text: str) -> bool:

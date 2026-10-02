@@ -89,6 +89,18 @@ def is_immediate_joiner(notice_label: str) -> bool:
     return low in ("immediate", "immediate joiner", "0 days", "0 day", "0-days") or low.startswith("0 ")
 
 
+def clean_first_name(raw: str | None) -> str:
+    """Poster name for the salutation. Handles handles: digits,
+    underscores and dots are stripped before capitalizing, so
+    'shubhampundir220' still becomes 'Hi Shubham,' instead of 'Hi,'.
+    Empty when nothing usable remains — never a placeholder."""
+    if not raw:
+        return ""
+    first = " ".join(str(raw).splitlines()).strip().split(" ")[0][:20]
+    cleaned = re.sub(r"[^a-zA-Z]", "", first)
+    return cleaned[:1].upper() + cleaned[1:] if cleaned else ""
+
+
 def applicant_snapshot() -> ApplicantSnapshot:
     """Resolve identity facts from AgentConfig with safe generic fallbacks."""
     try:
@@ -170,10 +182,15 @@ class GeminiWriter:
         role_name: str,
         job_description: str = "",
         company_name: str = "",
+        angle: str = "application",
+        recipient_name: str = "",
     ) -> str | None:
         """
         Generate tailored cold email copy with the pinned Gemini model.
         Returns None if GEMINI_API_KEY is unconfigured or the request fails.
+        angle="referral" reframes the ask (referral to the hiring team
+        instead of a direct application) — cold reply rates are higher for
+        a small, easy ask. Facts/snapshot stay identical either way.
         """
         if not self.api_key:
             log.debug("gemini.disabled", reason="GEMINI_API_KEY is not set.")
@@ -192,10 +209,48 @@ class GeminiWriter:
 
         links = " ".join(p for p in (who.github, who.linkedin) if p)
         links_line = f"\n{links}" if links else ""
-        salutation = f"Hi {company_name} Team," if company_name else "Hi there,"
-        contact_line = f"\n{who.mobile} | {who.location}" if who.mobile else f"\n{who.location}"
+        recipient_name = clean_first_name(recipient_name)
+        if recipient_name:
+            salutation = f"Hi {recipient_name},"
+        elif company_name:
+            salutation = f"Hi {company_name} Team,"
+        else:
+            salutation = "Hi,"
+        referral = str(angle or "application").strip().lower() == "referral"
+        if referral:
+            opener = (
+                f'You are {who.name}, writing to ask for a referral to the hiring team for the '
+                f'"{role_name}" role at "{company_name or "your company"}".'
+            )
+            intro_rule = (
+                f"4. Intro (2 sentences): Say you came across their LinkedIn post regarding "
+                f"the {role_name} opening, ask if they would be open to referring you "
+                f"to the hiring team, stating you have {who.experience_label} of experience "
+                f"building production systems and naming 2-3 of THEIR exact stack terms "
+                f"from the job requirements."
+            )
+            cta_rule = (
+                "6. CTA (1 sentence): Ask whether they would be open to referring you "
+                "for this role, and mention your resume is attached for a quick look. "
+                "Small, easy ask — no call pressure."
+            )
+        else:
+            opener = (
+                f'You are {who.name}, writing a direct job application email to an HR recruiter '
+                f'for the "{role_name}" role at "{company_name or "your company"}".'
+            )
+            intro_rule = (
+                f"4. Intro (2 sentences): Apply for the {role_name} role, stating you have "
+                f"{who.experience_label} of experience building production systems, naming 2-3 "
+                f"of THEIR exact stack terms from the job requirements, and summarizing the "
+                f"services you developed."
+            )
+            cta_rule = (
+                "6. CTA (1 sentence): Mention resume is attached and request a short "
+                "introductory call this week."
+            )
         prompt = f"""
-You are {who.name}, writing a direct job application email to an HR recruiter for the "{role_name}" role at "{company_name or 'your company'}".
+{opener}
 
 Applicant Background (exact facts, use them):
 - Name: {who.name}
@@ -214,9 +269,15 @@ CONTEXT:
 This is for the Indian tech job market. HR recruiters scan cold emails in 5 seconds to verify core hiring criteria: stack match, years, current CTC, expected CTC, notice period, location, and mobile number. A clean, structured quick candidate snapshot is essential for HR screening.
 
 RULES FOR THE EMAIL:
-1. Salutation: "{salutation}"
-2. Intro (2 sentences): Apply for the {role_name} role, stating you have {who.experience_label} of experience building production systems, naming 2-3 of THEIR exact stack terms from the job requirements, and summarizing the services you developed.
-3. Quick Candidate Snapshot (clean bullet points for rapid HR scan):
+1. Salutation: "{salutation}" — use it EXACTLY. Never write bracketed
+   placeholders like [Name], [Hiring Manager], or [Recruiter Name].
+2. Length: the WHOLE email stays under 150 words (aim ~110). Every extra
+   sentence halves the reply rate — cut ruthlessly, keep the snapshot.
+3. Open with THEM, not you: sentence one references their post/role
+   specifically (a stack term or detail from their requirements), never
+   "I hope this email finds you well" or any pleasantry.
+{intro_rule}
+5. Quick Candidate Snapshot (clean bullet points for rapid HR scan):
    • Name: {who.name}
    • Total Experience: {who.experience_label} ({role_name})
    • Current CTC: {who.current_ctc}
@@ -225,17 +286,17 @@ RULES FOR THE EMAIL:
    • Current Location: {who.location}
    • Mobile: {who.mobile}
    • Key Technical Skills: (name 4-6 matching tools from their description, dynamically customized to their requirements)
-4. CTA (1 sentence): Mention resume is attached and request a short introductory call this week.
-5. Sign off:
+{cta_rule}
+7. Sign off (no contact repeat — Mobile and Location already sit in the
+   snapshot above; duplicating them in the footer reads sloppy):
    Best regards,
-   {who.name}
-   {contact_line}{links_line}
+   {who.name}{links_line}
 
-6. FORBIDDEN:
+8. FORBIDDEN:
    - Buzzwords: passionate, cutting-edge, synergy, leverage, rockstar, ninja, guru, delve, testament, thrilled, robust, game-changer, world-class, esteemed, utmost.
    - Sob stories, hustle drama, or begging paragraphs.
    - Never invent metrics, percentages, user counts, or company names.
-7. Output ONLY the raw email body. No markdown fences, no subject lines, no placeholders.
+9. Output ONLY the raw email body. No markdown fences, no subject lines, no placeholders.
 """
 
         payload = {

@@ -169,6 +169,37 @@ class TestTenureFramings(unittest.TestCase):
             kind="radio", options=[]))
         self.assertIsNone(res)
 
+    def test_non_home_prefers_relocate_option(self):
+        """Delhi job offering both claims: relocate wins (run 480)."""
+        res = _engine().resolve(ScreeningQuestion(
+            text="The location of this job will be Delhi. Are you okay with this?",
+            kind="radio",
+            options=["I am currently in this location and okay with it",
+                     "I am willing to relocate to this location"]))
+        self.assertIsNotNone(res)
+        assert res is not None
+        self.assertIn("relocate", res.value.lower())
+
+    def test_home_keeps_current_location(self):
+        res = _engine().resolve(ScreeningQuestion(
+            text="The location of this job will be Bengaluru. Are you okay with this?",
+            kind="radio",
+            options=["I am currently in this location and okay with it",
+                     "I am willing to relocate to this location"]))
+        self.assertIsNotNone(res)
+        assert res is not None
+        self.assertIn("currently in this location", res.value.lower())
+
+    def test_non_home_no_relocate_falls_back(self):
+        """No relocate option: here-claim still carries the (true) Yes."""
+        res = _engine().resolve(ScreeningQuestion(
+            text="The location of this job will be Delhi. Are you okay with this?",
+            kind="radio",
+            options=["I am currently in this location and okay with it", "No"]))
+        self.assertIsNotNone(res)
+        assert res is not None
+        self.assertIn("currently in this location", res.value.lower())
+
     def test_take_up_interview_yes(self):
         """Mined gap: 'take up an interview' never reaches review."""
         res = _engine().resolve(ScreeningQuestion(

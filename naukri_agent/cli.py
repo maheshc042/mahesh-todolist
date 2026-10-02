@@ -191,6 +191,10 @@ def run(
 @app.command("flush-external")
 def flush_external(
     limit: int = typer.Option(50, "--limit", help="Max outbox rows to deliver"),
+    revive: bool = typer.Option(
+        False, "--revive",
+        help="First reset ConnectError dead rows to pending (server was down, not the job's fault)",
+    ),
     config_path: Path | None = typer.Option(None, "--config", help="Path to config.yaml"),
 ) -> None:
     """Deliver pending Sidekick outbox rows to POST /apply (contract v1)."""
@@ -204,6 +208,9 @@ def flush_external(
                 console.print("[yellow]sidekick_integration.enabled is false; nothing to flush.[/yellow]")
                 return
             repo = await Repository.create()
+            if revive:
+                revived = await repo.revive_dead_dispatches()
+                console.print(f"Revived {revived} ConnectError dead rows to pending.")
             dispatcher = ExternalJobDispatcher(
                 repo=repo,
                 api_url=config.sidekick_integration.api_url,
@@ -518,7 +525,7 @@ def login_linkedin(
 
 @app.command(name="campaign-linkedin")
 def campaign_linkedin_cmd(
-    limit: int = typer.Option(15, "--limit", "-l", help="Daily email limit"),
+    limit: int = typer.Option(20, "--limit", "-l", help="Daily email limit"),
     headed: bool = typer.Option(False, "--headed/--headless", help="Show browser window"),
     dry_run: bool = typer.Option(False, "--dry-run", help="Dry run: hunt and preview matches without sending emails"),
     config_path: Path | None = typer.Option(None, "--config", help="Path to config.yaml"),
@@ -536,14 +543,21 @@ def campaign_linkedin_cmd(
         await run_migrations()
         from .linkedin.campaign import run_campaign
         effective_dry_run = dry_run or not settings.side_effects_enabled
-        sent = await run_campaign(
-            daily_email_limit=limit,
-            headed=headed,
-            dry_run=effective_dry_run,
-        )
+        try:
+            sent = await run_campaign(
+                daily_email_limit=limit,
+                headed=headed,
+                dry_run=effective_dry_run,
+            )
+        except Exception as exc:
+            # Short message only: a rich traceback would print Settings
+            # locals (passwords, keys, DB URL) to the console.
+            console.print(f"[red]campaign failed:[/red] {str(exc)[:200]}")
+            raise typer.Exit(EXIT_RUN_FAILED) from None
+        finally:
+            await close_pool()
         action_word = "previewed" if effective_dry_run else "sent"
         console.print(f"[green]✓ LinkedIn campaign completed: {sent} emails {action_word}[/green]")
-        await close_pool()
 
     _run(_main())
 
