@@ -154,10 +154,10 @@ TECH_DISQUALIFY_REGEX = re.compile(
 # Keyword lists for role classification. Matched with word boundaries so that
 # e.g. "ai" does not match inside "email", and "react" not inside "reaction".
 AI_KEYWORDS = [
-    "ai", "python", "genai", "llm", "fastapi", "rag", "langchain", "machine learning", "pytorch",
+    "ai", "python", "genai", "llm", "fastapi", "rag", "langchain", "langgraph", "machine learning", "pytorch", "agent", "agentic",
 ]
 FS_KEYWORDS = [
-    "react", "full stack", "fullstack", "node.js", "nodejs", "mern", "next.js", "typescript", "frontend",
+    "react", "full stack", "fullstack", "node.js", "nodejs", "mern", "next.js", "typescript", "frontend", "backend", "express",
 ]
 
 

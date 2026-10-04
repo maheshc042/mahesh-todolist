@@ -72,31 +72,33 @@ TARGET_ROLES = [
     "Software Development Engineer in Test",
     "QA Automation Engineer",
     "Test Automation Engineer",
+    "Forward Deployed Engineer",
+    "RAG Engineer",
+    "Python Backend Developer",
+    "Cloud Engineer",
+    "Quality Analyst",
     "QA Engineer",
     "Software Test Engineer",
 ]
 
 # High-Precision Boolean Queries per Track
 AI_TARGET_QUERY = (
-    '("AI Engineer" OR "Generative AI Engineer" OR "GenAI Engineer" OR "AI Developer" OR '
-    '"ML Engineer" OR "Machine Learning Engineer" OR "LLM Engineer" OR "Python Developer" OR '
-    '"Python AI Developer" OR "AI Software Engineer" OR "MLOps Engineer") AND '
-    '("Python" OR "LLM" OR "FastAPI" OR "Machine Learning" OR "AWS")'
+    '("AI Engineer" OR "GenAI Engineer" OR "AI Developer" OR '
+    '"LLM Engineer" OR "RAG Engineer" OR "Forward Deployed Engineer" OR '
+    '"Python Developer" OR "Backend Developer") AND '
+    '("Python" OR "AI" OR "LLM" OR "RAG" OR "FastAPI")'
 )
 
 FULLSTACK_TARGET_QUERY = (
-    '("Full Stack Developer" OR "Full Stack Engineer" OR "Software Engineer" OR "Software Developer" OR '
-    '"Frontend Developer" OR "React Developer" OR "Node.js Developer" OR "Backend Developer" OR '
-    '"SDET" OR "QA Automation Engineer" OR "DevOps Engineer" OR "Web Developer") AND '
-    '("Node" OR "React" OR "TypeScript" OR "Full Stack" OR "QA" OR "Testing")'
+    '("Full Stack Developer" OR "Software Engineer" OR "Node.js Developer" OR '
+    '"Backend Developer" OR "SDET" OR "Cloud Engineer" OR "Quality Analyst") AND '
+    '("React" OR "Node" OR "TypeScript" OR "MERN" OR "AWS" OR "QA")'
 )
 
 FULL_TARGET_QUERY = (
-    '("AI Engineer" OR "Generative AI Engineer" OR "GenAI Engineer" OR "AI Developer" OR "ML Engineer" OR '
-    '"Python Developer" OR "Backend Developer" OR "Software Engineer" OR "Software Developer" OR '
-    '"Full Stack Developer" OR "Full Stack Engineer" OR "React Developer" OR "Node.js Developer" OR '
-    '"SDET" OR "QA Automation Engineer" OR "Test Automation Engineer" OR "QA Engineer") AND '
-    '("Python" OR "React" OR "Node" OR "FastAPI" OR "AWS" OR "Docker")'
+    '("AI Engineer" OR "GenAI Engineer" OR "Python Developer" OR "Full Stack Developer" OR '
+    '"Software Engineer" OR "Node.js Developer" OR "Backend Developer" OR "SDET" OR "Cloud Engineer") AND '
+    '("Python" OR "React" OR "Node" OR "FastAPI" OR "AWS")'
 )
 MODAL_CONTAINER_SELECTORS = [
     "dialog:has(button[aria-label*='Dismiss' i])",

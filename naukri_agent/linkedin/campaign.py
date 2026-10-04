@@ -41,15 +41,13 @@ log = get_logger(__name__)
 SEARCH_KEYWORDS = [
     "AI Engineer",
     "GenAI Engineer",
-    "LLM Engineer",
+    "Backend Developer",
     "AI Developer",
-    "GenAI Developer",
+    "RAG Engineer",
+    "Forward Deployed Engineer",
     "Python Developer",
     "Full Stack Developer",
     "Node.js Developer",
-    "Backend Developer",
-    "Forward Deployed Engineer",
-    "Cloud Engineer"
 ]
 
 import urllib.parse
