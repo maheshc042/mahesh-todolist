@@ -1422,6 +1422,40 @@ class Repository:
             post_url[:1000],
         )
 
+    async def recent_contacts(self, days: int = 30) -> list[dict]:
+        """Contacted recruiters (for reply detection), newest first."""
+        rows = await self.pool.fetch(
+            """
+            SELECT email, role_pitched, contacted_at, replied, replied_at
+              FROM contacted_recruiters
+             WHERE contacted_at >= now() - ($1 * interval '1 day')
+             ORDER BY contacted_at DESC
+            """,
+            days,
+        )
+        return [dict(row) for row in rows]
+
+    async def mark_replied(self, email: str, subject: str = "",
+                           snippet: str = "", replied_at: Any | None = None) -> None:
+        """Record an inbound recruiter reply (idempotent per email)."""
+        clean_email = (email or "").strip().lower()
+        if not clean_email:
+            return
+        await self.pool.execute(
+            """
+            UPDATE contacted_recruiters
+               SET replied = TRUE,
+                   replied_at = COALESCE($2, now()),
+                   reply_subject = COALESCE(NULLIF($3, ''), reply_subject),
+                   reply_snippet = COALESCE(NULLIF($4, ''), reply_snippet)
+             WHERE email = $1
+            """,
+            clean_email,
+            replied_at,
+            (subject or "")[:200],
+            (snippet or "")[:500],
+        )
+
     async def close(self) -> None:
         """Closes the underlying asyncpg connection pool."""
         from .pool import close_pool

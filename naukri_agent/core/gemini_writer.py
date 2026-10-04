@@ -51,6 +51,7 @@ class ApplicantSnapshot:
     mobile: str = "+91 9481777227"
     github: str = ""
     linkedin: str = ""
+    skills_label: str = ""
 
 
 def _settings_model(explicit: str | None) -> str:
@@ -152,6 +153,31 @@ def applicant_snapshot() -> ApplicantSnapshot:
     else:
         mobile = "+91 9481777227"
 
+    # Verified skill inventory: top mapped skills by tenure. The prompt may
+    # ONLY name these — presenting a post requirement ("LLM evals", "Go")
+    # as personal history is fabrication and reads as mass-blast.
+    skills_label = ""
+    try:
+        skill_years: dict[str, float] = {}
+        for profile in config.profiles or []:
+            if not getattr(profile, "enabled", True):
+                continue
+            try:
+                merged = config.experience_for(profile)
+            except (AttributeError, ValueError):
+                continue
+            for skill, years in ((merged.skills or {}).items()):
+                try:
+                    if float(years) > 0 and str(skill).strip():
+                        key = str(skill).strip()
+                        skill_years[key] = max(skill_years.get(key, 0.0), float(years))
+                except (TypeError, ValueError):
+                    continue
+        ranked = sorted(skill_years.items(), key=lambda kv: (-kv[1], kv[0]))[:10]
+        skills_label = ", ".join(f"{name} ({years:g}y)" for name, years in ranked)
+    except (AttributeError, ValueError) as exc:
+        log.debug("gemini.skills_unavailable", error=str(exc)[:120])
+
     return ApplicantSnapshot(
         name=name,
         location=location,
@@ -162,6 +188,7 @@ def applicant_snapshot() -> ApplicantSnapshot:
         mobile=mobile,
         github=(config.applicant_github or "").strip(),
         linkedin=(config.applicant_linkedin or "").strip(),
+        skills_label=skills_label,
     )
 
 
@@ -226,8 +253,9 @@ class GeminiWriter:
                 f"4. Intro (2 sentences): Say you came across their LinkedIn post regarding "
                 f"the {role_name} opening, ask if they would be open to referring you "
                 f"to the hiring team, stating you have {who.experience_label} of experience "
-                f"building production systems and naming 2-3 of THEIR exact stack terms "
-                f"from the job requirements."
+                f"building production systems. Name ONLY overlap between their requirements "
+                f"and YOUR verified inventory above — never present a requirement "
+                f"(e.g. 'LLM evals', 'Go') as your own history."
             )
             cta_rule = (
                 "6. CTA (1 sentence): Ask whether they would be open to referring you "
@@ -241,13 +269,14 @@ class GeminiWriter:
             )
             intro_rule = (
                 f"4. Intro (2 sentences): Apply for the {role_name} role, stating you have "
-                f"{who.experience_label} of experience building production systems, naming 2-3 "
-                f"of THEIR exact stack terms from the job requirements, and summarizing the "
-                f"services you developed."
+                f"{who.experience_label} of experience building production systems. Name ONLY "
+                f"overlap between their requirements and YOUR verified inventory above — "
+                f"never present a requirement (e.g. 'LLM evals', 'Go') as your own history; "
+                f"summarize the services you actually developed."
             )
             cta_rule = (
-                "6. CTA (1 sentence): Mention resume is attached and request a short "
-                "introductory call this week."
+                "6. CTA (1 sentence): Mention resume is attached for review, and ask if "
+                "they'd be open to a quick 10-minute chat or questions if the background looks like a fit."
             )
         prompt = f"""
 {opener}
@@ -260,6 +289,7 @@ Applicant Background (exact facts, use them):
 - Notice Period: {who.notice_label}
 - Current Location: {who.location}
 - Mobile / WhatsApp: {who.mobile}
+- Verified Skill Inventory: {who.skills_label or 'general full-stack development'}
 - Links:{links_line if links_line else ' none'}
 
 Job Requirements to Target:
@@ -285,7 +315,10 @@ RULES FOR THE EMAIL:
    • Notice Period: {who.notice_label}
    • Current Location: {who.location}
    • Mobile: {who.mobile}
-   • Key Technical Skills: (name 4-6 matching tools from their description, dynamically customized to their requirements)
+   • Key Technical Skills: (copy 4-6 EXACT tool names from their requirements —
+     verbatim, e.g. "FastAPI, LangChain, Pinecone" — never generic buckets
+     like "Cloud Technologies", "Machine Learning", "Data Visualization",
+     "AI", or "software development" standing alone)
 {cta_rule}
 7. Sign off (no contact repeat — Mobile and Location already sit in the
    snapshot above; duplicating them in the footer reads sloppy):

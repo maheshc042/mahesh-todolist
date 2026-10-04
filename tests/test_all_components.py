@@ -753,13 +753,92 @@ class TestMailerTrackRouting(unittest.TestCase):
 
         build = ColdEmailer.build_subject
         self.assertEqual(
-            build("AI Engineer", "Mahesh Chitakoti", immediate=True),
+            build(role="AI Engineer", name="Mahesh Chitakoti", immediate=True),
             "AI Engineer application, Mahesh Chitakoti (immediate joiner)")
         self.assertEqual(
-            build("AI Engineer", "", immediate=False),
+            build(role="AI Engineer", name="", immediate=False),
             "AI Engineer application")
-        self.assertIn("Immediate Joiner", build("X", "Z", immediate=True, referral=True))
-        self.assertNotIn("Acme", build("AI Engineer", "Mahesh Chitakoti"))
+        self.assertIn("Immediate Joiner", build(role="X", name="Z", immediate=True, referral=True))
+        self.assertNotIn("Acme", build(role="AI Engineer", name="Mahesh Chitakoti"))
+
+    def test_prompt_has_verified_inventory(self):
+        import io
+        import json
+        from unittest.mock import patch
+
+        from naukri_agent.core.gemini_writer import GeminiWriter
+
+        captured = {}
+
+        class FakeResp:
+            status = 200
+
+            def read(self):
+                return json.dumps(
+                    {"candidates": [{"content": {"parts": [{"text": "x"}]}}]}
+                ).encode()
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *a):
+                return False
+
+        def fake_urlopen(req, timeout=None):
+            captured["payload"] = json.loads(req.data.decode())
+            return FakeResp()
+
+        writer = GeminiWriter(api_key="test-key", model="test-model")
+        with patch("urllib.request.urlopen", side_effect=fake_urlopen):
+            writer.generate_email_body("AI Engineer", "Build RAG pipelines", "Acme")
+        prompt = captured["payload"]["contents"][0]["parts"][0]["text"]
+        self.assertIn("Verified Skill Inventory", prompt)
+        self.assertIn("never present a requirement", prompt.lower())
+
+    def test_stub_body_falls_back(self):
+        """A truncated model reply (<200 chars) must never send."""
+        from unittest.mock import patch
+
+        from naukri_agent.core.mailer import ColdEmailer
+
+        mailer = ColdEmailer(sender_email="a@b.com", app_password="x")
+        with patch(
+            "naukri_agent.core.gemini_writer.GeminiWriter.generate_email_body",
+            return_value="Hello, see attached",
+        ):
+            body = mailer._generate_body("AI Engineer", "", "Co")
+            self.assertIn("Candidate Overview", body)
+
+    def test_inbox_reply_detection(self):
+        """Fake IMAP server: replies from contacted senders surface, own
+        mail and strangers do not."""
+        import email as email_pkg
+        from unittest.mock import MagicMock, patch
+
+        from naukri_agent.core.mailer import ColdEmailer
+
+        def _raw(frm, subject, body):
+            m = email_pkg.message.EmailMessage()
+            m["From"] = frm
+            m["Subject"] = subject
+            m["Date"] = "Thu, 02 Oct 2026 10:00:00 +0000"
+            m.set_content(body)
+            return ("OK", [(b"1", m.as_bytes())])
+
+        imap = MagicMock()
+        imap.select.return_value = ("OK", [])
+        imap.search.return_value = ("OK", [b"1"])
+        imap.fetch.side_effect = [
+            _raw("recruiter@acme.com", "Re: role", "Interested, let's talk"),
+            _raw("maheshrwd042@gmail.com", "Re: role", "my own copy"),
+            _raw("stranger@x.com", "Hi", "spam"),
+        ]
+        mailer = ColdEmailer(sender_email="maheshrwd042@gmail.com", app_password="x")
+        with patch("imaplib.IMAP4_SSL", return_value=imap):
+            replies, err = mailer.check_inbox_replies(
+                ["recruiter@acme.com", "maheshrwd042@gmail.com", "quiet@acme.com"], 14)
+        self.assertIsNone(err)
+        self.assertEqual([r["from"] for r in replies], ["recruiter@acme.com"])
 
     def test_no_duplicate_contact_footer(self):
         """Mobile/location live in the snapshot bullets only — the signoff
@@ -792,9 +871,9 @@ class TestMailerTrackRouting(unittest.TestCase):
             body = mailer._generate_body("AI Engineer", "", "Co", angle="referral")
             self.assertIn("referring me", body)
             self.assertIn("Python, FastAPI", body)
-            self.assertNotIn("intro call", body)
+            self.assertNotIn("10-minute chat", body)
             plain = mailer._generate_body("AI Engineer", "", "Co")
-            self.assertIn("intro call", plain)
+            self.assertIn("10-minute chat", plain)
             self.assertNotIn("referring me", plain)
 
 
@@ -844,6 +923,55 @@ class TestGeminiPrompt(unittest.TestCase):
         self.assertIn('Salutation: "Hi Acme Team,"', prompt)
         self.assertIn("under 150 words", prompt)
         self.assertNotIn("referral", prompt.split("RULES")[0])
+
+
+class TestVerifyPostSubmit(unittest.IsolatedAsyncioTestCase):
+    """Runs 488/490: post-click confirmation missed on a stale drawer DOM.
+    A fresh reload + marker re-check must recover applied/already states —
+    and never invent success from an empty page."""
+
+    def _engine(self, page):
+        from unittest.mock import MagicMock
+
+        from naukri_agent.core.run_policy import RunPolicy
+        from naukri_agent.naukri.apply import ApplyEngine
+
+        artifacts = MagicMock()
+        policy = RunPolicy(dry_run=False, side_effects_enabled=True)
+        engine = ApplyEngine(page, MagicMock(), artifacts, policy=policy)
+        return engine
+
+    def _job(self):
+        from naukri_agent.core.models import Job
+
+        return Job(job_id="reco-1", title="SDE", company="Acme",
+                   url="https://www.naukri.com/job-listings-1")
+
+    async def test_recovers_applied_marker(self):
+        from unittest.mock import AsyncMock, patch
+
+        from naukri_agent.naukri import apply as apply_mod
+
+        page = MagicMock()
+        page.goto = AsyncMock()
+        page.title = AsyncMock(return_value="Software Engineer")
+        page.url = "https://www.naukri.com/job-listings-1"
+        engine = self._engine(page)
+        with patch.object(apply_mod, "first_visible", new=AsyncMock(return_value=object())):
+            self.assertEqual(await engine._verify_post_submit(self._job()), "applied")
+
+    async def test_empty_page_stays_unknown(self):
+        from unittest.mock import AsyncMock, patch
+
+        from naukri_agent.naukri import apply as apply_mod
+
+        page = MagicMock()
+        page.goto = AsyncMock()
+        page.title = AsyncMock(return_value="Software Engineer")
+        page.url = "https://www.naukri.com/job-listings-1"
+        engine = self._engine(page)
+        with patch.object(apply_mod, "first_visible", new=AsyncMock(return_value=None)):
+            self.assertEqual(await engine._verify_post_submit(self._job()), "unknown")
 
 
 class TestExperienceGates(unittest.TestCase):

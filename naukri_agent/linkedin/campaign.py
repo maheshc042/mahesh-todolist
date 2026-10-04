@@ -2,6 +2,10 @@
 LinkedIn Cold Email Campaign Runner.
 
 Design Decisions:
+- QUALITY OVER VOLUME (house rule): every send must match the candidate's
+  profile (skill overlap + role + geography + poster). A send to a
+  non-matching post is worse than no send — it burns cap AND domain
+  reputation. When in doubt, the gates reject.
 - DB Deduplication: Checks `contacted_recruiters` in Postgres to prevent duplicate recruiter contact.
 - Human Rate Limits: Daily cap of 20 emails and 30-90s randomized pacing
   between sends to protect Gmail Sender Score. 20/day via Gmail SMTP stays
@@ -15,6 +19,7 @@ from __future__ import annotations
 import asyncio
 import os
 import random
+import socket
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -27,20 +32,23 @@ from ..core.run_policy import RunPolicy
 from ..db.repository import Repository
 from ..logging_setup import get_logger
 from ..notify.notifier import build_notifier
-from .scraper import CookieExpiredError, LinkedInHunter
+from .scraper import CookieExpiredError, LinkedInHunter, RateLimitedError
 
 log = get_logger(__name__)
 
+# 16 searches: broad ground across both personas (billions of posts exist;
+# coverage comes from keyword breadth, never from lowering the gates).
 SEARCH_KEYWORDS = [
     "AI Engineer",
     "GenAI Engineer",
     "LLM Engineer",
     "AI Developer",
+    "GenAI Developer",
     "Python Developer",
     "Full Stack Developer",
-    "MERN Developer",
+    "Node.js Developer",
     "Backend Developer",
-    "Software Engineer",
+    "Forward Deployed Engineer",
     "Cloud Engineer"
 ]
 
@@ -67,6 +75,22 @@ SEARCH_URLS = [
 # coverage while doubling automation exposure on the account. The campaign
 # hunts feed posts only: recruiter posts with emails, a source nothing else
 # in this repo touches.
+
+
+async def _internet_available(timeout_s: float = 3.0) -> bool:
+    """Best-effort connectivity probe (DNS + TCP). Keeps an outage from
+    masquerading as an auth failure (run 486)."""
+    loop = asyncio.get_running_loop()
+    try:
+        await asyncio.wait_for(
+            loop.run_in_executor(
+                None, lambda: socket.create_connection(("8.8.8.8", 53), timeout=timeout_s).close()
+            ),
+            timeout=timeout_s + 2.0,
+        )
+        return True
+    except Exception:
+        return False
 
 
 def _configured_resume_fallback(want_ai: bool, resume_dir: Path) -> Path:
@@ -142,6 +166,13 @@ async def run_campaign(
     hunter = LinkedInHunter(li_at_cookie=li_cookie, headless=headless)
     mailer = ColdEmailer(sender_email=gmail_user, app_password=gmail_pass, gemini_api_key=gemini_key)
     if not dry_run and not mailer.verify_credentials():
+        # verify_credentials is False on BOTH bad password and dead network
+        # (run 486: outage reported as "auth failed"). Distinguish: offline
+        # is routine and quiet; only a true auth rejection pages the user.
+        if not await _internet_available():
+            log.warning("linkedin.gmail_unreachable_offline",
+                        detail="No internet — skipping campaign quietly, will retry next run.")
+            return 0
         # Bad app password: every send would fail — exit before hunting, LOUDLY.
         # (Sept 18-19 went silent here: 0 emails, 0 hunts, 0 alerts.)
         log.error(
@@ -197,22 +228,62 @@ async def run_campaign(
     if dry_run:
         print(f"\n[🔍 DRY RUN MODE] Hunting recruiter posts (limit: {effective_limit} emails preview). No emails will be sent.\n")
 
-    try:
-        sources: list[tuple[str, str]] = [("posts", u) for u in SEARCH_URLS]
-        for source, url in sources:
-            if emails_sent_today >= effective_limit:
-                log.info("linkedin.daily_limit_reached", limit=daily_email_limit)
-                break
+    from .analyzer import lead_is_addressable, overlap_report, prioritize_leads
 
+    # Match-to-profile skill set: union of every enabled profile's mapped
+    # skills with real tenure. Posts naming none of these are rejected at
+    # hunt time — quality (1% useful beats 100 sends) over volume.
+    required_skills: set[str] = set()
+    for _prof in config.profiles or []:
+        if not getattr(_prof, "enabled", True):
+            continue
+        try:
+            _exp = config.experience_for(_prof)
+        except Exception:
+            continue
+        for _skill, _years in ((_exp.skills or {}).items()):
+            try:
+                if float(_years) > 0 and str(_skill).strip():
+                    required_skills.add(str(_skill).strip().lower())
+            except (TypeError, ValueError):
+                continue
+    log.info("linkedin.required_skills", count=len(required_skills))
+
+    collected: list[dict] = []
+    overlap: dict[str, list[str]] = {}
+    try:
+        sources: list[tuple[str, str, str]] = [
+            ("posts", kw, u) for kw, u in zip(SEARCH_KEYWORDS, SEARCH_URLS)
+        ]
+        for source, keyword, url in sources:
             log.info("linkedin.starting_search", source=source, url=url[:60])
             try:
-                posts = await hunter.hunt_for_jobs(url)
+                posts = await hunter.hunt_for_jobs(
+                    url, required_skills=required_skills,
+                    search_label=keyword, seen=overlap,
+                )
             except CookieExpiredError as exc:
-                # Log-only by operator policy: the campaign runs every run, so
-                # a Telegram ping here spams once per run while the cookie is
-                # dead. Refresh LINKEDIN_LI_AT or run login-linkedin headed.
+                # Dead LinkedIn session stops HUNTING — but already-collected
+                # leads still send below (Gmail needs no LinkedIn session).
+                # Log-only by operator policy (no Telegram spam per run).
                 log.error("linkedin.cookie_expired", error=str(exc))
-                return emails_sent_today
+                break
+            except RateLimitedError as exc:
+                # Throttled session/IP: further searches only deepen the flag.
+                # Stop hunting now; send what was already collected.
+                log.error("linkedin.rate_limited_stopping_hunt", error=str(exc)[:150])
+                try:
+                    await notifier.send(
+                        "⚠️ LinkedIn campaign rate-limited",
+                        "LinkedIn is throttling this session/IP (1200 class). "
+                        f"Hunting stopped early; sending the {len(collected)} "
+                        "already-collected leads, then standing down. "
+                        "Let the account rest before the next run.",
+                        is_error=True,
+                    )
+                except Exception:
+                    pass
+                break
             except Exception as exc:
                 # One dead search (driver crash, ban page, OOM) must never
                 # kill the remaining sources — log and move on.
@@ -222,9 +293,6 @@ async def run_campaign(
                 continue
 
             for post_data in posts:
-                if emails_sent_today >= effective_limit:
-                    break
-
                 text = post_data["text"]
                 emails = post_data["emails"]
                 post_url = post_data.get("post_url", "")
@@ -233,12 +301,7 @@ async def run_campaign(
                 company = (post_data.get("company") or "").strip()
                 first_name = (post_data.get("first_name") or "").strip()
 
-                resume_path = _get_resume_path(role, resume_dir)
-
                 for target_email in emails:
-                    if emails_sent_today >= effective_limit:
-                        break
-
                     clean_email = target_email.strip().lower()
                     # Role inboxes (info@, careers@, noreply@…) are never read
                     # by a human — skip before dedupe so they don't burn slots.
@@ -254,72 +317,105 @@ async def run_campaign(
                         continue
                     if clean_email in attempted_this_run:
                         continue
-                    if await repo.has_emailed(clean_email, within_days=60):
-                        log.info("linkedin.already_emailed", email=clean_email)
-                        attempted_this_run.add(clean_email)
-                        continue
                     attempted_this_run.add(clean_email)
-
-                    if dry_run:
-                        body_preview = mailer._generate_body(
-                            role_name=role, job_description=text,
-                            company_name=company, recipient_name=first_name,
-                            angle="application",
-                        )
-                        print("=" * 70)
-                        print(f"📧 [DRY RUN MATCH #{emails_sent_today + 1}]")
-                        print(f"  To:         {clean_email}")
-                        print(f"  Role:       {role}")
-                        print(f"  Company:    {company or 'unknown'}")
-                        print(f"  Name:       {first_name or 'unknown'}")
-                        print(f"  Resume:     {resume_path.name}")
-                        print(f"  Post URL:   {post_url or 'N/A'}")
-                        print("  Pitch Snippet:")
-                        for line in body_preview.strip().splitlines()[:5]:
-                            print(f"    {line}")
-                        print("=" * 70)
-                        emails_sent_today += 1
-                        sent_records.append(
-                            {
-                                "email": clean_email,
-                                "role": role,
-                                "post_url": post_url,
-                            }
-                        )
-                        log.info("linkedin.dry_run_match", to=clean_email, role=role, total=emails_sent_today)
-                        await asyncio.sleep(0.1)
-                    else:
-                        policy.require_mutation("linkedin.outreach.send_email")
-                        success = await mailer.send_application_async(
-                            target_email=clean_email,
-                            role_name=role,
-                            resume_path=resume_path,
-                            job_description=text,
-                            company_name=company,
-                            recipient_name=first_name,
-                            angle="application",
-                        )
-                        if success:
-                            await repo.record_contacted_recruiter(clean_email, role, text, post_url)
-                            emails_sent_today += 1
-                            sent_records.append(
-                                {
-                                    "email": clean_email,
-                                    "role": role,
-                                    "post_url": post_url,
-                                }
-                            )
-                            log.info("linkedin.email_sent", to=clean_email, role=role, sent_today=emails_sent_today)
-                            # Human sending rhythm: randomized 30-90s between
-                            # sends so Gmail never sees burst automation.
-                            # (20/day cap keeps total volume safe regardless.)
-                            pace = random.uniform(30.0, 90.0)
-                            log.debug("linkedin.send_pacing", seconds=round(pace, 1))
-                            await asyncio.sleep(pace)
+                    collected.append({
+                        "email": clean_email,
+                        "role": role,
+                        "text": text,
+                        "post_url": post_url,
+                        "company": company,
+                        "first_name": first_name,
+                        "post_age_hours": post_data.get("post_age_hours"),
+                    })
 
             log.info("linkedin.pause_between_searches", seconds=10)
             if not dry_run:
                 await asyncio.sleep(10.0)
+
+        # Overlap telemetry: which keywords earn their LinkedIn attention
+        # with unique posts vs re-reading other keywords' hits. Drives
+        # pruning with data (see plan notes): >50% duplicated keywords go.
+        log.info("linkedin.overlap_report", **overlap_report(overlap))
+
+        # Phase 2 — send, company-domain first: under a daily cap the
+        # scarcest resource is sends, and employer inboxes convert better
+        # than free mailboxes. Stable within tiers (discovery order kept).
+        # Anonymous free-mailbox leads (no name, no company) never send:
+        # a bare "Hi," to a stranger reads as mass-blast.
+        for lead in prioritize_leads(collected):
+            if emails_sent_today >= effective_limit:
+                log.info("linkedin.daily_limit_reached", limit=daily_email_limit)
+                break
+            if not lead_is_addressable(lead):
+                log.info("linkedin.skipped_anonymous", email=lead.get("email"))
+                continue
+            clean_email = lead["email"]
+            role = lead["role"]
+            text = lead["text"]
+            post_url = lead["post_url"]
+            company = lead["company"]
+            first_name = lead["first_name"]
+            resume_path = _get_resume_path(role, resume_dir)
+            if await repo.has_emailed(clean_email, within_days=60):
+                log.info("linkedin.already_emailed", email=clean_email)
+                continue
+
+            if dry_run:
+                body_preview = mailer._generate_body(
+                    role_name=role, job_description=text,
+                    company_name=company, recipient_name=first_name,
+                    angle="application",
+                )
+                print("=" * 70)
+                print(f"📧 [DRY RUN MATCH #{emails_sent_today + 1}]")
+                print(f"  To:         {clean_email}")
+                print(f"  Role:       {role}")
+                print(f"  Company:    {company or 'unknown'}")
+                print(f"  Name:       {first_name or 'unknown'}")
+                print(f"  Resume:     {resume_path.name}")
+                print(f"  Post URL:   {post_url or 'N/A'}")
+                print("  Pitch Snippet:")
+                for line in body_preview.strip().splitlines()[:5]:
+                    print(f"    {line}")
+                print("=" * 70)
+                emails_sent_today += 1
+                sent_records.append(
+                    {
+                        "email": clean_email,
+                        "role": role,
+                        "post_url": post_url,
+                    }
+                )
+                log.info("linkedin.dry_run_match", to=clean_email, role=role, total=emails_sent_today)
+                await asyncio.sleep(0.1)
+            else:
+                policy.require_mutation("linkedin.outreach.send_email")
+                success = await mailer.send_application_async(
+                    target_email=clean_email,
+                    role_name=role,
+                    resume_path=resume_path,
+                    job_description=text,
+                    company_name=company,
+                    recipient_name=first_name,
+                    angle="application",
+                )
+                if success:
+                    await repo.record_contacted_recruiter(clean_email, role, text, post_url)
+                    emails_sent_today += 1
+                    sent_records.append(
+                        {
+                            "email": clean_email,
+                            "role": role,
+                            "post_url": post_url,
+                        }
+                    )
+                    log.info("linkedin.email_sent", to=clean_email, role=role, sent_today=emails_sent_today)
+                    # Human sending rhythm: randomized 30-90s between
+                    # sends so Gmail never sees burst automation.
+                    # (20/day cap keeps total volume safe regardless.)
+                    pace = random.uniform(30.0, 90.0)
+                    log.debug("linkedin.send_pacing", seconds=round(pace, 1))
+                    await asyncio.sleep(pace)
 
     except Exception as exc:
         # Crash outside any single search (SMTP blowup, DB outage): alert

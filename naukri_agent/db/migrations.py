@@ -451,6 +451,21 @@ MIGRATIONS: list[tuple[str, str]] = [
             ON external_dispatch_queue(job_id);
         """,
     ),
+    (
+        "0018_recruiter_reply_tracking",
+        """
+        -- Reply detection for cold outreach (interview convertibility loop).
+        -- The IMAP checker marks rows when a contacted recruiter writes back;
+        -- unmarked rows with fresh inbound mail are "new replies" to alert on.
+        ALTER TABLE contacted_recruiters
+            ADD COLUMN IF NOT EXISTS replied BOOLEAN NOT NULL DEFAULT FALSE,
+            ADD COLUMN IF NOT EXISTS replied_at TIMESTAMPTZ,
+            ADD COLUMN IF NOT EXISTS reply_subject TEXT,
+            ADD COLUMN IF NOT EXISTS reply_snippet TEXT;
+        CREATE INDEX IF NOT EXISTS idx_contacted_replied
+            ON contacted_recruiters(replied, contacted_at DESC);
+        """,
+    ),
 ]
 
 

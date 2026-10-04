@@ -38,6 +38,38 @@ class TestAbroadOnsite(unittest.TestCase):
         self.assertFalse(is_abroad_onsite(
             "Onsite in Hyderabad, 2-3 years. Email hr@x.com"))
 
+    def test_us_staffing_markers_rejected(self):
+        from naukri_agent.linkedin.analyzer import ABROAD_ONSITE_REJECT_REGEX as R
+        for txt in (
+            "USA-BASED CANDIDATES ONLY, W2/C2C contract",
+            "H1 candidates only, EAD accepted",
+            "OPT & Stem Extension students welcome",
+            "Location: Sunrise, FL Day 1 onsite",
+            "Position Arlington Virginia onsite 3 days",
+            "Onsite in Lisle, IL long term",
+        ):
+            self.assertTrue(bool(R.search(txt)), txt)
+
+    def test_hiring_poster_gate(self):
+        from naukri_agent.linkedin.analyzer import is_likely_hiring_poster
+        self.assertTrue(is_likely_hiring_poster("Technical Recruiter @ Aumnitech"))
+        self.assertTrue(is_likely_hiring_poster("Human Resources Executive"))
+        self.assertTrue(is_likely_hiring_poster("Founder @ Zyraune"))
+        self.assertTrue(is_likely_hiring_poster(""))
+        self.assertFalse(is_likely_hiring_poster("Python Developer | FastAPI | Open to Opportunities"))
+        self.assertFalse(is_likely_hiring_poster("SDE @ Coder Army | AI Creator"))
+
+    def test_iit_only_rejected(self):
+        from naukri_agent.linkedin.analyzer import IIT_ONLY_REJECT_REGEX as R
+        self.assertTrue(bool(R.search("Graduates from IITs/NITs only")))
+        self.assertFalse(bool(R.search("Hiring Python devs in Bengaluru")))
+
+    def test_zero_tech_rejected(self):
+        from naukri_agent.linkedin.analyzer import ZERO_TECH_REJECT_REGEX as R
+        self.assertTrue(bool(R.search("Golang Developer, AWS, prior Capital One exp")))
+        self.assertTrue(bool(R.search("Spring Boot microservices role")))
+        self.assertFalse(bool(R.search("Python FastAPI backend role")))
+
 
 class TestExistingPins(unittest.TestCase):
     def test_senior_rejected(self):
@@ -54,6 +86,56 @@ class TestExistingPins(unittest.TestCase):
     def test_email_extraction_ignores_junk(self):
         mails = extract_recruiter_emails("Contact hr@x.com or see pic.png, also a@b.jpg")
         self.assertEqual(mails, ["hr@x.com"])
+
+
+class TestProfileSkillOverlap(unittest.TestCase):
+    def test_match(self):
+        from naukri_agent.linkedin.analyzer import has_profile_skill_overlap
+        skills = {"python", "react", "full stack"}
+        self.assertTrue(has_profile_skill_overlap("Hiring Python devs, email x", skills))
+        self.assertTrue(has_profile_skill_overlap("Full Stack Developer remote", skills))
+
+    def test_no_match_rejected(self):
+        from naukri_agent.linkedin.analyzer import has_profile_skill_overlap
+        skills = {"python", "react"}
+        self.assertFalse(has_profile_skill_overlap("We're hiring developers! Email us", skills))
+        self.assertFalse(has_profile_skill_overlap("", skills))
+
+    def test_empty_skills_fail_open(self):
+        from naukri_agent.linkedin.analyzer import has_profile_skill_overlap
+        self.assertTrue(has_profile_skill_overlap("anything", set()))
+        self.assertTrue(has_profile_skill_overlap("anything", None))
+
+    def test_word_boundaries(self):
+        from naukri_agent.linkedin.analyzer import has_profile_skill_overlap
+        self.assertFalse(has_profile_skill_overlap("Looking for a reaction video editor", {"react"}))
+        self.assertTrue(has_profile_skill_overlap("React developer needed", {"react"}))
+
+
+class TestRateLimitAndPriority(unittest.TestCase):
+    def test_rate_wall_detected(self):
+        from naukri_agent.linkedin.analyzer import is_rate_limit_page
+        self.assertTrue(is_rate_limit_page(
+            "Error 1200", "https://www.linkedin.com/search/results/content/?keywords=x",
+            "This website has been temporarily rate limited"))
+        self.assertTrue(is_rate_limit_page("Search | LinkedIn", "https://x", "Too many requests"))
+
+    def test_normal_page_passes(self):
+        from naukri_agent.linkedin.analyzer import is_rate_limit_page
+        self.assertFalse(is_rate_limit_page("Search | LinkedIn", "https://www.linkedin.com/feed/", ""))
+        # Challenge pages are NOT rate walls (cheap to skip, must not stop the run).
+        self.assertFalse(is_rate_limit_page("Just a moment...", "https://x", ""))
+
+    def test_company_domains_first_stable(self):
+        from naukri_agent.linkedin.analyzer import prioritize_leads
+        leads = [
+            {"email": "a@gmail.com"},
+            {"email": "hr@acme.com"},
+            {"email": "b@yahoo.in"},
+            {"email": "jobs@startup.io"},
+        ]
+        ordered = [lead["email"] for lead in prioritize_leads(leads)]
+        self.assertEqual(ordered, ["hr@acme.com", "jobs@startup.io", "a@gmail.com", "b@yahoo.in"])
 
 
 class TestScrollUntilStall(unittest.IsolatedAsyncioTestCase):
@@ -143,6 +225,97 @@ class TestGotoSearch(unittest.IsolatedAsyncioTestCase):
                 raise TimeoutError("nope")
 
         self.assertFalse(await LinkedInHunter._goto_search(DeadPage(), "https://x"))
+
+
+class TestFreshnessPriority(unittest.TestCase):
+    def test_age_parsing(self):
+        from naukri_agent.linkedin.analyzer import parse_post_age_hours
+        self.assertEqual(parse_post_age_hours("4m • Follow"), 4 / 60)
+        self.assertEqual(parse_post_age_hours("13h • Edited • Follow"), 13.0)
+        self.assertEqual(parse_post_age_hours("2d • Follow"), 48.0)
+        self.assertEqual(parse_post_age_hours("just now"), 0.0)
+        self.assertIsNone(parse_post_age_hours("Follow"))
+
+    def test_fresh_first_within_tier(self):
+        from naukri_agent.linkedin.analyzer import prioritize_leads
+        leads = [
+            {"email": "old@acme.com", "post_age_hours": 20.0},
+            {"email": "new@gmail.com", "post_age_hours": 1.0},
+            {"email": "fresh@acme.com", "post_age_hours": 2.0},
+        ]
+        ordered = [lead["email"] for lead in prioritize_leads(leads)]
+        self.assertEqual(ordered, ["fresh@acme.com", "old@acme.com", "new@gmail.com"])
+
+    def test_unknown_age_sinks(self):
+        from naukri_agent.linkedin.analyzer import prioritize_leads
+        leads = [
+            {"email": "x@acme.com"},
+            {"email": "y@acme.com", "post_age_hours": 3.0},
+        ]
+        ordered = [lead["email"] for lead in prioritize_leads(leads)]
+        self.assertEqual(ordered, ["y@acme.com", "x@acme.com"])
+
+
+class TestOverlapMeasurement(unittest.TestCase):
+    def test_hash_stable_and_insensitive(self):
+        from naukri_agent.linkedin.analyzer import post_hash
+        self.assertEqual(post_hash("Hiring  Python  Devs"), post_hash("hiring python devs"))
+        self.assertNotEqual(post_hash("Hiring Python devs"), post_hash("Hiring Java devs"))
+
+    def test_report_math(self):
+        from naukri_agent.linkedin.analyzer import overlap_report
+        seen = {
+            "a": ["AI Engineer"],
+            "b": ["AI Engineer", "GenAI Engineer"],
+            "c": ["GenAI Engineer"],
+        }
+        rep = overlap_report(seen)
+        self.assertEqual(rep["unique_posts"], 3)
+        self.assertEqual(rep["total_reads"], 4)
+        self.assertEqual(rep["duplicate_reads"], 1)
+        self.assertEqual(rep["multi_keyword_posts"], 1)
+        self.assertEqual(rep["novel_per_keyword"], {"AI Engineer": 1, "GenAI Engineer": 1})
+
+    def test_empty(self):
+        from naukri_agent.linkedin.analyzer import overlap_report
+        rep = overlap_report({})
+        self.assertEqual(rep["unique_posts"], 0)
+        self.assertEqual(rep["duplicate_reads"], 0)
+
+
+class TestAddressable(unittest.TestCase):
+    def test_company_domain_always_ok(self):
+        from naukri_agent.linkedin.analyzer import lead_is_addressable
+        self.assertTrue(lead_is_addressable({"email": "hr@acme.com"}))
+
+    def test_free_mail_needs_name_or_company(self):
+        from naukri_agent.linkedin.analyzer import lead_is_addressable
+        self.assertTrue(lead_is_addressable(
+            {"email": "x@gmail.com", "first_name": "Ritu", "company": ""}))
+        self.assertTrue(lead_is_addressable(
+            {"email": "x@gmail.com", "first_name": "", "company": "Acme"}))
+        self.assertFalse(lead_is_addressable(
+            {"email": "hrritusingh32@gmail.com", "first_name": "", "company": ""}))
+
+
+class TestPosterFallback(unittest.TestCase):
+    def test_name_and_headline_from_snippet(self):
+        from naukri_agent.linkedin.analyzer import extract_poster
+        text = ("Feed post\n\nNaman Chandra\n\n \n • 3rd+\n\n"
+                "Data Analyst and Helping team to hire OPT students")
+        author, headline = extract_poster(text)
+        self.assertEqual(author, "Naman Chandra")
+        self.assertIn("Data Analyst", headline)
+
+    def test_no_shape_no_guess(self):
+        from naukri_agent.linkedin.analyzer import extract_poster
+        self.assertEqual(extract_poster("Just some random post text here"), ("", ""))
+        self.assertEqual(extract_poster(""), ("", ""))
+
+    def test_skips_feed_post_label(self):
+        from naukri_agent.linkedin.analyzer import extract_poster
+        author, _ = extract_poster("Feed post\n\n • 1st\n\nHiring now")
+        self.assertEqual(author, "")
 
 
 class TestCampaignSources(unittest.TestCase):

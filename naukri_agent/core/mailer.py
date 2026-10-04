@@ -12,10 +12,14 @@ Design Decisions:
 from __future__ import annotations
 
 import asyncio
+import imaplib
 import re
 import smtplib
 import ssl
+import email as email_pkg
+from datetime import UTC, datetime, timedelta
 from email.message import EmailMessage
+from email.utils import getaddresses, parsedate_to_datetime
 from pathlib import Path
 
 from ..config import AgentConfig
@@ -82,8 +86,15 @@ class ColdEmailer:
             angle=angle,
             recipient_name=recipient_name,
         )
-        if gemini_body:
+        # Stub guard (Oct 2026: an 18-char and a 49-char "email" went out):
+        # anything under a real email's floor is a truncated model reply —
+        # fall back to the deterministic template, never send the stub.
+        if gemini_body and len(gemini_body.strip()) >= 200:
+            log.info("mailer.body_source", source="gemini", chars=len(gemini_body.strip()))
             return gemini_body
+        if gemini_body:
+            log.warning("mailer.stub_discarded", chars=len(gemini_body.strip()))
+        log.info("mailer.body_source", source="template")
 
         role_low = role_name.lower()
         # Word boundaries: bare `"ai" in role` misfires on Retail/Training.
@@ -129,7 +140,7 @@ class ColdEmailer:
                 f"I am applying for the {role_name} role. My stack is {stack}, "
                 f"with {who.experience_label} building production systems around them. {proof}"
             )
-            closer = "My resume is attached for your review. I would welcome a short intro call this week to discuss how I can contribute."
+            closer = "My resume is attached for your review — if my background looks like a fit, I'd be glad to hop on a quick 10-minute chat or share any details."
 
         return f"""{salutation}
 
@@ -313,6 +324,100 @@ Best regards,
         except Exception as exc:
             log.exception("mailer.unexpected_error", to=target_email, error=str(exc))
             return False
+
+    def check_inbox_replies(
+        self,
+        known_emails: list[str],
+        since_days: int = 14,
+        max_per_sender: int = 5,
+        timeout_s: float = 30.0,
+    ) -> tuple[list[dict[str, str]], str | None]:
+        """Find inbound replies from contacted recruiters (stdlib IMAP).
+
+        Returns (replies, error): replies are newest-first dicts with
+        from/subject/date/snippet keys. error is None on success, else a
+        short reason (auth failure, unreachable, ...). Read-only: nothing
+        is flagged \\Seen (BODY.PEEK), nothing moved or deleted.
+        """
+        targets = {str(e or "").strip().lower() for e in (known_emails or []) if str(e or "").strip()}
+        if not targets:
+            return [], None
+        if not self.sender_email or not self.app_password:
+            return [], "gmail credentials not configured"
+        me = self.sender_email.strip().lower()
+        since = (datetime.now(UTC) - timedelta(days=max(1, since_days))).strftime("%d-%b-%Y")
+        replies: list[dict[str, str]] = []
+        try:
+            imap = imaplib.IMAP4_SSL("imap.gmail.com", 993, timeout=timeout_s)
+        except (OSError, TimeoutError) as exc:
+            return [], f"imap unreachable: {exc}"[:150]
+        try:
+            try:
+                imap.login(self.sender_email, self.app_password)
+            except imaplib.IMAP4.error:
+                return [], "imap auth rejected (check GMAIL_APP_PASSWORD)"
+            typ, _ = imap.select("INBOX", readonly=True)
+            if typ != "OK":
+                return [], "could not open INBOX"
+            for target in sorted(targets):
+                try:
+                    typ, ids = imap.search(None, "FROM", f'"{target}"', "SENTSINCE", since)
+                except Exception:
+                    continue
+                if typ != "OK" or not ids or not ids[0]:
+                    continue
+                for raw_id in ids[0].split()[-max_per_sender:]:
+                    try:
+                        typ, data = imap.fetch(raw_id, "(BODY.PEEK[])")
+                    except Exception:
+                        continue
+                    if typ != "OK" or not data:
+                        continue
+                    raw = b"".join(part[1] for part in data if isinstance(part, tuple) and len(part) > 1)
+                    if not raw:
+                        continue
+                    try:
+                        msg = email_pkg.message_from_bytes(raw)
+                    except Exception:
+                        continue
+                    from_addrs = [a.strip().lower() for _, a in getaddresses(msg.get_all("From", [])) if a]
+                    if not from_addrs or from_addrs[0] == me:
+                        continue
+                    if from_addrs[0] not in targets:
+                        continue
+                    try:
+                        dt = parsedate_to_datetime(str(msg.get("Date", "")))
+                        date_s = dt.astimezone(UTC).isoformat(timespec="seconds")
+                    except Exception:
+                        date_s = ""
+                    try:
+                        payload = msg.get_payload(decode=True) or b""
+                        if isinstance(msg.get_payload(), list):
+                            payload = b""
+                            for part in msg.walk():
+                                if part.get_content_type() == "text/plain" and not part.get_filename():
+                                    try:
+                                        payload = part.get_payload(decode=True) or b""
+                                    except Exception:
+                                        payload = b""
+                                    break
+                        snippet = payload.decode("utf-8", "ignore")
+                        snippet = " ".join(snippet.split())[:300]
+                    except Exception:
+                        snippet = ""
+                    replies.append({
+                        "from": from_addrs[0],
+                        "subject": str(msg.get("Subject", "") or "")[:200],
+                        "date": date_s,
+                        "snippet": snippet,
+                    })
+            replies.sort(key=lambda r: r.get("date", ""), reverse=True)
+            return replies, None
+        finally:
+            try:
+                imap.logout()
+            except Exception:
+                pass
 
     async def send_application_async(
         self,

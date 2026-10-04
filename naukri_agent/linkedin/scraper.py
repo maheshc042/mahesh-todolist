@@ -17,14 +17,27 @@ from playwright.async_api import BrowserContext, Page, async_playwright
 
 from ..logging_setup import get_logger
 from .analyzer import (
+    IIT_ONLY_REJECT_REGEX,
+    ZERO_TECH_REJECT_REGEX,
     classify_role,
     extract_company,
     extract_first_name,
+    extract_poster,
     extract_recruiter_emails,
+    has_profile_skill_overlap,
     is_abroad_onsite,
     is_experience_match,
+    is_likely_hiring_poster,
+    is_rate_limit_page,
     is_spam_or_unpaid,
+    parse_post_age_hours,
+    post_hash,
 )
+
+
+class RateLimitedError(Exception):
+    """LinkedIn is throttling the session/IP (Cloudflare 1200 class).
+    Continuing to scrape burns the account for zero reads — stop the run."""
 
 log = get_logger(__name__)
 
@@ -293,12 +306,31 @@ class LinkedInHunter:
             log.warning("linkedin.goto_failed", error=str(second)[:150], url=search_url[:70])
             return False
 
-    async def hunt_for_jobs(self, search_url: str) -> list[dict[str, Any]]:
+    async def hunt_for_jobs(
+        self, search_url: str, required_skills: set[str] | frozenset[str] | None = None,
+        search_label: str = "", seen: dict[str, list[str]] | None = None,
+    ) -> list[dict[str, Any]]:
         """
         Navigates to the search URL, waits for posts, extracts text, classifies roles, and extracts emails.
+        required_skills: profile-map skills (years > 0). Posts naming none
+        of them are rejected — quality (match-to-profile) beats volume.
+        search_label + seen: cross-search overlap measurement. Every read
+        post's hash is recorded under its keyword so the campaign can report
+        duplication rates and prune redundant keywords with data.
         """
         results: list[dict[str, Any]] = []
+        rejected: dict[str, int] = {}
+        # Posts that reached the author gate (i.e. had emails + passed all
+        # text gates) vs ones where name/headline extraction worked. A 0%
+        # hit rate means LinkedIn changed its DOM and the selectors below
+        # are stale — the seeker_poster gate silently stops working then.
+        author_hits = 0
+        author_gated = 0
         log.info("linkedin.hunt_started", url=search_url[:70])
+
+        def _drop(reason: str, preview: str = "") -> None:
+            rejected[reason] = rejected.get(reason, 0) + 1
+            log.debug(f"linkedin.lead.rejected_{reason}", preview=preview[:70].replace("\n", " "))
 
         async with async_playwright() as p:
             context = await self._setup_stealth_context(p)
@@ -310,6 +342,17 @@ class LinkedInHunter:
                 # Go directly to search URL
                 if not await self._goto_search(page, search_url):
                     return results
+
+                # Rate wall check BEFORE anything else: a throttled session
+                # renders the interstitial on every navigation, and each
+                # further search only deepens the flag on the account.
+                try:
+                    _title = (await page.title()) or ""
+                except Exception:
+                    _title = ""
+                if is_rate_limit_page(_title, page.url):
+                    log.error("linkedin.rate_limited", url=search_url[:70])
+                    raise RateLimitedError("LinkedIn rate wall (1200 class) — stopping campaign")
 
                 # Check if redirected to login
                 page_title = await page.title()
@@ -339,6 +382,16 @@ class LinkedInHunter:
                     )
                     await asyncio.sleep(2)
                 except Exception:
+                    # Empty page after a full wait is how a soft wall often
+                    # presents (no markers, just nothing). Re-probe before
+                    # calling it an empty search.
+                    try:
+                        _t = (await page.title()) or ""
+                    except Exception:
+                        _t = ""
+                    if is_rate_limit_page(_t, page.url):
+                        log.error("linkedin.rate_limited", url=search_url[:70])
+                        raise RateLimitedError("LinkedIn rate wall (1200 class) — stopping campaign")
                     log.warning("linkedin.no_posts", detail="No posts appeared within 15 seconds. Page might be empty.")
 
                 await self._human_scroll(page)
@@ -363,32 +416,65 @@ class LinkedInHunter:
                     if not text or text in seen_texts:
                         continue
                     seen_texts.add(text)
+                    if seen is not None:
+                        labels = seen.setdefault(post_hash(text), [])
+                        label = search_label or "?"
+                        if not labels or labels[-1] != label:
+                            labels.append(label)
 
                     emails = extract_recruiter_emails(text)
                     if not emails:
+                        _drop("no_email", text)
                         continue
 
                     if is_spam_or_unpaid(text):
-                        log.debug("linkedin.lead.rejected_spam_or_unpaid", preview=text[:70].replace("\n", " "))
+                        _drop("spam_or_unpaid", text)
                         continue
 
                     if is_abroad_onsite(text):
-                        log.debug("linkedin.lead.rejected_abroad_onsite", preview=text[:70].replace("\n", " "))
+                        _drop("abroad_onsite", text)
+                        continue
+
+                    author_gated += 1
+                    author, headline = await self._extract_author(container)
+                    if not author and not headline:
+                        # DOM missed (stale selectors, truncated render):
+                        # the snippet itself carries "Name • degree • headline".
+                        sn_author, sn_headline = extract_poster(text)
+                        if sn_author:
+                            author, headline = sn_author, sn_headline or headline
+                    if author or headline:
+                        author_hits += 1
+                    if not is_likely_hiring_poster(headline):
+                        rejected["seeker_poster"] = rejected.get("seeker_poster", 0) + 1
+                        log.debug("linkedin.lead.rejected_seeker_poster", headline=headline[:60])
+                        continue
+
+                    if IIT_ONLY_REJECT_REGEX.search(text):
+                        _drop("iit_only", text)
+                        continue
+
+                    if ZERO_TECH_REJECT_REGEX.search(text):
+                        _drop("zero_tech", text)
                         continue
 
                     if not is_experience_match(text):
-                        log.debug("linkedin.lead.rejected_experience", preview=text[:70].replace("\n", " "))
+                        _drop("experience", text)
                         continue
 
                     role = classify_role(text)
                     if not role:
-                        log.debug("linkedin.lead.rejected_role_or_tech", preview=text[:70].replace("\n", " "))
+                        _drop("role_or_tech", text)
+                        continue
+
+                    if not has_profile_skill_overlap(text, required_skills):
+                        _drop("no_skill_overlap", text)
                         continue
 
                     post_url = ""
                     try:
                         link_loc = container.locator(
-                            "a[href*='urn:li:activity'], a[href*='activity-']"
+                            "a[href*='urn:li:activity'], a[href*='activity-'], a[href*='/posts/']"
                         ).first
                         if await link_loc.count():
                             href = await link_loc.get_attribute("href") or ""
@@ -397,16 +483,16 @@ class LinkedInHunter:
                     except Exception:
                         post_url = ""
 
-                    author, headline = await self._extract_author(container)
                     results.append({
                         "text": text, "role": role, "emails": emails,
                         "post_url": post_url, "author": author,
                         "headline": headline,
                         "company": extract_company(text, headline),
                         "first_name": extract_first_name(author),
+                        "post_age_hours": parse_post_age_hours(text),
                     })
 
-                log.info("linkedin.hunt_completed", total_posts_read=len(containers), qualified_leads=len(results))
+                log.info("linkedin.hunt_completed", total_posts_read=len(containers), qualified_leads=len(results), rejected=rejected, author_hits=author_hits, author_gated=author_gated)
 
             except CookieExpiredError:
                 raise

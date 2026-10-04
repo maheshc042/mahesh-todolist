@@ -291,7 +291,7 @@ class ApplyEngine:
             "div:has-text('Successfully applied')",
             "div.acp-header-container:has-text('Applied to')",
         ]
-        for _ in range(75):  # ~11.25s resilient SLA poll for enterprise network latency
+        for _ in range(100):  # ~15s resilient SLA poll for enterprise network latency
             if self._popup_opened:
                 return "popup"
             try:
@@ -525,5 +525,57 @@ class ApplyEngine:
                 attempts=attempts,
             )
 
+        # Verify pass (runs 488/490: 6 straight "no confirmation" fails on the
+        # secondary account): the submit click already fired, so a stuck drawer
+        # DOM proves nothing. One fresh reload + marker re-check separates a
+        # genuinely lost submit from a confirmation the stale page never
+        # rendered. A reload is a plain GET — it can never double-submit.
+        verdict = await self._verify_post_submit(job)
+        if verdict == "applied":
+            return ApplyOutcome(
+                status=ApplicationStatus.APPLIED,
+                detail="Naukri submission confirmation observed on verify pass",
+                attempts=attempts,
+                confirmation_type="verify_pass",
+                confirmation_evidence="Success marker observed after job page reload",
+            )
+        if verdict == "already_applied":
+            return ApplyOutcome(
+                status=ApplicationStatus.ALREADY_APPLIED,
+                reason=SkipReason.ALREADY_APPLIED,
+                detail="Already applied marker observed on verify pass",
+                attempts=attempts,
+            )
+
         shot = await self.artifacts.capture_failure(self.page, "no-confirmation", profile, job.job_id)
         return ApplyOutcome(status=ApplicationStatus.FAILED, detail="No success confirmation within SLA", screenshot_path=shot, attempts=attempts)
+
+    async def _verify_post_submit(self, job: Job) -> str:
+        """Reload the job page and re-check confirmation markers.
+
+        Returns 'applied' | 'already_applied' | 'unknown'. Pure observation —
+        markers must be present; absence is never treated as success.
+        """
+        try:
+            await self.page.goto(job.url, wait_until="domcontentloaded", timeout=self.nav_timeout_ms)
+        except Exception as exc:
+            log.debug("apply.verify_goto_failed", job_id=job.job_id, error=str(exc)[:120])
+            return "unknown"
+        await human_pause(1000, 2000)
+        try:
+            title = await self.page.title()
+            if "Apply Confirmation" in (title or "") or "/apply/confirmation" in (self.page.url or ""):
+                return "applied"
+        except Exception:
+            pass
+        try:
+            if await first_visible(self.page, S.APPLY_SUCCESS, timeout_ms=4_000) is not None:
+                return "applied"
+        except Exception:
+            pass
+        try:
+            if await first_visible(self.page, S.JD_ALREADY_APPLIED, timeout_ms=2_000) is not None:
+                return "already_applied"
+        except Exception:
+            pass
+        return "unknown"

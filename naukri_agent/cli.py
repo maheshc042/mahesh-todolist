@@ -562,6 +562,82 @@ def campaign_linkedin_cmd(
     _run(_main())
 
 
+@app.command(name="replies")
+def replies_cmd(
+    days: int = typer.Option(14, "--days", "-d", help="Look back window in days"),
+    config_path: Path | None = typer.Option(None, "--config", help="Path to config.yaml"),
+) -> None:
+    """Check Gmail for recruiter replies to cold outreach (read-only IMAP).
+
+    New replies print here, land in Telegram, and are marked seen so the
+    next check only surfaces fresh ones. Speed-to-lead wins interviews —
+    run this daily.
+    """
+
+    async def _main() -> None:
+        import os
+
+        settings = _settings_only()
+        await run_migrations()
+        from .core.mailer import ColdEmailer
+        from .notify.notifier import build_notifier
+
+        gmail_user = os.getenv("GMAIL_USER", "").strip()
+        gmail_pass = os.getenv("GMAIL_APP_PASSWORD", os.getenv("GMAIL_APP_PASS", "")).strip()
+        if not gmail_user or not gmail_pass:
+            raise ConfigError("GMAIL_USER and GMAIL_APP_PASSWORD must be set in .env")
+        repo = await Repository.create()
+        try:
+            contacts = await repo.recent_contacts(days=30)
+            if not contacts:
+                console.print("[yellow]no contacted recruiters in the last 30 days[/yellow]")
+                return
+            seen_at = {c["email"]: (c.get("replied_at"), c.get("replied")) for c in contacts}
+            mailer = ColdEmailer(sender_email=gmail_user, app_password=gmail_pass)
+            found, err = await asyncio.to_thread(
+                mailer.check_inbox_replies,
+                [c["email"] for c in contacts],
+                days,
+            )
+            if err:
+                console.print(f"[red]inbox check failed:[/red] {err}")
+                raise typer.Exit(EXIT_RUN_FAILED)
+            fresh = []
+            for rep in found:
+                marked_at, marked = seen_at.get(rep["from"], (None, False))
+                if marked and marked_at and rep.get("date") and rep["date"] <= str(marked_at):
+                    continue
+                fresh.append(rep)
+            if not fresh:
+                console.print(f"[green]no new replies[/green] ({len(found)} already-seen threads checked)")
+                return
+            for rep in fresh:
+                await repo.mark_replied(rep["from"], rep.get("subject", ""), rep.get("snippet", ""))
+            table = Table(title=f"{len(fresh)} new recruiter replies", header_style="bold")
+            for column in ("from", "date", "subject", "snippet"):
+                table.add_column(column, overflow="fold")
+            for rep in fresh:
+                table.add_row(rep["from"], rep.get("date", "")[:16],
+                              rep.get("subject", "")[:60], rep.get("snippet", "")[:100])
+            console.print(table)
+            try:
+                cfg = load_config(config_path)
+                notifier = build_notifier(
+                    telegram_enabled=cfg.notifications.telegram_enabled,
+                    bot_token=settings.telegram_bot_token,
+                    chat_id=settings.telegram_chat_id,
+                )
+                lines = [f"💬 {r['from']}: {r.get('subject', '')[:70]}" for r in fresh]
+                await notifier.send(f"💬 {len(fresh)} new recruiter replies — reply fast!",
+                                    "\n".join(lines), is_error=False)
+            except Exception as exc:
+                log.warning("replies.notify_failed", error=str(exc)[:150])
+        finally:
+            await close_pool()
+
+    _run(_main())
+
+
 
 
 # ---------------------------------------------------------------------------
