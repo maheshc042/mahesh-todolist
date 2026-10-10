@@ -1,0 +1,73 @@
+"""
+Base interface for all Job Platforms.
+"""
+from __future__ import annotations
+
+from abc import ABC, abstractmethod
+from collections.abc import Callable
+
+from playwright.async_api import Page
+
+from ..config import JobProfile
+from ..core.models import ApplyOutcome, FilterDecision, Job
+from ..core.run_policy import RunPolicy
+
+
+class BaseJobPlatform(ABC):
+    def __init__(self, page: Page, account_key: str, policy: RunPolicy):
+        self.page = page
+        self.account_key = account_key
+        self.policy = policy
+
+    # Login-free sources (HiringCafe) fail on transient bot walls, not dead
+    # credentials: pausing them converts one bad minute into a blackout until
+    # headed recovery. Default True; override False where no login exists.
+    pause_on_login_failure: bool = True
+
+    def require_mutation(self, action: str) -> None:
+        """Fail closed before any externally visible platform side effect."""
+        self.policy.require_mutation(f"{self.platform_name}.{action}")
+
+    @property
+    @abstractmethod
+    def platform_name(self) -> str:
+        """Returns the identifier for the database (e.g., 'naukri', 'instahyre')."""
+
+    @abstractmethod
+    async def ensure_logged_in(self) -> bool:
+        """
+        Authenticate the session. 
+        Returns True if logged in successfully, raises FatalAgentError if blocked.
+        """
+
+    @abstractmethod
+    async def fetch_jobs(self, profile: JobProfile, exclude_job_ids: set[str]) -> list[Job]:
+        """
+        Scrape the platform's feed/search and return a list of standard Job objects.
+        Should skip jobs present in `exclude_job_ids`.
+        """
+
+    @abstractmethod
+    async def apply_to_job(
+        self, 
+        job: Job, 
+        profile_name: str, 
+        pre_submit_check: Callable[[Job], FilterDecision] | None = None
+    ) -> ApplyOutcome:
+        """
+        Execute the apply flow for a single job.
+        Must handle its own UI elements, Chatbots, or popup logic.
+        """
+
+    async def handle_messages(self) -> None:
+        """
+        Optional post-apply hook to handle asynchronous platform messages/questionnaires.
+        Does nothing by default. Platforms like Cutshort will override this.
+        """
+
+
+class PlatformWalledError(Exception):
+    """Raised when a bot wall makes further work pointless (Cloudflare
+    challenge on every API call, IP block). The orchestrator pauses the
+    platform and moves on instead of burning the queue into the wall."""
+

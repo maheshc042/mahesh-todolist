@@ -1,0 +1,747 @@
+# ---------------------------------------------------------------------------
+# Naukri auto-apply agent.
+#
+# TWO ACCOUNTS, TWO RESUMES:
+#   primary   (NAUKRI_EMAIL)   -> AI / Python Engineer resume
+#   secondary (NAUKRI_EMAIL_2) -> Full Stack / MERN + AI resume
+#
+# Naukri attaches whatever resume sits on the PROFILE — there is no per-
+# application resume picker — so one account == one resume == one job family.
+# Each profile below is bound to its account with `account:`, and a run only
+# ever touches one account (`run -a primary`, `run --all-accounts` for both,
+# sequentially).
+#
+# SOURCE: Naukri's own "Recommended jobs" feed only. Naukri has already matched
+# those postings against the profile, headline, skills and preferences, so it
+# beats any keyword query. The keyword-search fallback is left configured but
+# disabled (`searches: []`) — see the commented block on the Full-Stack profile
+# to re-enable it.
+# ---------------------------------------------------------------------------
+
+applicant_name: "Mahesh Chitakoti"
+applicant_location: "Bengaluru, India"
+applicant_email: "[EMAIL_ADDRESS]"
+applicant_phone: "9481777227"
+applicant_linkedin: "https://www.linkedin.com/in/maheshchitakoti"
+applicant_github: "https://github.com/maheshchichkoti"
+applicant_portfolio: "https://github.com/maheshchichkoti"
+
+platforms:
+  instahyre: true
+  cutshort: true
+  linkedin: true
+  naukri: true
+  wellfound: true
+  # HiringCafe RE-ENABLED (2026-10-06): the Oct 2026 UI refresh moved search
+  # from /?searchState= (now 403 even for clean clients) to
+  # /classic?searchState= (200 + filtered SSR for clean clients). The old
+  # wall evidence (runs 470-472: every parameterized navigation challenged
+  # in the automated browser) was against the dead path — this path is
+  # untested in automation. If the wall persists here, the platform pauses
+  # itself cleanly (PlatformWalledError, no burn). Flip back to false if so.
+  hiringcafe: true
+
+# HiringCafe feed (read-only source for the Sidekick handoff).
+# Server-side filters mirror the proven query: fresh, junior, eng/IT/data.
+# NOTE: HiringCafe is EXTERNAL-only (never APPLIED), so it takes no
+# platform_limits entry — volume is governed by target_jobs_per_run below.
+hiringcafe:
+  max_days: 3
+  max_experience: 3
+  target_jobs_per_run: 25
+  max_pages: 6
+
+# Sidekick handoff (contract v1, see career-apply-agent/CONTRACT.md +
+# SIDEKICK_PICKUP.md). External outcomes from ANY platform are enqueued in
+# Postgres; mode "pickup" (below) means Sidekick drains the outbox itself
+# whenever IT runs — no POSTs from here, no schedule choreography, no
+# undispatched warnings. "push" restores agent-side POST-at-flush.
+sidekick_integration:
+  enabled: true
+  mode: pickup
+  api_url: "http://127.0.0.1:8000"
+  auto_flush_on_startup: true
+  request_timeout_s: 60
+
+
+linkedin:
+  days: 1
+
+instahyre:
+  # Feed pages to scrape: skill-filtered search is relevance-ordered (decay,
+  # not cliff). Eligible jobs were observed on page 3 itself, so 5 keeps a
+  # 2-page margin past the last proven zone at ~25s/page. Ranked-plan CSVs
+  # carry per-job page tabs — tighten further only if they prove pages 4-5
+  # barren over several runs.
+  max_pages: 5
+  # Instahyre enforces MAX 15 skill tags: anything past #15 is silently
+  # ignored (run 366: 15 active, 16th missing with zero warning). Keep this
+  # list at exactly 15, most important first. Code truncates + warns on more.
+  skills:
+    - "SDET"
+    - "Python"
+    - "Node.js"
+    - "React.js"
+    - "TypeScript"
+    - "FastAPI"
+    - "Next.js"
+    - "Generative AI"
+    - "JavaScript"
+    - "LangChain"
+    - "LangGraph"
+    - "MLOps"
+    - "AWS Bedrock"
+    - "API Testing"
+    - "Quality Assurance"
+  experience_years: 2
+
+browser:
+  headless: true
+  slow_mo_ms: 0
+  viewport_width: 1440
+  viewport_height: 900
+  locale: en-IN
+  timezone: Asia/Kolkata
+  default_timeout_ms: 10000        # Fail-fast UI checks (10s)
+  navigation_timeout_ms: 20000     # Fail-fast page loads (20s max)
+  min_action_delay_ms: 250
+  max_action_delay_ms: 800
+  block_resources: [font, media]
+
+run:
+  dedupe_window_days: 90
+  daily_application_cap: 80
+  max_consecutive_failures: 5
+  min_delay_between_applies_s: 8   # Human pacing with room for coffee (8-22s)
+  max_delay_between_applies_s: 22  # Human pacing with room for coffee (8-22s)
+  max_retries_per_job: 1           # No more double-retries on dead pages
+  strict_answers: true
+  screenshot_on_failure: true
+  screenshot_on_success: false
+  run_timeout_minutes: 90          # 90-minute allowance for multi-platform completion
+
+# Naukri's recommended feed — the primary (and by default only) job source.
+recommended:
+  enabled: true
+  tabs: ["default", "all"]
+  max_scroll_rounds: 20
+  stall_rounds_before_stop: 2
+  max_jobs: 300
+  follow_show_more: true
+
+schedule:
+  enabled: true
+  # Default, used by any account without an override below.
+  cron: "40 9 * * *"
+  # The two accounts MUST be hours apart: two logins from one IP inside the same
+  # window is the pattern most likely to trigger Naukri's "unusual activity"
+  # challenge. Morning for Full-Stack, afternoon for AI/Python.
+  cron_by_account:
+    primary: "0 9 * * *"     # 09:00 AM IST (Morning recruiter search window - AI)
+    secondary: "0 13 * * *"  # 01:00 PM IST (Afternoon recruiter search window - Full Stack)
+  timezone: Asia/Kolkata
+  jitter_seconds: 600
+  run_on_start: false
+
+notifications:
+  telegram_enabled: true
+  notify_on_success: true
+  notify_on_failure: true
+  include_job_list: true
+  max_jobs_in_message: 15
+
+# ---------------------------------------------------------------------------
+# Global screening-question knowledge base. Profile-level `answers:` win over
+# these, so account-specific numbers live on the profile.
+# ---------------------------------------------------------------------------
+answers:
+  "how many years of hands-on experience do you have in generative ai/llm development?": "2"
+  "how many years of experience do you have in generative ai/llm": "2"
+  "please select the city you are currently residing or willing to relocate to": "Bengaluru"
+  "city you are currently residing or willing to relocate to": "Bengaluru"
+  "city you are currently residing": "Bengaluru"
+  "hi mahesh, companies value diversity and want to build inclusive teams. share your career status to proceed with this job application. are you on a career break?": "No"
+  "have you designed database schemas?": "Yes"
+  "would you be willing to attend two rounds of technical interviews, including a face-to-face round?": "Yes"
+  "are you ready to work for c2h role?": "Yes"
+  "have you completed your education through regular/full-time mode?": "yes"
+  "how many years of experience do you have as agentic ai ?": "<3 years"
+  "to proceed with the further steps, please fill out the form.(mandatory):https://forms.gle/5eezfamwmpj2epz29": "Yes -Filled the form"
+  "how many years of ai backend developer?": "Yes"
+  "are you comfortable attending interviews in person on weekdays?": "Yes"
+  "how many years of experience do you have in .net core?": "0"
+  "how many years of experience do you have in html, css, javascript?": "3"
+  "how many years of experience do you have in .net?": "0"
+  "experience in angular or react ?": "3"
+  "how many years of experience do you have in spring boot?": "0"
+  # Notice Period & Availability
+  serving notice: "Yes"
+  immediate joiner: "Yes"
+  notice period: "0 days"
+  how soon can you join: "0 days"
+  last working day: "30/04/2026"
+  last working date: "30/04/2026"
+  lwd: "30/04/2026"
+  relieving date: "30/04/2026"
+  end date of notice: "30/04/2026"
+  buyout option: "No"
+  # Chatbot file requests the agent cannot fulfil in-drawer (no upload
+  # mechanism): take the provided dodge option, never the upload action.
+  upload your resume: "I'll do it later"
+  upload resume: "I'll do it later"
+
+  # Contact & Links
+  phone: "9481777227"
+  mobile: "9481777227"
+  contact number: "9481777227"
+  mobile number: "9481777227"
+  phone number: "9481777227"
+  linkedin url: "https://www.linkedin.com/in/maheshchitakoti"
+  github url: "https://github.com/maheshchichkoti"
+  portfolio url: "https://github.com/maheshchichkoti"
+  # Q#41 trained 2026-10-07: "submit your portfolio link ... or share a link
+  # to your best work" — the answer is the URL itself, not a description.
+  portfolio link: "https://github.com/maheshchichkoti"
+  link to your best work: "https://github.com/maheshchichkoti"
+
+  # Salary & CTC
+  current ctc: "3.9"
+  expected ctc: "7"
+  fixed ctc: "3.9"
+  variable ctc: "0"
+
+  # Experience — 3 years total career experience (full stack + cloud)
+  total experience: "3"
+  relevant experience: "3"
+  experience in react: "3"
+  experience in node: "3"
+  experience in javascript: "3"
+  experience in html: "3"
+  experience in css: "3"
+  experience in html css: "3"
+  experience in html css javascript: "3"
+  experience in typescript: "3"
+  experience in full stack: "3"
+  experience in aws: "3"
+  experience in cloud: "3"
+  experience in testing: "3"
+  experience in software testing: "3"
+  experience in sql: "3"
+  experience in postgresql: "3"
+  experience in database: "3"
+  experience in devops: "3"
+  experience in docker: "3"
+  experience in ci/cd: "3"
+
+  # AI / Python track: 2 years hands-on.
+  experience in ai: "2"
+  experience in artificial intelligence: "2"
+  experience in machine learning: "2"
+  experience in python: "2"
+  experience in llm: "2"
+  experience in generative ai: "2"
+  experience in genai: "2"
+  experience in chatbot: "2"
+  experience in rag: "2"
+  experience in langchain: "2"
+  experience in langgraph: "2"
+  experience in fastapi: "2"
+  experience in mlops: "2"
+  experience in prompt engineering: "2"
+  experience in vector database: "2"
+  experience in embeddings: "2"
+  experience in hugging face: "2"
+  experience in pytorch: "2"
+  experience in deep learning: "2"
+  experience in openai: "2"
+  experience in transformers: "2"
+  experience in mcp: "2"
+  experience in .net: "0"
+  experience in java: "0"
+  experience in spring: "0"
+  experience in spring boot: "0"
+  experience in spring framework: "0"
+
+  # Academic Details
+  10th percentage: "67"
+  12th percentage: "74"
+  secondary percentage: "74"
+  sslc percentage: "67"
+  puc percentage: "75"
+  graduation percentage: "60"
+  degree percentage: "60"
+  ug percentage: "60"
+  cgpa: "6"
+  post graduation: "NA"
+  pg percentage: "NA"
+
+  # College / Tier-1 / Institute Heuristics
+  iit: "No"
+  nit: "No"
+  dtu: "No"
+  iiit: "No"
+  premier institute: "No"
+  tier 1: "No"
+
+  # Residing & Relocation
+  residing: "Yes"
+  relocate: "Yes"
+  relocation: "Yes"
+  residing or willing to relocate: "Yes"
+  willing to relocate: "Yes"
+  ready to relocate: "Yes"
+  open to relocate: "Yes"
+  # City-list questions ("Which of these locations are you willing to
+  # relocate to?", city multi-selects): the answer is the CITY itself —
+  # "Yes" typed into a city box is garbage (Q#39 trained 2026-10-06 after
+  # runs 268-509 failed it). Also covers "currently residing in" phrasings
+  # — the user lives in Bengaluru either way.
+  which of these locations: "Bengaluru"
+  # Q#45/46 trained 2026-10-09: "Please select the city you are currently
+  # residing or willing to relocate to" (free-text city box). Must beat the
+  # "residing or willing to relocate → Yes" key on token count, or the box
+  # gets a "Yes" typed into it (same garbage-class as Q#39).
+  "select the city you are currently residing or willing to relocate": "Bengaluru"
+  # Q#47 trained 2026-10-09: scoped to Bengaluru/Bangalore only — a bare
+  # "are you based in" key would answer Yes for ANY city (lie).
+  "are you based in bengaluru": "Yes"
+  "are you based in bangalore": "Yes"
+  # Q#42 trained 2026-10-07: exact-phrase key for the Sector-65-Gurugram
+  # in-office screener. User lives in Bengaluru (outside NCR) and will
+  # relocate — the stored value mirrors the correct option verbatim so it
+  # exact-matches at apply time. Scoped to this question only by the long
+  # phrase; fires nowhere else.
+  "fully in-office at sector 65, gurugram": "I'm outside NCR and will relocate before joining"
+  current location: "Bengaluru"
+  preferred location: "Bengaluru"
+  are you willing to work from office: "Yes"
+  hybrid mode: "Yes"
+  face to face interview: "Yes"
+  ready to relocate for a face to face interview: "Yes"
+  comfortable attending interviews: "Yes"
+  comfortable attending interviews in person: "Yes"
+  attending interviews in person on weekdays: "Yes"
+  attending interviews in person on weekends: "Yes"
+  interviews in person on weekdays: "Yes"
+  interviews in person on weekends: "Yes"
+  interviews in person: "Yes"
+  "re:available for f2f|available for interview|f2f interview on|interview on": "Yes"
+  "re:availability.*(?:date|time|timing|schedule)|interview.*(?:date|time|timing|slot)": "Available on weekdays between 10:00 AM to 6:00 PM IST"
+  "l1 bot availability date and timing": "Available on weekdays between 10:00 AM to 6:00 PM IST"
+  # Both spellings: recruiters type this one wrong at least as often as not.
+  need special accommodation for interview: "No"
+  need specifal accomodation for interview: "No"
+
+  # Reason for Change
+  reason for job change: "Looking for better technical growth, challenging engineering problems, and career advancement."
+  why leaving: "Looking for better technical growth, challenging engineering problems, and career advancement."
+  why are you looking for a change: "Looking for better technical growth, challenging engineering problems, and career advancement."
+
+  # Self fit-rating questions (1-10 / 0-10 scales with real options):
+  # default 8 — strong but credible. Never 10 (not believable), never
+  # below 7. Requires the word "fit" so skill ratings ("Rate yourself in
+  # Java") never catch an inflated number. (Skip-only variants are
+  # answered Skip per-question.)
+  "re:rate.{0,25}fit|\\bfit\\b.{0,25}(?:1|one).{0,8}10|(?:1|one).{0,8}10.{0,25}\\bfit\\b": "8"
+
+  # General HR
+  do you have a valid passport: "Yes"
+  highest qualification: "B.Tech"
+  highest level of education: "Bachelors Degree"
+  highest level of education obtained: "Bachelors Degree"
+  highest education: "Bachelors Degree"
+  education level: "Bachelors Degree"
+  level of education: "Bachelors Degree"
+  education: "Bachelors Degree"
+  degree: "B.Tech"
+  graduation year: "2023"
+  any offer in hand: "No"
+  holding any offer: "No"
+  if you are holding any offer then mention offer amount: "No"
+  holding any offer then mention offer amount: "No"
+  employment type: "FTE"
+  type of employment: "FTE"
+  job type: "FTE"
+
+  # Statutory deductions (trained 2026-10-04, Q#37: PF deduction in current org).
+  deduction of pf: "No"
+  pf deducted: "No"
+  provident fund: "No"
+
+  # Person-level identity facts: identical for every account/profile, so they
+  # live globally — never profile-scoped (run 437 queued ex-Infosys on the
+  # Full Stack account although the AI account already knew it).
+  # Substring keys: Stage-1 matches `pattern in question`, so the short
+  # "currently located in bangalore" covers every phrasing ("Are you
+  # currently located in Bangalore?", "currently located in...") at 0.9.
+  currently located in bangalore: "Yes"
+  are you an ex-infosys employee: "NA"
+  ex-infosys employee id: "NA"
+  ex-employee of infosys: "NA"
+  date of birth: "1997-11-19"
+  dob: "1997-11-19"
+  birth date: "1997-11-19"
+  which product did you work on: "WorkBridge - AI-Powered Collaboration Platform (full-stack + AI: React, Node.js, Python, FastAPI, PostgreSQL, live project)"
+  product worked on: "WorkBridge - AI-Powered Collaboration Platform (full-stack + AI: React, Node.js, Python, FastAPI, PostgreSQL, live project)"
+  name the product: "WorkBridge - AI-Powered Collaboration Platform (full-stack + AI: React, Node.js, Python, FastAPI, PostgreSQL, live project)"
+  brief description of the projects: "Built full-stack & AI applications using Python, FastAPI, Node.js, React & AWS. Implemented REST APIs."
+  description of the projects: "Built full-stack & AI applications using Python, FastAPI, Node.js, React & AWS. Implemented REST APIs."
+  key contributions and technical skills: "Built full-stack & AI applications using Python, FastAPI, Node.js, React & AWS. Implemented REST APIs."
+  # Tech Stack & Framework Preferences
+  which backend framework have you used: "Express.js, FastAPI"
+  backend framework: "Express.js, FastAPI"
+  which database have you worked with: "MongoDB, PostgreSQL, Redis"
+  database worked with: "MongoDB, PostgreSQL, Redis"
+  which programming language are you most comfortable with: "Python"
+  programming language most comfortable with: "Python"
+  most comfortable programming language: "Python"
+  # External Form Links (Google Forms, forms.gle, etc.)
+  "re:forms\\.gle|google\\.com/forms|fill out the form|fill the form|mandatory form": "Yes -Filled the form"
+  "re:c2h|contract to hire": "Yes"
+  "ready to work for c2h": "Yes"
+  "completed your education through regular": "yes"
+  "education through regular/full-time mode": "yes"
+  "regular/full-time mode": "yes"
+  "ai backend developer": "Yes"
+  "re:^yes\\s*/\\s*no\\??$": "Yes"
+  # High-leverage regex patterns for recruiter question variants
+  "re:shift|rotational|night shift": "Yes"
+  "re:laptop|wifi|internet connection|broadband": "Yes"
+  "re:fresher|recent graduate": "No"
+  "re:database schemas|designed database": "Yes"
+  "re:diversity|inclusive teams|career break": "No"
+
+  # Technical MCQs
+  "re:concurrency model.*strictly i/o-bound": "Asynchronous programming utilizing the Asyncio library."
+  "re:mitigates system overload.*high-volume api": "Rate limiting and message queuing."
+  "re:distributed systems.*ensure high reliability": "Node redundancy and fault tolerance."
+  "re:unpredictable spikes in data volume": "Horizontal elastic network scaling."
+  "re:advantage of utilizing websockets": "Full-duplex real-time communication."
+  "re:data engineers ensure data quality": "Implementing rigorous validation and cleansing pipelines."
+  "re:generative ai integrate.*automation testing": "Creating synthetic training and test datasets."
+
+  # Azure, Auth, Low Level Design & HR Screening
+  "re:worked with microsoft azure|azure services": "Yes"
+  "re:awareness of ai product features|llm integrations": "Yes"
+  "re:mern stack development": "Yes"
+  "re:built and consumed restful apis|restful apis": "Yes"
+  "re:jwt or oauth|oauth-based authentication": "Yes"
+  "re:data privacy policy|privacy policy consent|privacy policy": "Yes"
+  "experience in sql development": "3"
+  "re:low level design": "3"
+  "re:best coding practice|code quality": "Writing modular code, following DRY and SOLID principles, strict typing, linting, unit testing, and structured logging."
+  "re:comfortable with english": "I can speak and write"
+  "re:what is your strength|your strength": "Backend Technologies"
+
+# ---------------------------------------------------------------------------
+# Skill -> years map. This answers the open-ended "how many years of X?" family
+# that no finite answer table can cover: the engine detects the intent, sees
+# which of these skills the question names, and combines them with
+# `multi_skill_strategy` ("HTML, CSS, JavaScript" -> max = the stack as a whole).
+# Anything not listed falls back to `default_years`.
+# ---------------------------------------------------------------------------
+experience:
+  total_years: 3
+
+  default_years: 1
+  multi_skill_strategy: max
+  skills:
+    html: 3
+    css: 3
+    javascript: 3
+    js: 3
+    react: 3
+    node: 3
+    typescript: 3
+    full stack: 3
+    mern: 3
+    mern stack: 3
+    mean: 3
+    express: 3
+    express.js: 3
+    postgresql: 3
+    postgres: 3
+    mongodb: 3
+    mongo: 3
+    sql: 3
+    rest api: 3
+    restful api: 3
+    microservices: 3
+    git: 3
+    github: 3
+    c++: 0
+    cpp: 0
+    c: 0
+    docker: 3
+    next.js: 3
+    nextjs: 3
+    vue: 0
+    angular: 0
+    testing: 3
+    software testing: 3
+    qa: 3
+    devops: 3
+    golang: 0
+    go: 0
+    .net: 0
+    dotnet: 0
+    dot net: 0
+    # Java ecosystem stays 0: the resume claims no Java/Spring, and the
+    # explicit answers above already say 0. A nonzero map here would let
+    # unlisted-variant questions ("years in Hibernate?") answer 1 against
+    # the resume — never inflate tenure recruiters cross-check.
+    java: 0
+    spring: 0
+    spring boot: 0
+    spring framework: 0
+    hibernate: 0
+    # AI / Python track: 2 years hands-on. Recruiters cross-check these
+    # against the resume, so anything outside this list falls back to
+    # default_years (1) — honest for new tools, never inflated.
+    ai: 2
+    artificial intelligence: 2
+    agentic ai: 2
+    agentic: 2
+    machine learning: 2
+    python: 2
+    llm: 2
+    generative ai: 2
+    genai: 2
+    nlp: 2
+    langchain: 2
+    langgraph: 2
+    fastapi: 2
+    chatbot: 2
+    conversational ai: 2
+    language models: 2
+    ai engineer: 2
+    rag: 2
+    mlops: 2
+    prompt engineering: 2
+    vector database: 2
+    embeddings: 2
+    hugging face: 2
+    pytorch: 2
+    deep learning: 2
+    openai: 2
+    transformers: 2
+    mcp: 2
+    front end: 3
+    frontend: 3
+    back end: 3
+    backend: 3
+    ui: 3
+    ux: 3
+    ui/ux: 3
+    apis: 3
+    api: 3
+    rest: 3
+    agile: 3
+    use cases: 3
+    business processes: 3
+    customer engagement: 3
+    emerging technologies: 3
+    cloud services: 3
+    cloud platforms: 3
+    azure: 3
+    microsoft azure: 3
+    unix: 3
+    linux: 3
+    data structures: 3
+    dsa: 3
+    algorithms: 3
+    cloud: 3
+    aws: 3
+    aml: 0
+    fircosoft: 0
+
+# ---------------------------------------------------------------------------
+# Daily "touch the profile" pass. Naukri's recruiter search sorts candidates by
+# profile-last-updated, so a stale profile is invisible past page one. This is
+# quota-free and usually generates more inbound contact than applying does.
+# `min_hours_between` is enforced against the profile_updates table, so several
+# runs (or a container restart) still produce exactly one edit per day —
+# repeated edits in one day is what Naukri's abuse heuristics look for.
+# ---------------------------------------------------------------------------
+profile_refresh:
+  enabled: true
+  # First success wins. `skills` is deliberately not listed: the tag editor can
+  # drop a skill chip on a mis-timed keystroke.
+  strategies: ["headline"]
+  min_hours_between: 14
+  verify: true
+
+# ---------------------------------------------------------------------------
+# Match Score API pre-filter.
+#
+# Calls Naukri's internal matchscore API (no browser required) before
+# navigating to each job page. Jobs with keyskills_score == 0 are
+# irrelevant — skip them and save ~4 seconds per job.
+#
+# Fail-open: if the API is down, times out, or returns an error, the job
+# is NOT skipped — it falls through to the normal Playwright apply flow.
+# This means the API can never block applications.
+#
+# To disable entirely: set enabled: false
+# ---------------------------------------------------------------------------
+match_score_prefilter:
+  enabled: true
+  min_keyskills_score: 1        # reject weak keyword overlap before browser navigation
+  request_timeout_s: 5.0
+  max_concurrent: 3             # parallel score fetches (stay under Naukri rate limit)
+  fail_open: true               # on any API error, apply anyway
+
+# ---------------------------------------------------------------------------
+# Profiles. One per account.
+# ---------------------------------------------------------------------------
+profiles:
+  # =========================================================================
+  # ACCOUNT 2 (secondary) — Full Stack / MERN, with AI-adjacent roles welcome.
+  # The Full-Stack + AI resume must be the active CV on this Naukri profile.
+  # =========================================================================
+  - name: "Full Stack / Web Developer"
+    enabled: true
+    priority: 1
+    account: secondary
+    experience_years: 3
+    use_recommended: true
+    platform_limits:
+      naukri: 35
+      linkedin: 35
+      cutshort: 20
+      wellfound: 20
+      instahyre: 25
+    resume_label: "Full Stack Engineer"
+    resume_file: "resumes/CV_Mahesh_Chitakoti_2026_1_.pdf"
+
+    # Primary skills required: AT LEAST ONE of core_skills MUST match in every job
+    # Explicit title keywords for scoring (so it doesn't divide by 50)
+    title_keywords: ["full stack", "mern", "react", "node", "frontend", "backend", "software engineer", "developer", "web", "qa", "automation", "sdet", "next", "cloud engineer", "devops", "platform engineer", "database developer", "sql developer"]
+
+    # Condensed to Top 14 so math allows a high score
+    core_skills: ["react", "node", "javascript", "typescript", "python", "fastapi", "django", "frontend", "backend", "full stack", "mern", "ui", "aws", "docker", "nextjs"]
+    secondary_skills: ["api", "rest", "graphql", "postgresql", "mongodb", "redis", "database", "gcp", "azure", "kubernetes", "ci/cd", "microservices", "html", "css", "tailwind", "qa", "automation", "selenium"]
+    bonus_skills: ["testing", "pytest", "jest", "playwright", "cypress", "git", "github", "jira", "agile", "scrum", "code review", "debugging"]
+
+    filters:
+      title_must_include_any: [full stack, fullstack, mern, mean, mean stack, react, reactjs, node, nodejs, nextjs, javascript, typescript, frontend, backend, mongodb, web developer, website developer, software engineer, software developer, software development engineer, software development engineer 1, software development engineer 2, software development engineer in test, backend developer, backend engineer, frontend developer, frontend engineer, front end, back end, sde, sde 1, sde 2, sde-1, sde-2, sde i, sde ii, founding engineer, product engineer, software craftsperson, software craftsman, qa, automation, sdet, tester, software tester, qa engineer, quality assurance, quality engineer, test engineer, manual testing, automation testing, next, cloud engineer, devops, devops engineer, platform engineer, database developer, database engineer, sql developer, integration engineer, implementation engineer, application engineer, application developer, associate engineer, junior engineer, fresher, technical support, technical support engineer, support engineer, product support, application support, desktop support, site reliability]
+      title_must_exclude_any: [lead, principal, staff, architect, manager, trainer, training, professor, assistant professor, associate professor, teacher, teaching, faculty, instructor, lecturer, tutor, mentor, educator, academic, curriculum developer, sales, presales, pre-sales, bpo, php, wordpress, .net, dotnet, dot net, spring boot, asp.net, c#, c++, golang, golang developer, golang engineer, go developer, go engineer, java, mainframe, sap, salesforce, drupal, magento, engineering manager, project manager, product manager, general manager, solution architect, enterprise architect, tech architect, technical architect, sr. manager, gis, oac, intershop, erp, pega, servicenow, intern, internship, it support, helpdesk, service desk, it engineer, systems engineer, security engineer, cybersecurity, infosec, soc analyst, data scientist, etl, big data, snowflake, teradata, bi developer, powerbi, tableau, data warehousing, databricks, dba, database administrator, oracle dba, llm, ai engineer, machine learning, ml engineer, deep learning, nlp engineer, computer vision, prompt engineer, ai researcher, genai, generative ai, content writer, seo, android, ios, react native, mobile developer, mobile engineer, flutter, swift, kotlin, infrastructure engineer, phd, ph.d, research scientist]
+      description_must_exclude_any: [
+        "bpo", "commission only", "unpaid", "registration fee", "security deposit",
+        "prefers women", "women diversity", "women-only", "women only", "female only", "female diversity", "diversity drive"
+      ]
+      allowed_locations: []
+      blocked_locations: []
+      blocked_companies: []
+      experience:
+        min_years: 0
+        max_years: 3.5
+      min_salary_lpa: 5
+      max_posted_days: 5
+      min_rating: null
+      require_easy_apply: true
+      skip_walkin: true
+
+    answers:
+      relevant experience: "3"
+      total experience: "3"
+      proficiency in python, typescript: "Proficient in Python and TypeScript with 3 years of commercial experience building web applications and APIs."
+      proficiency in python: "Proficient in Python with hands-on experience in FastAPI, Django, and full-stack applications."
+      proficiency in typescript: "Proficient in TypeScript with hands-on experience in modern React and Node.js."
+      programming language: "Python, TypeScript, JavaScript"
+      programming languages: "Python, TypeScript, JavaScript"
+      current ctc: "4"
+      expected ctc: "7"
+      notice period: "0 days"
+      last working day: "30/04/2026"
+      reason for job change: "Looking for better technical growth and challenging full-stack projects."
+
+  # =========================================================================
+  # ACCOUNT 1 (primary) — AI / Python Engineer.
+  # The AI/Python resume must be the active CV on this Naukri profile.
+  # 3 years total engineering experience, 2 of it in AI/Python.
+  # =========================================================================
+  - name: "AI / Python Engineer"
+    enabled: true
+    priority: 2
+    account: primary
+    experience_years: 2
+    use_recommended: true
+    platform_limits:
+      naukri: 35
+      linkedin: 35
+      cutshort: 20
+      wellfound: 20
+      instahyre: 25
+    resume_label: "AI / Python Engineer"
+    resume_file: "resumes/CV_Mahesh_Chitakoti_2026.pdf"
+
+    # Explicit title keywords for scoring (so it doesn't divide by 33)
+    title_keywords: ["ai", "python", "machine learning", "ml", "genai", "llm", "backend", "full stack", "software engineer", "developer", "sde", "chatbot", "rag", "nlp", "agent", "qa", "automation", "sdet", "quality analyst", "cloud engineer", "devops", "mlops", "platform engineer", "database developer", "sql developer"]
+
+    # Condensed to Top 13 so math allows a high score
+    core_skills: ["python", "fastapi", "django", "ai", "artificial intelligence", "machine learning", "ml", "generative ai", "genai", "llm", "rag", "langchain", "openai", "chatbot", "nlp"]
+    secondary_skills: ["react", "node", "javascript", "typescript", "frontend", "backend", "api", "rest", "postgresql", "mongodb", "aws", "docker", "kubernetes", "vector database", "pinecone", "chromadb", "embeddings", "semantic retrieval", "computer vision", "agent", "qa", "automation", "playwright", "selenium"]
+    bonus_skills: ["testing", "pytest", "jest", "git", "github", "jira", "agile", "scrum", "debugging"]
+
+    filters:
+      title_must_include_any: [ai, artificial intelligence, machine learning, ml, python, django, mongodb, llm, genai, generative ai, nlp, chatbot, prompt, ai agent, llm agent, agentic, python developer, ai engineer, ml engineer, ai software engineer, full stack ai engineer, backend engineer, backend developer, front end, back end, full stack, fullstack, mern, mean, mean stack, web developer, sde, sde 1, sde 2, sde-1, sde-2, sde i, sde ii, founding engineer, product engineer, software craftsperson, software craftsman, software engineer, software developer, software development engineer, software development engineer 1, software development engineer 2, software development engineer in test, qa, automation, sdet, tester, software tester, qa engineer, quality assurance, quality analyst, quality engineer, test automation, manual testing, automation testing, cloud engineer, devops, devops engineer, mlops, mlops engineer, platform engineer, database developer, database engineer, sql developer, forward deploy, forward deployed engineer, forward deployment, forward deployment engineer, integration engineer, implementation engineer, application engineer, application developer, associate engineer, junior engineer, fresher, customer success engineer, data analyst, technical support, technical support engineer, support engineer, product support, application support, junior data engineer, data engineer, desktop support, site reliability engineer]
+      title_must_exclude_any: [lead, principal, staff, architect, manager, trainer, training, professor, assistant professor, associate professor, teacher, teaching, faculty, instructor, lecturer, tutor, mentor, educator, academic, curriculum developer, sales, presales, pre-sales, bpo, php, wordpress, .net, dotnet, dot net, spring boot, asp.net, c#, c++, golang developer, golang engineer, golang, go developer, go engineer, java, network, hardware, mainframe, sap, salesforce, drupal, magento, engineering manager, project manager, product manager, general manager, solution architect, enterprise architect, tech architect, technical architect, sr. manager, gis, oac, intershop, erp, pega, servicenow, intern, internship, it support, helpdesk, service desk, it engineer, systems engineer, security engineer, cybersecurity, infosec, soc analyst, data scientist, etl, big data, snowflake, teradata, bi developer, powerbi, tableau, data warehousing, databricks, dba, database administrator, oracle dba, content writer, seo, android, ios, react native, mobile developer, mobile engineer, flutter, swift, kotlin, infrastructure engineer, phd, ph.d, research scientist, ai researcher]
+      description_must_exclude_any: [
+        "bpo", "commission only", "unpaid", "phd required", "registration fee", "security deposit",
+        "prefers women", "women diversity", "women-only", "women only", "female only", "female diversity", "diversity drive"
+      ]
+      allowed_locations: []
+      blocked_locations: []
+      blocked_companies: []
+      experience:
+        min_years: 0
+        max_years: 3.5
+      min_salary_lpa: 5
+      max_posted_days: 5
+      min_rating: null
+      require_easy_apply: true
+      skip_walkin: true
+
+    # Honest split: 3 years total, 2 specifically in AI/Python.
+    # Recruiters cross-check these against the resume, so they must match it.
+    answers:
+      total experience: "3"
+      relevant experience: "2"
+      experience in ai: "2"
+      experience in artificial intelligence: "2"
+      experience in machine learning: "0"
+      experience in python: "2"
+      experience in llm: "2"
+      experience in generative ai: "2"
+      experience in genai: "2"
+      hands-on experience in generative ai: "2"
+      hands-on experience in generative ai/llm: "2"
+      hands-on experience in generative ai/llm development: "2"
+      experience in generative ai/llm: "2"
+      experience in llm development: "0"
+      generative ai/llm development: "2"
+      proficiency in python, typescript: "Proficient in Python and TypeScript with 3 years of experience building APIs, backend services, and web applications."
+      proficiency in python: "Proficient in Python with hands-on experience in FastAPI, Django, and AI applications."
+      proficiency in typescript: "Proficient in TypeScript with hands-on experience in modern React and Node.js."
+      programming language: "Python, TypeScript, JavaScript"
+      programming languages: "Python, TypeScript, JavaScript"
+      experience in nlp: "2"
+      experience in langchain: "2"
+      experience in langgraph: "2"
+      experience in fastapi: "2"
+      experience in tensorflow: "0"
+      experience in pytorch: "2"
+      experience in transformers: "0"
+      experience in rag: "2"
+      experience in mlops: "2"
+      experience in hugging face: "2"
+      experience in openai: "2"
+      experience in data science: "0"
+      current ctc: "4"
+      expected ctc: "7"
+      notice period: "0 days"
+      last working day: "30/04/2026"
+      reason for job change: "Transitioning fully into AI/Python engineering after building AI features on top of my full-stack work."
+      are you an ex-infosys employee: "NA"
+      ex-employee: "No"

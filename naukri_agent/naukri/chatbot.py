@@ -1,0 +1,832 @@
+"""
+Naukri screening-chatbot driver.
+
+After clicking Apply, Naukri may open a right-hand drawer chatbot that asks
+recruiter questions one at a time. It is a React widget with no stable API, so
+the driver is a bounded state machine:
+
+    read current question -> classify input type -> resolve answer -> submit
+    -> wait for the question text to CHANGE -> repeat
+
+Design decisions:
+
+- **Change-detection instead of fixed sleeps.** We record the last question text
+  and wait for it to differ. This is the only reliable completion signal because
+  the drawer reuses the same DOM nodes for every question.
+- **Hard iteration cap (`max_questions`).** Without it a mis-detected question
+  loops forever and burns the run's time budget.
+- **Strict-mode abort.** If a question cannot be answered we close the drawer and
+  report `UNANSWERED_QUESTION`; the orchestrator queues it for human review. We
+  never submit a guessed answer to a recruiter.
+- **contenteditable typing.** Naukri's text input is a contenteditable div, not
+  an <input>, so `fill()` silently does nothing — `press_sequentially` is
+  required for React's onChange to fire.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import re
+
+from playwright.async_api import Page
+
+from ..browser.resilience import dismiss_overlays, first_visible, human_pause, safe_text
+from ..core.answers import AnswerEngine
+from ..core.models import ScreeningQuestion, SkipReason
+from ..core.run_policy import RunPolicy
+from ..logging_setup import get_logger
+from . import selectors as S
+
+log = get_logger(__name__)
+
+
+# Online/proctored assessments the agent cannot take (run 500: an autoproctor
+# link sat in review forever). Explicit test markers only — never fuzzy:
+# a wrong hit would skip an answerable job. Pure, unit-tested.
+_ASSESSMENT_RE = re.compile(
+    r"online assessment|assessment test|proctored|\bautoproctor\b|hackerrank|"
+    r"codility|imocha|deselect|take the test|complete the test|aptitude test|"
+    r"coding test|assessment link|test link|assessment:",
+    re.IGNORECASE,
+)
+
+
+def assessment_skip_detail(text: str) -> str | None:
+    """Detail string when a question demands a proctored test, else None."""
+    if text and _ASSESSMENT_RE.search(text):
+        return (
+            "requires proctored online assessment "
+            f"({text.strip()[:120]}) — no honest path without taking the test"
+        )
+    return None
+
+
+class ChatbotResult:
+    def __init__(self) -> None:
+        self.answered = 0
+        self.completed = False
+        self.unanswered: list[ScreeningQuestion] = []
+        self.error: str | None = None
+        # Tenure shortfall: the question is unanswerable-honest (candidate
+        # below every option) — the JOB must be skipped, not reviewed.
+        self.unfit: str | None = None
+        # Skip reason travelling with unfit (tenure shortfall keeps the
+        # legacy FILTER_EXPERIENCE; assessments get their own bucket).
+        self.unfit_reason: SkipReason | None = None
+
+
+class ChatbotHandler:
+    def __init__(
+        self,
+        page: Page,
+        answers: AnswerEngine,
+        policy: RunPolicy,
+        max_questions: int = 15,
+    ) -> None:
+        self.page = page
+        self.answers = answers
+        self.policy = policy
+        self.max_questions = max_questions
+
+    async def is_open(self, timeout_ms: int = 5_000) -> bool:
+        return await first_visible(self.page, S.CHATBOT_DRAWER, timeout_ms) is not None
+
+    async def close(self) -> None:
+        for selector in S.CHATBOT_CLOSE:
+            try:
+                locator = self.page.locator(selector).first
+                if await locator.count() and await locator.is_visible():
+                    await locator.click(timeout=2_000)
+                    return
+            except Exception:
+                continue
+        try:
+            await self.page.keyboard.press("Escape")
+        except Exception:
+            pass
+
+    # ------------------------------------------------------------------- read
+    async def _current_question(self) -> ScreeningQuestion | None:
+        """The last bot bubble is the active question."""
+        bubbles: list = []
+        for selector in S.CHATBOT_QUESTION:
+            bubbles = await self.page.locator(selector).all()
+            if bubbles:
+                break
+        if not bubbles:
+            return None
+
+        text = ""
+        for bubble in reversed(bubbles[-4:]):
+            candidate = await safe_text(bubble)
+            if candidate and len(candidate) > 3:
+                text = candidate
+                break
+        if not text:
+            return None
+
+        kind, options = await self._classify_input()
+        return ScreeningQuestion(text=text, kind=kind, options=options)
+
+    async def _classify_input(self) -> tuple[str, list[str]]:
+        """Inspect which widget the drawer is currently rendering, allowing time for React hydration."""
+        for attempt in range(5):
+            radios = await self._option_texts(S.CHATBOT_RADIO_OPTIONS)
+            if radios:
+                return "radio", radios
+
+            checkboxes = await self._option_texts(S.CHATBOT_CHECKBOX_OPTIONS)
+            if checkboxes:
+                return "checkbox", checkboxes
+
+            chips = await self._option_texts(S.CHATBOT_CHIPS)
+            if chips:
+                return "radio", chips
+
+            dropdown = await first_visible(self.page, S.CHATBOT_DROPDOWN, timeout_ms=300)
+            if dropdown is not None:
+                option_texts = [
+                    (await safe_text(option))
+                    for option in await dropdown.locator("option").all()
+                ]
+                options = [text for text in option_texts if text]
+                if options:
+                    return "dropdown", options
+
+            # Custom combobox / dropdown options
+            combobox_options = await self._option_texts(S.CHATBOT_DROPDOWN_OPTIONS)
+            if combobox_options:
+                return "combobox", combobox_options
+
+            combobox_trigger = await first_visible(self.page, S.CHATBOT_COMBOBOX_TRIGGER, timeout_ms=300)
+            if combobox_trigger is not None:
+                try:
+                    await combobox_trigger.click(timeout=1_500)
+                    await human_pause(200, 400)
+                    options = await self._option_texts(S.CHATBOT_DROPDOWN_OPTIONS)
+                    if options:
+                        return "combobox", options
+                except Exception:
+                    pass
+                return "combobox", []
+
+            if await first_visible(self.page, S.CHATBOT_TEXT_INPUT, timeout_ms=300):
+                return "text", []
+
+            if attempt < 4:
+                await asyncio.sleep(0.4)
+
+        return "unknown", []
+
+    async def _option_texts(self, selectors: list[str]) -> list[str]:
+        for selector in selectors:
+            locators = await self.page.locator(selector).all()
+            if not locators:
+                continue
+            texts: list[str] = []
+            for locator in locators:
+                try:
+                    if not await locator.is_visible():
+                        continue
+                except Exception:
+                    continue
+                text = await safe_text(locator)
+                if text:
+                    texts.append(text)
+            if texts:
+                return texts
+        return []
+
+    async def _dismiss_blocking_overlays(self) -> None:
+        try:
+            await self.page.evaluate("""() => {
+                document.querySelectorAll('#splScrn, .circleG, .loader-wrapper, div[class*="splashScreen"], div[class*="backdrop"]:not([class*="drawer"]):not([class*="chatbot"])').forEach(el => el.remove());
+            }""")
+        except Exception:
+            pass
+
+    # ------------------------------------------------------------------ write
+    async def _answer_text(self, value: str) -> bool:
+        await self._dismiss_blocking_overlays()
+        field = await first_visible(self.page, S.CHATBOT_TEXT_INPUT, timeout_ms=4_000)
+        if field is None:
+            return False
+        try:
+            self.policy.require_mutation("naukri.screening.answer")
+            try:
+                await field.click(force=True, timeout=2_500)
+            except Exception:
+                await field.focus()
+            # contenteditable: clear any prefill, then type so React re-renders.
+            await self.page.keyboard.press("Control+A")
+            await self.page.keyboard.press("Delete")
+            await field.press_sequentially(value, delay=45)
+            await human_pause(200, 500)
+            if not await self._submit():
+                await field.press("Enter")
+            return True
+        except Exception as exc:
+            log.warning("chatbot.text_answer_failed", error=str(exc)[:200])
+            return False
+
+    @staticmethod
+    def _match_numeric_option_idx(val_clean: str, option_texts: list[str]) -> int | None:
+        """Find index of best matching numeric option for experience or salary values."""
+        num_match = re.search(r"(\d+(?:\.\d+)?)", val_clean)
+        if not num_match:
+            return None
+        val = float(num_match.group(1))
+
+        # Pass 1: Range bounds check (e.g. '2-3 years' or '2 to 4 years')
+        for idx, opt in enumerate(option_texts):
+            opt_low = opt.lower()
+            numbers = [float(n) for n in re.findall(r"(\d+(?:\.\d+)?)", opt_low)]
+            if len(numbers) >= 2:
+                if min(numbers) <= val <= max(numbers):
+                    return idx
+            elif len(numbers) == 1:
+                n = numbers[0]
+                if ("<" in opt_low or "under" in opt_low or "less than" in opt_low) and val <= n:
+                    return idx
+                if (">" in opt_low or "+" in opt_low or "more than" in opt_low) and val >= n:
+                    return idx
+
+        # Pass 2: Nearest single number (e.g. '2 years' vs '3 years')
+        closest_idx = None
+        min_diff = float("inf")
+        for idx, opt in enumerate(option_texts):
+            opt_low = opt.lower()
+            numbers = [float(n) for n in re.findall(r"(\d+(?:\.\d+)?)", opt_low)]
+            if len(numbers) == 1:
+                diff = abs(numbers[0] - val)
+                if diff < min_diff and diff <= 1.0:
+                    min_diff = diff
+                    closest_idx = idx
+
+        return closest_idx
+
+    @staticmethod
+    def _match_option_text(opt_text: str, val_clean: str) -> bool:
+        """Fuzzy matches options, chips, and combobox entries."""
+        ct = opt_text.strip().lower()
+        rv = val_clean.strip().lower()
+        if not ct or not rv:
+            return False
+        if ct == rv or rv in ct or ct in rv:
+            return True
+        if rv in ("yes", "true") and any(w in ct for w in ["yes", "agree", "comfortable", "available", "willing", "open", "ready", "works", "sure"]):
+            return True
+        if rv in ("no", "false") and any(w in ct for w in ["no", "never", "not"]):
+            return True
+        if any(c in rv for c in ["bengaluru", "bangalore"]):
+            if any(w in ct for w in ["bengaluru", "bangalore", "yes", "willing", "open", "relocate"]):
+                return True
+        if any(c in rv for c in ["mumbai", "bombay"]):
+            if any(w in ct for w in ["mumbai", "bombay", "yes", "willing", "open", "relocate"]):
+                return True
+        if any(c in rv for c in ["hyderabad", "delhi", "noida", "pune", "chennai"]):
+            if any(w in ct for w in [rv, "yes", "willing", "open", "relocate"]):
+                return True
+        return False
+
+    async def _answer_combobox(self, value: str) -> bool:
+        """Handles modern React custom dropdowns and searchable select comboboxes."""
+        await self._dismiss_blocking_overlays()
+        val_clean = value.strip().lower()
+
+        # Step 1: Ensure options list is expanded if not already visible
+        current_options = await self._option_texts(S.CHATBOT_DROPDOWN_OPTIONS)
+        if not current_options:
+            trigger = await first_visible(self.page, S.CHATBOT_COMBOBOX_TRIGGER, timeout_ms=1_500)
+            if trigger is not None:
+                try:
+                    await trigger.click(force=True, timeout=2_000)
+                    await human_pause(200, 400)
+                except Exception:
+                    pass
+
+        # Step 2: If a search input exists in the dropdown, filter by value
+        search_box = await first_visible(self.page, S.CHATBOT_SEARCH_INPUT, timeout_ms=800)
+        if search_box is not None:
+            try:
+                await search_box.click(force=True, timeout=1_500)
+                await search_box.press_sequentially(value, delay=35)
+                await human_pause(200, 400)
+            except Exception:
+                pass
+
+        # Step 3: Find matching option locator (exact text match or fuzzy match)
+        for selector in S.CHATBOT_DROPDOWN_OPTIONS:
+            locators = await self.page.locator(selector).all()
+            for locator in locators:
+                try:
+                    if not await locator.is_visible():
+                        continue
+                    text = (await safe_text(locator)).strip()
+                    if text and self._match_option_text(text, val_clean):
+                        self.policy.require_mutation("naukri.screening.answer")
+                        try:
+                            await locator.click(force=True, timeout=2_500)
+                        except Exception:
+                            await locator.evaluate("el => el.click()")
+                        await human_pause(200, 500)
+                        await self._submit()
+                        return True
+                except Exception:
+                    continue
+
+        # Step 4: Fallback to numeric range match for experience/salary dropdowns
+        for selector in S.CHATBOT_DROPDOWN_OPTIONS:
+            locators = await self.page.locator(selector).all()
+            texts: list[str] = []
+            vis_locators = []
+            for locator in locators:
+                try:
+                    if await locator.is_visible():
+                        t = (await safe_text(locator)).strip()
+                        if t:
+                            texts.append(t)
+                            vis_locators.append(locator)
+                except Exception:
+                    pass
+            num_idx = self._match_numeric_option_idx(val_clean, texts)
+            if num_idx is not None and num_idx < len(vis_locators):
+                try:
+                    self.policy.require_mutation("naukri.screening.answer")
+                    await vis_locators[num_idx].click(force=True, timeout=2_500)
+                    await human_pause(200, 500)
+                    await self._submit()
+                    return True
+                except Exception:
+                    pass
+
+        return False
+
+    async def _answer_option(self, value: str, kind: str) -> bool:
+        await self._dismiss_blocking_overlays()
+        if kind == "combobox":
+            return await self._answer_combobox(value)
+
+        val_clean = value.strip().lower()
+        selectors = (
+            S.CHATBOT_CHECKBOX_OPTIONS if kind == "checkbox" else S.CHATBOT_RADIO_OPTIONS
+        ) + S.CHATBOT_CHIPS
+        for selector in selectors:
+            locators = await self.page.locator(selector).all()
+            for locator in locators:
+                text = (await safe_text(locator)).strip()
+                if text and self._match_option_text(text, val_clean):
+                    try:
+                        self.policy.require_mutation("naukri.screening.answer")
+                        await locator.click(force=True, timeout=3_000)
+                        await human_pause(200, 500)
+                        if kind == "checkbox":
+                            # Custom widgets often swallow label clicks: verify
+                            # the box actually toggled (city multi-selects
+                            # failed silently here across runs 268-507).
+                            await self._ensure_checkbox_checked(locator)
+                        await self._submit()
+                        return True
+                    except Exception:
+                        try:
+                            await locator.evaluate("el => el.click()")
+                            await human_pause(200, 500)
+                            if kind == "checkbox":
+                                await self._ensure_checkbox_checked(locator)
+                            await self._submit()
+                            return True
+                        except Exception:
+                            continue
+
+        # Numeric range fallback for radio / chip options (e.g. experience chips '2-3 years')
+        texts = []
+        vis_locators = []
+        for selector in selectors:
+            for locator in await self.page.locator(selector).all():
+                try:
+                    if await locator.is_visible():
+                        t = (await safe_text(locator)).strip()
+                        if t:
+                            texts.append(t)
+                            vis_locators.append(locator)
+                except Exception:
+                    pass
+        num_idx = self._match_numeric_option_idx(val_clean, texts)
+        if num_idx is not None and num_idx < len(vis_locators):
+            try:
+                self.policy.require_mutation("naukri.screening.answer")
+                await vis_locators[num_idx].click(force=True, timeout=3_000)
+                await human_pause(200, 500)
+                await self._submit()
+                return True
+            except Exception:
+                pass
+
+        # dropdown fallback
+        dropdown = await first_visible(self.page, S.CHATBOT_DROPDOWN, timeout_ms=800)
+        if dropdown is not None:
+            try:
+                self.policy.require_mutation("naukri.screening.answer")
+                await dropdown.select_option(label=value)
+                await self._submit()
+                return True
+            except Exception:
+                pass
+
+        if await self._answer_combobox(value):
+            return True
+
+        # Last resort: the drawer sometimes renders options as plain clickable
+        # text outside every known selector list. Click the first visible
+        # button/option/label whose text matches the resolved answer.
+        try:
+            drawer = await first_visible(self.page, S.CHATBOT_DRAWER, timeout_ms=1_500)
+            scope = drawer or self.page
+            wanted = (value or "").strip().lower()
+            if wanted:
+                for el in await scope.locator(
+                    "button, div[role='option'], div[role='radio'], label"
+                ).all():
+                    try:
+                        if not await el.is_visible():
+                            continue
+                        t = (await safe_text(el)).strip().lower()
+                    except Exception:
+                        continue
+                    if not t or t.endswith("?"):
+                        continue
+                    if t == wanted or (
+                        len(wanted) >= 6 and len(t) >= 4 and (wanted in t or t in wanted)
+                    ):
+                        try:
+                            self.policy.require_mutation("naukri.screening.answer")
+                            await el.click(force=True, timeout=2_500)
+                        except Exception:
+                            await el.evaluate("el => el.click()")
+                        await human_pause(200, 500)
+                        await self._submit()
+                        return True
+        except Exception:
+            pass
+        return False
+
+    @staticmethod
+    def _word_in(needle: str, haystack: str) -> bool:
+        """Word-boundary containment (pure): 'bengaluru' matches the word,
+        never a substring of a longer token."""
+        if not needle or not haystack:
+            return False
+        return re.search(
+            rf"(?<![a-z0-9]){re.escape(needle)}(?![a-z0-9])", haystack
+        ) is not None
+
+    async def _selection_evidence(self, scope) -> bool:
+        """True when the last click observably selected something (pure DOM
+        read). Class-based markers are drawer-scoped only — page-wide they
+        match unrelated chrome. Never raises."""
+        try:
+            for sel in ("input[type='checkbox']:checked",
+                        "input[type='radio']:checked"):
+                try:
+                    loc = scope.locator(sel).first
+                    if await loc.count() > 0 and await loc.is_visible():
+                        return True
+                except Exception:
+                    continue
+            try:
+                drawer = await first_visible(self.page, S.CHATBOT_DRAWER, timeout_ms=800)
+            except Exception:
+                drawer = None
+            anchor = drawer or scope
+            for sel in ("[aria-checked='true']", "[aria-selected='true']",
+                        "[class*='selected']", "[class*='active']"):
+                try:
+                    loc = anchor.locator(sel).first
+                    if await loc.count() > 0 and await loc.is_visible():
+                        return True
+                except Exception:
+                    continue
+        except Exception:
+            pass
+        return False
+
+    async def _answer_free_text_option(self, value: str, question) -> bool:
+        """Click a text-matching option node and verify the selection took.
+
+        Covers option markup outside every selector list (li/a/custom divs).
+        Text cap (60 chars) keeps whole cards unclickable; effect check keeps
+        blind submits out. Returns True only on verified selection + submit
+        attempt. Never raises."""
+        wanted = (value or "").strip().lower()
+        if not wanted or len(wanted) < 2:
+            return False
+        try:
+            drawer = await first_visible(self.page, S.CHATBOT_DRAWER, timeout_ms=1_500)
+        except Exception:
+            drawer = None
+        scope = drawer or self.page
+        try:
+            elements = await scope.locator(
+                "button, a, li, span, div, label, [role]"
+            ).all()
+        except Exception:
+            return False
+        for el in elements:
+            try:
+                if not await el.is_visible():
+                    continue
+                t = ((await safe_text(el)) or "").strip()
+            except Exception:
+                continue
+            if not t or len(t) > 60 or t.endswith("?"):
+                continue
+            tl = t.lower()
+            if tl != wanted and not (
+                len(wanted) >= 3 and self._word_in(wanted, tl)
+            ):
+                continue
+            clicked = False
+            for mode in ("force", "js", "key"):
+                try:
+                    self.policy.require_mutation("naukri.screening.answer")
+                    if mode == "force":
+                        await el.click(force=True, timeout=2_500)
+                    elif mode == "js":
+                        await el.evaluate("el => el.click()")
+                    else:
+                        try:
+                            await el.focus(timeout=1_500)
+                        except Exception:
+                            pass
+                        await el.press("Enter", timeout=1_500)
+                    clicked = True
+                    break
+                except Exception:
+                    continue
+            if not clicked:
+                continue
+            await human_pause(400, 800)
+            if not await self._selection_evidence(scope):
+                continue
+            if await self._submit():
+                return True
+            try:
+                await el.press("Enter", timeout=1_500)
+                return True
+            except Exception:
+                return True
+        return False
+
+    async def _ensure_checkbox_checked(self, label_locator) -> bool:
+        """Verify a checkbox toggled on; JS-click the nested input if not.
+
+        Custom multi-select widgets (city lists) often swallow label clicks.
+        Effect-only safety net: returns True when checked or when there is
+        nothing verifiable (preserves old submit-attempted behavior).
+        Never raises.
+        """
+        try:
+            candidates = []
+            try:
+                inner = label_locator.locator("input[type='checkbox']").first
+                if await inner.count() > 0:
+                    candidates.append(inner)
+            except Exception:
+                pass
+            if not candidates:
+                try:
+                    parent = label_locator.locator("xpath=..").first
+                    sib = parent.locator("input[type='checkbox']").first
+                    if await sib.count() > 0:
+                        candidates.append(sib)
+                except Exception:
+                    pass
+            if not candidates:
+                return True
+            for box in candidates:
+                try:
+                    if await box.is_checked():
+                        return True
+                except Exception:
+                    continue
+                try:
+                    self.policy.require_mutation("naukri.screening.answer")
+                    await box.evaluate(
+                        "el => { el.checked = true; "
+                        "el.dispatchEvent(new Event('input', {bubbles: true})); "
+                        "el.dispatchEvent(new Event('change', {bubbles: true})); "
+                        "el.click(); }"
+                    )
+                except Exception:
+                    continue
+                await human_pause(200, 400)
+                try:
+                    if await box.is_checked():
+                        return True
+                except Exception:
+                    return True
+            return True
+        except Exception:
+            return True
+
+    async def _submit(self) -> bool:
+        await self._dismiss_blocking_overlays()
+        for selector in S.CHATBOT_SAVE + S.CHATBOT_SEND:
+            try:
+                locator = self.page.locator(selector).first
+                if await locator.count() and await locator.is_visible():
+                    try:
+                        await locator.click(force=True, timeout=2_500)
+                    except Exception:
+                        await locator.evaluate("el => el.click()")
+                    return True
+            except Exception:
+                continue
+        # Fallback: drawer-scoped action buttons by text. City multi-selects
+        # often label the control Done/OK/Confirm/Apply instead of Save/Send.
+        # Drawer-scoped ONLY: page-level "Apply" could hit the job button.
+        try:
+            drawer = await first_visible(self.page, S.CHATBOT_DRAWER, timeout_ms=1_500)
+            if drawer is None:
+                return False
+            for el in await drawer.locator("button").all():
+                try:
+                    if not await el.is_visible():
+                        continue
+                    t = ((await safe_text(el)) or "").strip().lower()
+                except Exception:
+                    continue
+                if not t or t.endswith("?"):
+                    continue
+                if t in ("save", "done", "ok", "confirm", "apply", "submit",
+                         "continue", "next"):
+                    try:
+                        await el.click(force=True, timeout=2_500)
+                    except Exception:
+                        try:
+                            await el.evaluate("el => el.click()")
+                        except Exception:
+                            continue
+                    return True
+        except Exception:
+            pass
+        return False
+
+    # ------------------------------------------------------------------- loop
+    async def run(self, on_unanswered=None) -> ChatbotResult:
+        result = ChatbotResult()
+        last_question = ""
+        stagnant_rounds = 0
+
+        for index in range(self.max_questions):
+            await asyncio.sleep(1.2)  # let the drawer render the next bubble
+
+            if await first_visible(self.page, S.CHATBOT_COMPLETE, timeout_ms=1_200):
+                result.completed = True
+                log.info("chatbot.completed", answered=result.answered)
+                break
+
+            question = await self._current_question()
+            if question is None:
+                stagnant_rounds += 1
+                if stagnant_rounds >= 3:
+                    # No question and no completion banner: assume the drawer is
+                    # done (Naukri closes it silently on the last answer).
+                    result.completed = not await self.is_open(1_500)
+                    break
+                continue
+
+            if question.text == last_question:
+                stagnant_rounds += 1
+                if stagnant_rounds >= 3:
+                    result.error = "chatbot stalled on the same question"
+                    log.warning("chatbot.stalled", question=question.text[:150])
+                    break
+                continue
+
+            stagnant_rounds = 0
+            last_question = question.text
+            log.info(
+                "chatbot.question",
+                index=index,
+                kind=question.kind,
+                options=len(question.options),
+                question=question.text[:180],
+            )
+
+            resolved = self.answers.resolve(question)
+            if resolved is None:
+                skip_detail = assessment_skip_detail(question.text)
+                if skip_detail is not None:
+                    result.unfit = skip_detail
+                    result.unfit_reason = SkipReason.ASSESSMENT_REQUIRED
+                    log.info("chatbot.assessment_skip", question=question.text[:180])
+                    await self.close()
+                    return result
+                shortfall = self.answers.tenure_shortfall(question)
+                if shortfall is not None:
+                    result.unfit = shortfall
+                    log.info("chatbot.tenure_shortfall_skip", question=question.text[:180], detail=shortfall[:150])
+                    await self.close()
+                    return result
+                result.unanswered.append(question)
+                if on_unanswered is not None:
+                    await on_unanswered(question)
+                log.warning("chatbot.unanswered_abort", question=question.text[:180])
+                await self.close()
+                return result
+
+            ok = False
+            if question.kind == "combobox":
+                ok = await self._answer_combobox(resolved.value)
+            elif question.kind in ("text", "unknown"):
+                ok = await self._answer_text(resolved.value)
+            else:
+                ok = await self._answer_option(resolved.value, question.kind)
+
+            if not ok:
+                # Robust fallback cascade across all widget types
+                if question.kind in ("text", "unknown"):
+                    ok = (
+                        await self._answer_option(resolved.value, "radio")
+                        or await self._answer_combobox(resolved.value)
+                    )
+                elif question.kind == "combobox":
+                    ok = (
+                        await self._answer_option(resolved.value, "radio")
+                        or await self._answer_text(resolved.value)
+                    )
+                else:
+                    ok = (
+                        await self._answer_combobox(resolved.value)
+                        or await self._answer_text(resolved.value)
+                    )
+                # Last resort: options rendered outside every known selector
+                # list (city multi-selects). Hunt text nodes across element
+                # types and VERIFY an effect before submitting — blind clicks
+                # on giant containers manufactured the silent run-268→509
+                # streak (click "succeeded", nothing selected, submit went
+                # nowhere, error swallowed).
+                if not ok:
+                    ok = await self._answer_free_text_option(resolved.value, question)
+
+            if not ok:
+                # Forensics first: the next run-500 cannot be fixed from
+                # "could not submit" alone. Option texts + resolved value
+                # pinpoint whether matching or the save control failed.
+                log.warning(
+                    "chatbot.answer_paths_exhausted",
+                    question=question.text[:150],
+                    kind=question.kind,
+                    options=[o[:60] for o in (question.options or [])[:12]],
+                    value=resolved.value[:60],
+                )
+                # Before raising failure, verify if the submission triggered page redirect to Apply Confirmation
+                is_confirmed = (
+                    await first_visible(self.page, S.APPLY_SUCCESS, timeout_ms=1_500) is not None
+                    or "applied" in self.page.url.lower()
+                    or "confirmation" in (await self.page.title()).lower()
+                    or await self.page.locator("meta[name='atdlayout'][content='jobapplied'], meta[atdlayout='jobapplied']").count() > 0
+                )
+                if is_confirmed:
+                    result.completed = True
+                    result.error = None
+                    log.info("chatbot.page_confirmed_on_answer", answered=result.answered)
+                    break
+
+                result.error = f"could not submit answer for: {question.text[:120]}"
+                log.error("chatbot.answer_submit_failed", question=question.text[:150],
+                          kind=question.kind, options=len(question.options),
+                          resolved_value=(resolved.value or "")[:80],
+                          resolved_source=resolved.source)
+                # Route into the review queue as well: a mechanical failure
+                # the KB can eventually answer (new matcher, new widget path)
+                # must retrain and retry, never fail silently forever — city
+                # checkboxes failed identically across runs 268-507 with the
+                # error swallowed. Downstream treats this as NEEDS_REVIEW.
+                if question not in result.unanswered:
+                    result.unanswered.append(question)
+                    if on_unanswered is not None:
+                        await on_unanswered(question)
+                break
+
+            result.answered += 1
+            log.info(
+                "chatbot.answered",
+                value=resolved.value[:80],
+                source=resolved.source,
+                matched=resolved.matched_pattern[:60],
+            )
+
+        if not result.completed and result.error is None:
+            is_confirmed = (
+                await first_visible(self.page, S.APPLY_SUCCESS, timeout_ms=1_500) is not None
+                or "applied" in self.page.url.lower()
+                or "confirmation" in (await self.page.title()).lower()
+                or await self.page.locator("meta[name='atdlayout'][content='jobapplied'], meta[atdlayout='jobapplied']").count() > 0
+            )
+            # Drawer gone or confirmation page visible == Naukri accepted the application.
+            result.completed = is_confirmed or not await self.is_open(1_500)
+
+        await dismiss_overlays(self.page)
+        return result
