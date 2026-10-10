@@ -32,14 +32,12 @@ platforms:
   linkedin: true
   naukri: true
   wellfound: true
-  # HiringCafe RE-ENABLED (2026-10-06): the Oct 2026 UI refresh moved search
-  # from /?searchState= (now 403 even for clean clients) to
-  # /classic?searchState= (200 + filtered SSR for clean clients). The old
-  # wall evidence (runs 470-472: every parameterized navigation challenged
-  # in the automated browser) was against the dead path — this path is
-  # untested in automation. If the wall persists here, the platform pauses
-  # itself cleanly (PlatformWalledError, no burn). Flip back to false if so.
-  hiringcafe: true
+  # HiringCafe PAUSED again (2026-10-10, run 531): the /classic path that
+  # returned 200 for clean clients still challenges EVERY parameterized
+  # navigation inside the automated browser (3 walled search pages, zero
+  # cards). Server-side posture unchanged — client-side 200s mean nothing
+  # for CDP-driven Chrome. Revisit only on a validated live run.
+  hiringcafe: false
 
 # HiringCafe feed (read-only source for the Sidekick handoff).
 # Server-side filters mirror the proven query: fresh, junior, eng/IT/data.

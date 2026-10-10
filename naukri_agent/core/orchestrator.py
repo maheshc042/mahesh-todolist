@@ -765,6 +765,13 @@ class Orchestrator:
                         reason="insufficient run budget",
                         remaining_s=round(campaign_budget_s, 1),
                     )
+                    if self.repo is not None:
+                        await self.repo.log_event(
+                            self.run_id, "run.linkedin_campaign_skipped",
+                            level="info", profile=None,
+                            payload={"reason": "insufficient run budget"},
+                            account=self.account_key,
+                        )
                 else:
                     try:
                         from ..linkedin.campaign import run_campaign
@@ -776,9 +783,23 @@ class Orchestrator:
                             emails_sent=sent,
                             dry_run=campaign_dry_run,
                         )
+                        if self.repo is not None:
+                            await self.repo.log_event(
+                                self.run_id, "run.linkedin_campaign_done",
+                                level="info", profile=None,
+                                payload={"emails_sent": sent, "dry_run": campaign_dry_run},
+                                account=self.account_key,
+                            )
                     except Exception as exc:
                         log.warning("run.linkedin_campaign_failed", error=str(exc)[:200])
                         self.stats.errors.append(f"linkedin campaign failed: {str(exc)[:120]}")
+                        if self.repo is not None:
+                            await self.repo.log_event(
+                                self.run_id, "run.linkedin_campaign_failed",
+                                level="warning", profile=None,
+                                payload={"error": str(exc)[:200]},
+                                account=self.account_key,
+                            )
 
 
         except FatalAgentError as exc:
