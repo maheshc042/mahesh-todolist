@@ -158,9 +158,9 @@ class TestScrollUntilStall(unittest.IsolatedAsyncioTestCase):
             mouse = FakeMouse()
 
         hunter = LinkedInHunter(headless=True)
-        done = await hunter._human_scroll(FakePage(), max_scrolls=20, stall_rounds=2)
+        stats = await hunter._human_scroll(FakePage(), max_scrolls=20, stall_rounds=2)
         # 3 -> 5 (new) -> 5 (stall 1) -> 5 (stall 2, stop)
-        self.assertEqual(done, 3)
+        self.assertEqual(stats, {"rounds": 3, "new_ids": 0, "exit": "stall"})
 
     async def test_cap_respected_on_rich_feed(self):
         from naukri_agent.linkedin.scraper import LinkedInHunter
@@ -182,8 +182,8 @@ class TestScrollUntilStall(unittest.IsolatedAsyncioTestCase):
 
         hunter = LinkedInHunter(headless=True)
         with unittest.mock.patch("asyncio.sleep", return_value=None):
-            done = await hunter._human_scroll(FakePage(), max_scrolls=7, stall_rounds=5)
-        self.assertEqual(done, 7)
+            stats = await hunter._human_scroll(FakePage(), max_scrolls=7, stall_rounds=5)
+        self.assertEqual(stats, {"rounds": 7, "new_ids": 0, "exit": "cap"})
 
     async def test_dead_page_ends_gracefully(self):
         from naukri_agent.linkedin.scraper import LinkedInHunter
@@ -198,8 +198,8 @@ class TestScrollUntilStall(unittest.IsolatedAsyncioTestCase):
                     raise RuntimeError("dead")
 
         hunter = LinkedInHunter(headless=True)
-        done = await hunter._human_scroll(DeadPage(), max_scrolls=20)
-        self.assertEqual(done, 0)
+        stats = await hunter._human_scroll(DeadPage(), max_scrolls=20)
+        self.assertEqual(stats, {"rounds": 0, "new_ids": 0, "exit": "dead"})
 
 
 class TestGotoSearch(unittest.IsolatedAsyncioTestCase):
